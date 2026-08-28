@@ -1,0 +1,52 @@
+task:
+  id: data-gen
+  plan: demo-pipeline
+  title: Generate the demo dataset
+  depends_on: []
+  brief: |
+    Implement `src/demo_pipeline/data_gen.py` as a runnable module:
+
+    - `python -m demo_pipeline.data_gen --out PATH --seed SEED [--n N]`
+    - Rows are generated with `random.Random(seed)` (Mersenne Twister,
+      stable across platforms): x ~ uniform(0, 100),
+      y = 2x + 1 + gauss(0, 5), both rounded to 6 decimals.
+    - The CSV must have the exact header `x,y` (no index column).
+    - Create parent directories of --out if missing.
+    - Exit code 0 on success.
+
+    Do not implement or modify any other module.
+  contract:
+    inputs:
+    - name: seed
+      type: int
+      description: RNG seed (determinism contract)
+    - name: n
+      type: int
+      description: Number of rows to generate
+    outputs:
+    - name: dataset
+      type: path
+      description: CSV file with header `x,y` and n rows, y ≈ 2x + 1 + noise
+  deliverables:
+  - src/demo_pipeline/data_gen.py
+  constraints:
+  - stdlib only (no third-party dependencies)
+  - deterministic for a given seed
+  acceptance:
+    steps:
+    - id: run-data-gen
+      run: python -m demo_pipeline.data_gen --out "${HARNESS_RESULTS_DIR}/demo_data.csv"
+        --seed 42
+      timeout: 120
+      checks:
+      - type: file_exists
+        path: ${HARNESS_RESULTS_DIR}/demo_data.csv
+      - type: text_contains
+        path: ${HARNESS_RESULTS_DIR}/demo_data.csv
+        contains:
+        - x,y
+  status: done
+  worker: demo-worker-a
+  log:
+  - 2026-08-28T08:53:36Z claimed by demo-worker-a
+  - 2026-08-28T08:53:52Z acceptance passed (1 step(s)) — done

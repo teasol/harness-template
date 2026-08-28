@@ -23,7 +23,13 @@ flowchart LR
 | `harness/checks.py` | Check registry; each check is `(root, params) -> detail` and fails via `CheckError` |
 | `harness/report.py` | Serialize `RunResult` to JSON + Markdown |
 | `harness/reproducibility.py` | Seeding helpers, deterministic env vars, sha256 |
-| `harness/cli.py` | `python -m harness verify|hash` |
+| `harness/plan.py` | Plans: module DAGs, contracts, acceptance — the Planner's output format |
+| `harness/task.py` | Task materialization, lifecycle (claim/block/done), board — the Worker's world |
+| `harness/cli.py` | `python -m harness verify\|hash\|plan\|task` |
+
+The orchestration layer builds on the verification layer: a task's acceptance
+is a standard spec run by the standard Runner (see
+[orchestration.md](orchestration.md)).
 
 ## Design rules
 

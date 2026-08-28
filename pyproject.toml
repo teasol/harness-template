@@ -24,7 +24,8 @@ dev = [
 harness = "harness.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["harness*"]
+where = [".", "src"]
+exclude = ["tests*"]
 
 [tool.ruff]
 line-length = 100

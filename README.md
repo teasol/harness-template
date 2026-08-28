@@ -64,23 +64,62 @@ steps:
 Run it with `python -m harness verify --spec configs/my-experiment.yaml`.
 Full reference: [docs/verification.md](docs/verification.md).
 
+## Two-tier agent orchestration
+
+Beyond single pipelines, this template orchestrates **multiple agents
+hierarchically**: a **Planner** owns direction and flow; **Workers** each own
+one module, built in isolation against a self-contained spec.
+
+```mermaid
+flowchart TD
+    P["Planner agent"] -->|"writes"| PL["plans/*.yaml<br/>goal · DAG · contracts"]
+    PL -->|"materialize"| T["tasks/*.task.yaml"]
+    T -->|"claim"| W["Worker agents"]
+    W -->|"implement + verify"| S["src/... deliverables"]
+    S -->|"task done"| T
+    T -->|"all done"| I["integration spec"]
+    I --> H["Runner + checks"]
+```
+
+Try the shipped example end-to-end:
+
+```bash
+make plan        # validate plans/demo-pipeline.yaml + refresh tasks
+make tasks       # show the board
+python -m harness task show --id stats        # a Worker's complete work order
+python -m harness verify --spec configs/demo-pipeline.yaml   # Planner's integration gate
+```
+
+- **Planner contract**: [agents/planner.md](agents/planner.md)
+- **Worker contract**: [agents/worker.md](agents/worker.md)
+- **Full reference**: [docs/orchestration.md](docs/orchestration.md)
+
 ## Project structure
 
 ```
 harness-template/
 ├── AGENTS.md               # Agent-facing ground rules (read this first)
-├── Makefile                # setup / lint / test / verify / reproduce
+├── Makefile                # setup / lint / test / verify / plan / tasks
 ├── pyproject.toml          # Project metadata + tool config
+├── agents/                 # Role contracts for hierarchical agents
+│   ├── planner.md          #   Planner: owns plans, DAGs, contracts, flow
+│   └── worker.md           #   Worker: owns one module task, in isolation
+├── plans/                  # Orchestration plans (Planner output)
+│   └── demo-pipeline.yaml
+├── tasks/                  # Materialized work orders (Worker input)
 ├── harness/                # Core verification harness (Python package)
 │   ├── spec.py             #   Spec loading & validation
 │   ├── runner.py           #   Step execution engine
 │   ├── checks.py           #   Built-in checks + registry
 │   ├── report.py           #   JSON/Markdown report generation
 │   ├── reproducibility.py  #   Seeding & hashing utilities
-│   └── cli.py              #   `python -m harness verify|hash`
-├── configs/                # Declarative specs & experiment configs (YAML)
+│   ├── plan.py             #   Plans: module DAGs + contracts
+│   ├── task.py             #   Task lifecycle, board, materialization
+│   └── cli.py              #   `python -m harness verify|hash|plan|task`
+├── src/                    # Project code (demo_pipeline ships as example)
+├── configs/                # Verification & integration specs (YAML)
 ├── scripts/                # Runnable steps (bootstrap, demo, instantiate)
-├── tests/                  # Pytest suite (incl. end-to-end harness test)
+├── tests/                  # Pytest suite (incl. end-to-end harness tests)
 ├── docs/                   # Architecture & reference docs
 ├── data/                   # Datasets (gitignored; see data/README.md)
 ├── results/                # Run outputs & reports (gitignored)
@@ -104,15 +143,17 @@ cd <new-project>
 
 Then instantiate:
 
-```bash
-python scripts/instantiate.py --name <new-project>
-git add -A && git commit -m "chore: instantiate from harness-template"
-make setup && make verify
-```
+```bashorchestration.md](docs/orchestration.md) — two-tier orchestration reference
+- [docs/verification.md](docs/verification.md) — spec & check reference
+- [docs/reproducibility.md](docs/reproducibility.md) — determinism policy
+- [docs/architecture.md](docs/architecture.md) — component overview
 
-## Documentation
+## CI
 
-- [AGENTS.md](AGENTS.md) — ground rules for agents & contributors
+- **CI** (`.github/workflows/ci.yml`): lint + tests on every push/PR.
+- **Verification** (`.github/workflows/verify.yml`): runs the harness twice and
+  compares output hashes (determinism gate), then validates the orchestration
+  plan, verifies every task's acceptance, and runs the integration specributors
 - [docs/verification.md](docs/verification.md) — spec & check reference
 - [docs/reproducibility.md](docs/reproducibility.md) — determinism policy
 - [docs/architecture.md](docs/architecture.md) — component overview

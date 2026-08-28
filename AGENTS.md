@@ -5,10 +5,28 @@ from this template. Read this before making any change.
 
 ## Repository purpose
 
-This is a harness-engineering template: verification infrastructure
-(`harness/`), declarative specs (`configs/`), and CI gates come pre-wired.
-Project-specific research code lives alongside it and must keep using the
-harness for anything that needs to be trusted or reproduced.
+This is a harness-engineering template with **two-tier agent orchestration**:
+a Planner agent owns direction and flow (`plans/`), Worker agents each own one
+module task (`tasks/`), and the harness enforces every contract
+machine-checkably. Project-specific research code lives alongside it and must
+keep using the harness for anything that needs to be trusted or reproduced.
+
+## Orchestration roles
+
+You are always acting in ONE of three roles — know which:
+
+- **Planner** ([agents/planner.md](agents/planner.md)): own `plans/*.yaml`,
+  module DAGs, contracts, acceptance, and the integration spec. Never write
+  module code. Hand off via `harness plan materialize`.
+- **Worker** ([agents/worker.md](agents/worker.md)): claim exactly one task
+  (`harness task claim`), implement it fully against the task file's brief
+  and contract, verify (`harness task verify`), mark done (`harness task
+  done`). Never touch other modules, the plan, or `harness/`.
+- **Maintainer** (default): work on the harness itself, CI, or docs. Follow
+  the rules below.
+
+If a Worker finds a contract ambiguous or a dependency broken: `harness task
+block --reason "..."` and hand back to the Planner. Never improvise the plan.
 
 ## Non-negotiable rules
 
@@ -35,10 +53,23 @@ harness for anything that needs to be trusted or reproduced.
 | `make format` | Auto-format with ruff |
 | `make test` | Pytest suite |
 | `make verify` | Run the verification spec (`configs/demo.yaml`) |
+| `make plan` | Validate the orchestration plan + refresh task files |
+| `make tasks` | Show the task board |
 | `make reproduce` | Re-run verification into a fresh results dir |
 | `make clean` | Remove generated artifacts |
 
-Direct harness usage:
+Orchestration commands:
+
+```bash
+python -m harness plan validate|materialize|status plans/<plan>.yaml
+python -m harness task list|show|claim|block|verify|done --id <id>
+```
+
+Diragents/` — role contracts (planner.md, worker.md). Read the one for your role.
+- `plans/` — orchestration plans: goal, module DAG, contracts, briefs, acceptance.
+- `tasks/` — materialized work orders with lifecycle state (status/worker/log). Committed.
+- `harness/` — verification + orchestration engine. Stable, minimal, stdlib + PyYAML only.
+- `src/` — project code (`demo_pipeline/` ships as the orchestration example)
 
 ```bash
 python -m harness verify --spec configs/<spec>.yaml [--results-dir DIR]

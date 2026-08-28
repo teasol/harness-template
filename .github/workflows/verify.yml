@@ -32,3 +32,10 @@ jobs:
           echo "run1: $h1"
           echo "run2: $h2"
           test "$h1" = "$h2"
+
+      - name: Orchestration demo (plan → tasks → integration)
+        run: |
+          python -m harness plan validate plans/demo-pipeline.yaml
+          python -m harness task verify --id data-gen --results-dir results/task1
+          python -m harness task verify --id stats --results-dir results/task2
+          python -m harness verify --spec configs/demo-pipeline.yaml --results-dir results/pipeline
