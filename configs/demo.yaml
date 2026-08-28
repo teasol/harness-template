@@ -1,0 +1,26 @@
+# Demo verification spec — end-to-end smoke test of the harness.
+# Runs in seconds; extend or replace for your project.
+name: demo
+description: End-to-end smoke test of the verification harness
+seed: 42
+
+steps:
+  - id: generate-output
+    run: python scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/output.json" --seed 42
+    timeout: 120
+    checks:
+      - type: file_exists
+        path: ${HARNESS_RESULTS_DIR}/output.json
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/output.json
+        metric: value
+        min: 0
+        max: 100
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/output.json
+        metric: seed
+        equals: 42
+
+  - id: selftest
+    run: python -m harness hash "${HARNESS_RESULTS_DIR}/output.json"
+    timeout: 60

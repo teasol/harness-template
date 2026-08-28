@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Secrets & environments
+.env
+
+# Research artifacts (keep the READMEs only)
+data/*
+!data/README.md
+results/*
+!results/README.md
+checkpoints/
+logs/
+wandb/
+mlruns/
+
+# OS / editors
+.DS_Store
+.idea/
+*.swp
