@@ -1,0 +1,33 @@
+name: Verification
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 3 * * 1" # weekly determinism canary
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install ".[dev]"
+
+      - name: Run harness (first pass)
+        run: python -m harness verify --spec configs/demo.yaml --results-dir results/run1
+
+      - name: Run harness (second pass)
+        run: python -m harness verify --spec configs/demo.yaml --results-dir results/run2
+
+      - name: Determinism gate (compare output hashes)
+        run: |
+          f1=$(ls results/run1/runs/*/output.json)
+          f2=$(ls results/run2/runs/*/output.json)
+          h1=$(python -m harness hash "$f1")
+          h2=$(python -m harness hash "$f2")
+          echo "run1: $h1"
+          echo "run2: $h2"
+          test "$h1" = "$h2"
