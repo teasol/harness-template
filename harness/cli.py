@@ -3,17 +3,18 @@
 Usage::
 
     python -m harness verify --spec configs/demo.yaml [--results-dir DIR]
+    python -m harness reproduce --spec configs/demo.yaml [--times 2]
     python -m harness hash <file> [<file> ...]
 
     # Two-tier orchestration (Planner → tasks → Workers)
     python -m harness plan validate <plan.yaml>
     python -m harness plan materialize <plan.yaml> [--tasks-dir tasks] [--force]
-    python -m harness plan status <plan.yaml> [--tasks-dir tasks]
+    python -m harness plan status <plan.yaml> [--tasks-dir tasks] [--check]
     python -m harness task list [--status todo] [--tasks-dir tasks]
     python -m harness task show --id <id> [--tasks-dir tasks]
-    python -m harness task claim --id <id> --by <agent> [--tasks-dir tasks]
+    python -m harness task claim --id <id> --by <agent> [--force] [--tasks-dir tasks]
     python -m harness task block --id <id> --reason "..." [--tasks-dir tasks]
-    python -m harness task verify --id <id> [--tasks-dir tasks]
+    python -m harness task verify (--id <id> | --all) [--status S] [--tasks-dir tasks]
     python -m harness task done --id <id> [--by <agent>] [--tasks-dir tasks]
 
 """
@@ -28,6 +29,11 @@ from pathlib import Path
 from harness import task as task_mod
 from harness.plan import PlanError, load_plan
 from harness.report import write_reports
+from harness.reproduce import (
+    ReproduceError,
+    reproduce,
+    write_reproduce_report,
+)
 from harness.reproducibility import file_sha256
 from harness.runner import Runner
 from harness.spec import SpecError, load_spec
@@ -57,6 +63,35 @@ def cmd_verify(args: argparse.Namespace) -> int:
     print(f"  report: {md_path}")
     print(f"  json:   {json_path}")
     return 0 if result.success else 1
+
+
+def cmd_reproduce(args: argparse.Namespace) -> int:
+    try:
+        spec = load_spec(args.spec)
+    except SpecError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        result = reproduce(spec, times=args.times, root=args.root, results_dir=args.results_dir)
+    except ReproduceError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    report = write_reproduce_report(result, args.results_dir)
+    if result.reproducible:
+        print(
+            f"[{spec.name}] REPRODUCIBLE — {result.times} runs, "
+            f"{len(result.manifest)} artifact(s) identical"
+        )
+        for rel, digest in result.manifest.items():
+            print(f"    ok  {rel}  {digest[:16]}…")
+    else:
+        print(f"[{spec.name}] NOT REPRODUCIBLE — {result.times} runs", file=sys.stderr)
+        for line in result.differences:
+            print(f"  DIFF  {line}", file=sys.stderr)
+    print(f"  report: {report}")
+    return 0 if result.reproducible else 1
 
 
 def cmd_hash(args: argparse.Namespace) -> int:
@@ -136,6 +171,16 @@ def cmd_plan_status(args: argparse.Namespace) -> int:
     print(f"Progress: {done}/{total} done")
     if plan.integration:
         print(f"Integration spec: {plan.integration}")
+
+    drift = task_mod.spec_drift(plan, args.tasks_dir)
+    if drift:
+        print()
+        print("Drift — task files no longer match the plan:")
+        for module_id, fields in drift.items():
+            print(f"  {module_id}: {', '.join(fields)}")
+        print("  Fix with: harness plan materialize <plan> --force")
+    if args.check:
+        return 1 if drift else 0
     return 0
 
 
@@ -174,7 +219,7 @@ def cmd_task_show(args: argparse.Namespace) -> int:
 
 def cmd_task_claim(args: argparse.Namespace) -> int:
     try:
-        task = task_mod.claim(args.tasks_dir, args.id, args.by)
+        task = task_mod.claim(args.tasks_dir, args.id, args.by, force=args.force)
     except TaskError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -193,22 +238,47 @@ def cmd_task_block(args: argparse.Namespace) -> int:
 
 
 def cmd_task_verify(args: argparse.Namespace) -> int:
+    if not args.all and not args.id:
+        print("error: task verify requires --id <id> or --all", file=sys.stderr)
+        return 2
     try:
-        task = task_mod.load_task(args.tasks_dir, args.id)
-        result = task_mod.verify_task(task, root=args.root, results_dir=args.results_dir)
+        if args.all:
+            tasks = task_mod.load_board(args.tasks_dir)
+            if args.status:
+                tasks = [t for t in tasks if t.status == args.status]
+        else:
+            tasks = [task_mod.load_task(args.tasks_dir, args.id)]
     except TaskError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    status = "PASSED" if result.success else "FAILED"
-    print(f"[{result.spec_name}] {status} ({len(result.steps)} step(s))")
-    _print_step_failures(result)
-    print(f"  report: {Path(result.run_dir) / 'report.md'}")
-    return 0 if result.success else 1
+
+    if not tasks:
+        print("(no matching tasks)")
+        return 0
+
+    failed = 0
+    for task in tasks:
+        result = task_mod.verify_task(task, root=args.root, results_dir=args.results_dir)
+        status = "PASSED" if result.success else "FAILED"
+        print(f"[{result.spec_name}] {status} ({len(result.steps)} step(s))")
+        _print_step_failures(result)
+        print(f"  report: {Path(result.run_dir) / 'report.md'}")
+        if not result.success:
+            failed += 1
+    if len(tasks) > 1:
+        print(f"{len(tasks) - failed}/{len(tasks)} task(s) passed")
+    return 1 if failed else 0
 
 
 def cmd_task_done(args: argparse.Namespace) -> int:
     try:
-        task, result = task_mod.complete(args.tasks_dir, args.id, worker=args.by)
+        task, result = task_mod.complete(
+            args.tasks_dir,
+            args.id,
+            worker=args.by,
+            root=args.root,
+            results_dir=args.results_dir,
+        )
     except TaskError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -235,6 +305,15 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--results-dir", default="results", help="Base directory for run outputs")
     verify.set_defaults(func=cmd_verify)
 
+    rerun = sub.add_parser("reproduce", help="Run a spec repeatedly and compare artifact hashes")
+    rerun.add_argument("--spec", required=True, help="Path to the spec YAML file")
+    rerun.add_argument("--times", type=int, default=2, help="How many runs to compare (>= 2)")
+    rerun.add_argument("--root", default=".", help="Root directory for relative paths")
+    rerun.add_argument(
+        "--results-dir", default="results/reproduce", help="Base directory for run outputs"
+    )
+    rerun.set_defaults(func=cmd_reproduce)
+
     hash_cmd = sub.add_parser("hash", help="Print the sha256 of file(s)")
     hash_cmd.add_argument("paths", nargs="+", help="File path(s)")
     hash_cmd.set_defaults(func=cmd_hash)
@@ -257,6 +336,11 @@ def build_parser() -> argparse.ArgumentParser:
     plan_status = plan_sub.add_parser("status", help="Show module progress for a plan")
     plan_status.add_argument("plan", help="Path to the plan YAML file")
     plan_status.add_argument("--tasks-dir", default="tasks")
+    plan_status.add_argument(
+        "--check",
+        action="store_true",
+        help="Exit non-zero if task files have drifted from the plan",
+    )
     plan_status.set_defaults(func=cmd_plan_status)
 
     task_cmd = sub.add_parser("task", help="Worker task commands")
@@ -271,13 +355,23 @@ def build_parser() -> argparse.ArgumentParser:
         ("done", "Verify acceptance and mark done", cmd_task_done),
     ]:
         parser_i = task_sub.add_parser(name, help=help_text)
-        if name != "list":
+        if name == "verify":
+            parser_i.add_argument("--id", help="Task id (omit when using --all)")
+            parser_i.add_argument(
+                "--all", action="store_true", help="Verify every task on the board"
+            )
+        elif name != "list":
             parser_i.add_argument("--id", required=True, help="Task id")
         parser_i.add_argument("--tasks-dir", default="tasks")
-        if name == "list":
+        if name in ("list", "verify"):
             parser_i.add_argument("--status", choices=list(task_mod.TASK_STATUSES))
         if name == "claim":
             parser_i.add_argument("--by", required=True, help="Worker/agent name")
+            parser_i.add_argument(
+                "--force",
+                action="store_true",
+                help="Claim even if dependencies are not done (recorded in the log)",
+            )
         if name == "block":
             parser_i.add_argument("--reason", required=True, help="Why the task is blocked")
         if name == "done":

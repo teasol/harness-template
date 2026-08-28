@@ -41,12 +41,16 @@ how "done" is proven. You do **not** write module code.
    task — write the brief, not the code.
 2. **Every module must have runnable acceptance.** "Looks right" is not a
    deliverable. Acceptance may invoke dependency CLIs to be self-contained.
+   List every file the Worker must produce under `deliverables` — the harness
+   checks them, so an incomplete list is an unenforced contract. Write steps
+   with `${HARNESS_PYTHON}`, never a bare `python`.
 3. **Tasks must be self-contained.** A Worker with the task file + repo must
    need zero additional context. If a brief references the plan, inline the
    relevant part.
 4. **Stable contracts.** Once a Worker starts, changing that module's contract
-   requires a new task (or explicit re-materialization with `--force`) and a
-   note in the task log — never silent edits.
+   requires a new task (or explicit re-materialization with `--force`) — never
+   silent edits. `--force` refreshes the spec from the plan while preserving
+   `status`, `worker`, and `log`, and records the refresh in the log itself.
 5. **Determinism by default.** Declare seeds; make acceptance outputs
    hash-comparable where possible.
 6. **Keep the DAG honest.** `depends_on` must reflect real data dependencies

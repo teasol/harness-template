@@ -6,11 +6,29 @@ The harness turns declarative YAML specs into executable, checkable pipelines.
 
 ```bash
 python -m harness verify --spec configs/demo.yaml [--root DIR] [--results-dir DIR]
-python -m harness hash <file> [<file> ...]     # sha256 helper
+python -m harness reproduce --spec configs/demo.yaml [--times N]  # determinism gate
+python -m harness hash <file> [<file> ...]                        # sha256 helper
 ```
 
 Exit codes: `0` = all steps and checks passed, `1` = verification failed,
 `2` = usage/spec error.
+
+### `reproduce` — the determinism gate
+
+`reproduce` runs a spec `--times` (default 2) and diffs a manifest of every
+artifact each run wrote. Harness bookkeeping (`report.json`, `report.md`,
+`logs/`) is excluded, since it records timestamps and durations that differ by
+construction; what remains is the run's research output.
+
+- `0` — every artifact is byte-identical across runs
+- `1` — at least one artifact diverged; the differing paths and digests are
+  printed and stored in `reproduce.json`
+- `2` — the spec failed, or produced **no** artifacts to compare
+
+That last case is deliberate: a determinism gate over zero files passes
+unconditionally and is worse than no gate, so the harness refuses it rather
+than reporting a green tick. Write step outputs into `${HARNESS_RESULTS_DIR}`
+and they are gated automatically.
 
 ## Spec format
 
@@ -38,6 +56,14 @@ Every step (and every check `path` param, via `${VAR}` expansion) can use:
 | --- | --- |
 | `HARNESS_RESULTS_DIR` | Per-run artifact directory (`<results-dir>/runs/<name>-<timestamp>/`) |
 | `HARNESS_RUN_ID` | Spec name |
+| `HARNESS_PYTHON` | Absolute path to the interpreter running the harness |
+| `HARNESS_SEED` | The spec's `seed` (unset when the spec declares none) |
+
+**Always call the interpreter as `${HARNESS_PYTHON}`, never as bare `python`** —
+Debian/Ubuntu and many CI images ship only `python3`, so a hardcoded `python`
+makes a spec fail on a fresh checkout. Likewise, spell seeds
+`--seed ${HARNESS_SEED}` so the spec's `seed:` stays the single source of
+truth instead of being duplicated in a command string.
 
 When `seed` is set, the runner also exports `PYTHONHASHSEED` and
 `CUBLAS_WORKSPACE_CONFIG=:4096:8` to every step (see
@@ -60,10 +86,21 @@ skipped and the step is marked failed.
 
 Each run writes to `<results-dir>/runs/<name>-<timestamp>/`:
 
-- `report.json` — machine-readable full result
-- `report.md` — human-readable summary table + failed checks
+- `report.json` — machine-readable full result (including `provenance`)
+- `report.md` — human-readable summary table, provenance block, failed checks
 - `logs/NN-<step_id>.log` — command, exit code, stdout/stderr per step
 - step artifacts (whatever the steps wrote, conventionally into `$HARNESS_RESULTS_DIR`)
+
+### Provenance
+
+Every report records what produced the run, so a result found months later can
+be traced back to code: `git_commit`, `git_branch`, `git_dirty`, the Python
+version and interpreter path, the platform string, the harness version, and the
+declared `seed`. Each field is best-effort — outside a git checkout the git
+fields are `null` rather than an error.
+
+A `git_dirty: true` report was produced from an uncommitted worktree and is
+**not** reproducible from the commit alone; treat it as a draft result.
 
 ## Adding a check type
 

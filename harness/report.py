@@ -25,6 +25,27 @@ def write_reports(result: RunResult) -> tuple[Path, Path]:
     return json_path, md_path
 
 
+def _provenance_lines(result: RunResult) -> list[str]:
+    """Render the 'how do I reproduce this?' block, if provenance was captured."""
+    prov = result.provenance
+    if not prov:
+        return []
+    commit = prov.get("git_commit") or "unknown"
+    if prov.get("git_dirty"):
+        commit += " (dirty worktree — uncommitted changes)"
+    return [
+        "## Provenance",
+        "",
+        f"- Commit: `{commit}`",
+        f"- Branch: `{prov.get('git_branch') or 'unknown'}`",
+        f"- Python: {prov.get('python_version') or 'unknown'} (`{prov.get('python_executable')}`)",
+        f"- Platform: {prov.get('platform') or 'unknown'}",
+        f"- Harness: {prov.get('harness_version') or 'unknown'}",
+        f"- Seed: {prov.get('seed') if prov.get('seed') is not None else '(none declared)'}",
+        "",
+    ]
+
+
 def _markdown(result: RunResult) -> str:
     status = "PASSED" if result.success else "FAILED"
     lines = [
@@ -36,6 +57,9 @@ def _markdown(result: RunResult) -> str:
         f"- Finished: {result.finished_at}",
         f"- Run dir: `{result.run_dir}`",
         "",
+    ]
+    lines += _provenance_lines(result)
+    lines += [
         "| Step | Exit | Duration (s) | Checks | Status |",
         "| --- | --- | --- | --- | --- |",
     ]

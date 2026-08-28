@@ -6,7 +6,7 @@ seed: 42
 
 steps:
   - id: generate-output
-    run: python scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/output.json" --seed 42
+    run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/output.json" --seed ${HARNESS_SEED}
     timeout: 120
     checks:
       - type: file_exists
@@ -22,5 +22,5 @@ steps:
         equals: 42
 
   - id: selftest
-    run: python -m harness hash "${HARNESS_RESULTS_DIR}/output.json"
+    run: ${HARNESS_PYTHON} -m harness hash "${HARNESS_RESULTS_DIR}/output.json"
     timeout: 60

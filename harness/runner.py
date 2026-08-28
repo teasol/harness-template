@@ -5,15 +5,17 @@ from __future__ import annotations
 import dataclasses
 import os
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from harness import checks as checks_mod
-from harness.reproducibility import deterministic_env
+from harness.reproducibility import collect_provenance, deterministic_env
 from harness.spec import Spec, Step
 
-_RUN_ENV_KEYS = ("HARNESS_RESULTS_DIR", "HARNESS_RUN_ID")
+_RUN_ENV_KEYS = ("HARNESS_RESULTS_DIR", "HARNESS_RUN_ID", "HARNESS_PYTHON", "HARNESS_SEED")
 
 
 @dataclasses.dataclass
@@ -51,6 +53,7 @@ class RunResult:
     success: bool
     run_dir: str
     steps: list[StepResult] = dataclasses.field(default_factory=list)
+    provenance: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 def _utcnow() -> datetime:
@@ -82,6 +85,13 @@ class Runner:
         saved = {key: os.environ.get(key) for key in _RUN_ENV_KEYS}
         os.environ["HARNESS_RESULTS_DIR"] = str(run_dir)
         os.environ["HARNESS_RUN_ID"] = spec.name
+        # Steps must not assume a `python` binary exists (Debian/Ubuntu ship only
+        # `python3`); they invoke the very interpreter running the harness.
+        os.environ["HARNESS_PYTHON"] = sys.executable or "python3"
+        if spec.seed is not None:
+            os.environ["HARNESS_SEED"] = str(spec.seed)
+        else:
+            os.environ.pop("HARNESS_SEED", None)
 
         step_results: list[StepResult] = []
         try:
@@ -109,6 +119,7 @@ class Runner:
             success=bool(step_results) and all_steps_ran and all(r.success for r in step_results),
             run_dir=str(run_dir),
             steps=step_results,
+            provenance=collect_provenance(self.root, seed=spec.seed),
         )
 
     def _run_step(

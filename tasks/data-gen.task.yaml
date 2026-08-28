@@ -35,7 +35,7 @@ task:
   acceptance:
     steps:
     - id: run-data-gen
-      run: python -m demo_pipeline.data_gen --out "${HARNESS_RESULTS_DIR}/demo_data.csv"
+      run: ${HARNESS_PYTHON} -m demo_pipeline.data_gen --out "${HARNESS_RESULTS_DIR}/demo_data.csv"
         --seed 42
       timeout: 120
       checks:
@@ -50,3 +50,4 @@ task:
   log:
   - 2026-08-28T08:53:36Z claimed by demo-worker-a
   - 2026-08-28T08:53:52Z acceptance passed (1 step(s)) — done
+  - 2026-08-28T13:22:56Z re-materialized from plan 'demo-pipeline' (--force)

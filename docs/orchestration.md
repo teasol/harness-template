@@ -41,13 +41,14 @@ coordinate through ordinary git commits.
 | Command | Role | Purpose |
 | --- | --- | --- |
 | `harness plan validate <plan>` | Planner | Check schema, DAG (cycles, unknown deps), acceptance check types |
-| `harness plan materialize <plan>` | Planner | Write `tasks/<id>.task.yaml` per module (skips existing; `--force` overwrites) |
-| `harness plan status <plan>` | Planner | Module progress + integration pointer |
+| `harness plan materialize <plan>` | Planner | Write `tasks/<id>.task.yaml` per module (skips existing; `--force` refreshes the spec but preserves `status`/`worker`/`log`) |
+| `harness plan status <plan> [--check]` | Planner | Module progress, integration pointer, and plan/task drift (`--check` exits non-zero on drift) |
 | `harness task list [--status S]` | both | The board; `READY=yes` = todo + all deps done |
 | `harness task show --id <id>` | Worker | Print the full work order |
-| `harness task claim --id <id> --by <name>` | Worker | todo/blocked → in_progress |
+| `harness task claim --id <id> --by <name>` | Worker | todo/blocked → in_progress; refused unless every dependency is `done` (`--force` overrides and logs it) |
 | `harness task block --id <id> --reason "..."` | Worker | Park a task with a reason for the Planner |
-| `harness task verify --id <id>` | Worker | Run the task's acceptance steps |
+| `harness task verify --id <id>` | Worker | Run the task's acceptance steps + assert declared deliverables exist |
+| `harness task verify --all [--status S]` | Planner | Audit the whole board — re-verify every task (CI uses `--status done`) |
 | `harness task done --id <id> [--by <name>]` | Worker | Verify, then mark done (fails if acceptance fails) |
 | `harness verify --spec <spec>` | Planner | Integration check of the assembled whole |
 
@@ -111,6 +112,18 @@ comment-free so round-trips stay clean.
 - **Acceptance reuses the verification harness.** A task's acceptance is a
   standard spec (steps + checks) executed by the same Runner — one engine
   everywhere.
+- **Declared contracts are enforced, not trusted.** `deliverables` are checked
+  by the harness as a synthetic `deliverables` step appended to every task
+  verification: acceptance passing while a declared file is missing is a
+  failure, not a pass.
+- **The DAG is enforced at claim time.** `task claim` refuses a task whose
+  dependencies are not `done`, so a Worker cannot burn a session failing
+  acceptance against inputs that do not exist yet. `--force` exists for the
+  Planner's deliberate exceptions and writes the override into the log.
+- **Re-materialization never erases the board.** `--force` re-syncs the
+  spec (brief, contract, acceptance, deliverables, constraints) from the plan
+  and keeps `status`, `worker`, and `log`, appending a re-materialization
+  entry.
 - **Acceptance must be self-contained.** It may invoke dependency CLIs to
   prepare its inputs; it must never depend on another task having run first
   in the same session.
@@ -126,3 +139,16 @@ comment-free so round-trips stay clean.
 2. `harness plan validate` → `harness plan materialize` (writes only the new
    task file; existing tasks untouched).
 3. A Worker claims the new task like any other.
+
+## Changing a module's contract mid-flight
+
+1. Planner edits the module in `plans/<plan>.yaml`.
+2. `harness plan materialize <plan> --force` — the task file's brief,
+   contract, acceptance, and deliverables are refreshed from the plan; its
+   `status`, `worker`, and `log` survive, and the refresh is appended to the
+   log so the Worker can see the ground shifted.
+3. Tell the assigned Worker to re-read the task (`harness task show`).
+
+Skipping step 2 leaves the task file stale, so `harness plan status --check`
+(also `make drift`, a pre-commit hook, and a CI step) fails whenever a plan and
+its task files disagree on any plan-owned field.

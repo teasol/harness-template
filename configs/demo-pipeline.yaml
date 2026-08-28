@@ -6,14 +6,14 @@ seed: 42
 
 steps:
   - id: generate-dataset
-    run: python -m demo_pipeline.data_gen --out "${HARNESS_RESULTS_DIR}/demo_data.csv" --seed 42
+    run: ${HARNESS_PYTHON} -m demo_pipeline.data_gen --out "${HARNESS_RESULTS_DIR}/demo_data.csv" --seed ${HARNESS_SEED}
     timeout: 120
     checks:
       - type: file_exists
         path: ${HARNESS_RESULTS_DIR}/demo_data.csv
 
   - id: compute-stats
-    run: python -m demo_pipeline.stats --input "${HARNESS_RESULTS_DIR}/demo_data.csv" --out "${HARNESS_RESULTS_DIR}/stats.json"
+    run: ${HARNESS_PYTHON} -m demo_pipeline.stats --input "${HARNESS_RESULTS_DIR}/demo_data.csv" --out "${HARNESS_RESULTS_DIR}/stats.json"
     timeout: 120
     checks:
       - type: json_metric

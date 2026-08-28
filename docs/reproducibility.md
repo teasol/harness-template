@@ -1,7 +1,17 @@
 # Reproducibility policy
 
 Verification is only meaningful if runs are reproducible. This template
-enforces determinism at three levels.
+enforces determinism at three levels, on top of a provenance record that says
+what produced each run.
+
+## 0. Provenance
+
+Every `report.json` carries a `provenance` block (git commit + dirty flag,
+branch, Python version and interpreter, platform, harness version, seed) and
+`report.md` renders it. Without it "the numbers came out different" is
+unanswerable; with it, the first question — *was this even the same code?* —
+is answered by the artifact itself. Reports produced from a dirty worktree are
+flagged, because they cannot be reconstructed from a commit.
 
 ## 1. Seeds
 
@@ -20,16 +30,17 @@ set_all_seeds(config.experiment.seed)
 
 ## 2. Hash stability
 
-`harness hash <file>` prints a file's sha256. The CI verification workflow runs
-the demo spec **twice** and compares the artifact hashes — any divergence fails
-the PR. Apply the same pattern to your own artifacts:
+`harness reproduce` runs a spec repeatedly and compares a hash manifest of
+**every** artifact it produced — not one hand-picked file:
 
 ```bash
-python -m harness verify --spec configs/exp.yaml --results-dir results/a
-python -m harness verify --spec configs/exp.yaml --results-dir results/b
-diff <(python -m harness hash results/a/runs/*/output.json) \
-     <(python -m harness hash results/b/runs/*/output.json)
+python -m harness reproduce --spec configs/exp.yaml --times 2
 ```
+
+It exits non-zero on any divergence, and refuses to pass a spec that produced
+nothing to compare. `make reproduce` wraps it and the CI verification workflow
+runs it on every PR, so nondeterminism fails the PR rather than being noticed
+months later. (`harness hash <file>` remains available for one-off digests.)
 
 Notes:
 

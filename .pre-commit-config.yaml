@@ -1,3 +1,9 @@
+# Local enforcement of the rules AGENTS.md states. Prose is advisory; a hook
+# that fails the commit is not. Deliberately tool-agnostic: pre-commit is a
+# plain Python program, so these gates bind humans and any coding agent
+# equally, with no dependency on a particular assistant or vendor.
+#
+# Install once per checkout:  pre-commit install
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -15,3 +21,38 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: python3 -m pytest -q
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Specs and plans are data the harness executes — a malformed one is a
+      # broken build, so it is caught at commit time rather than in CI.
+      - id: harness-plan-validate
+        name: harness plan validate
+        entry: python3 -m harness plan validate plans/demo-pipeline.yaml
+        language: system
+        files: ^plans/.*\.yaml$
+        pass_filenames: false
+
+      # Editing a plan without re-materializing leaves Workers reading
+      # instructions the Planner has already replaced.
+      - id: harness-plan-drift
+        name: harness plan/task drift
+        entry: python3 -m harness plan status plans/demo-pipeline.yaml --check
+        language: system
+        files: ^(plans|tasks)/.*\.yaml$
+        pass_filenames: false
+
+      # Verification must be green before code lands, not after.
+      - id: harness-verify
+        name: harness verify
+        entry: python3 -m harness verify --spec configs/demo.yaml
+        language: system
+        files: ^(harness|src|scripts|configs)/.*$
+        pass_filenames: false

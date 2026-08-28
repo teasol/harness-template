@@ -22,10 +22,11 @@ flowchart LR
 | `harness/runner.py` | Execute steps via `subprocess`, capture logs, evaluate checks, stop on first failure |
 | `harness/checks.py` | Check registry; each check is `(root, params) -> detail` and fails via `CheckError` |
 | `harness/report.py` | Serialize `RunResult` to JSON + Markdown |
-| `harness/reproducibility.py` | Seeding helpers, deterministic env vars, sha256 |
+| `harness/reproduce.py` | Determinism gate: repeat a spec, diff artifact manifests |
+| `harness/reproducibility.py` | Seeding helpers, deterministic env vars, sha256, run provenance |
 | `harness/plan.py` | Plans: module DAGs, contracts, acceptance — the Planner's output format |
-| `harness/task.py` | Task materialization, lifecycle (claim/block/done), board — the Worker's world |
-| `harness/cli.py` | `python -m harness verify\|hash\|plan\|task` |
+| `harness/task.py` | Task materialization, lifecycle (claim/block/done), dependency + deliverable enforcement, board — the Worker's world |
+| `harness/cli.py` | `python -m harness verify\|reproduce\|hash\|plan\|task` |
 
 The orchestration layer builds on the verification layer: a task's acceptance
 is a standard spec run by the standard Runner (see
@@ -39,5 +40,9 @@ is a standard spec run by the standard Runner (see
   logic, write a script and reference it from a step.
 - **Fail fast**: the runner stops at the first failing step by default
   (`stop_on_failure=False` to collect all failures).
-- **Everything leaves a trace**: stdout/stderr, exit codes, durations, and
-  check details are always captured in the run directory.
+- **Everything leaves a trace**: stdout/stderr, exit codes, durations, check
+  details, and run provenance (commit, interpreter, platform, seed) are always
+  captured in the run directory.
+- **Declared contracts are enforced**: anything a plan or task declares
+  (`deliverables`, `depends_on`) is machine-checked. A rule the harness cannot
+  check belongs in prose, and prose is not a gate.

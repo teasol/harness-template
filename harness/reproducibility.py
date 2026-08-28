@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import os
+import platform
 import random
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 
 def file_sha256(path: str | Path) -> str:
@@ -44,3 +48,48 @@ def deterministic_env(seed: int) -> dict[str, str]:
         # Required by CUDA >= 10.2 for deterministic cuBLAS ops (torch).
         "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
     }
+
+
+def _git(root: Path, *args: str) -> str | None:
+    """Run a read-only git command in ``root``; return None if unavailable."""
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["git", *args],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def collect_provenance(root: str | Path = ".", seed: int | None = None) -> dict[str, Any]:
+    """Describe *what* produced a run, so a report answers 'how do I redo this?'.
+
+    Every field is best-effort: a missing git binary or a non-repo checkout
+    yields ``None`` rather than failing the run.
+    """
+    root = Path(root)
+    commit = _git(root, "rev-parse", "HEAD")
+    status = _git(root, "status", "--porcelain")
+    return {
+        "harness_version": _harness_version(),
+        "git_commit": commit,
+        "git_branch": _git(root, "rev-parse", "--abbrev-ref", "HEAD"),
+        "git_dirty": None if status is None else bool(status),
+        "python_version": sys.version.split()[0],
+        "python_executable": sys.executable,
+        "platform": platform.platform(),
+        "seed": seed,
+    }
+
+
+def _harness_version() -> str:
+    from harness import __version__
+
+    return __version__

@@ -23,8 +23,11 @@ the numbers." This template makes verification a first-class artifact:
 ```bash
 make setup     # editable install + dev tools (or: bash scripts/bootstrap.sh)
 make verify    # run the demo verification spec end-to-end
+make reproduce # run it twice and diff every artifact (determinism gate)
 make test      # pytest suite (includes harness end-to-end tests)
 make lint      # ruff check + format check
+make audit     # re-verify every task marked done
+make drift     # fail if task files have drifted from the plan
 ```
 
 `make verify` runs `configs/demo.yaml`: a seeded step that produces
@@ -143,7 +146,16 @@ cd <new-project>
 
 Then instantiate:
 
-```bashorchestration.md](docs/orchestration.md) — two-tier orchestration reference
+```bash
+python3 scripts/instantiate.py --name <new-project>
+git add -A && git commit -m "chore: instantiate from harness-template"
+make setup && make verify
+```
+
+## Documentation
+
+- [AGENTS.md](AGENTS.md) — ground rules for agents & contributors
+- [docs/orchestration.md](docs/orchestration.md) — two-tier orchestration reference
 - [docs/verification.md](docs/verification.md) — spec & check reference
 - [docs/reproducibility.md](docs/reproducibility.md) — determinism policy
 - [docs/architecture.md](docs/architecture.md) — component overview
@@ -151,15 +163,10 @@ Then instantiate:
 ## CI
 
 - **CI** (`.github/workflows/ci.yml`): lint + tests on every push/PR.
-- **Verification** (`.github/workflows/verify.yml`): runs the harness twice and
-  compares output hashes (determinism gate), then validates the orchestration
-  plan, verifies every task's acceptance, and runs the integration specributors
-- [docs/verification.md](docs/verification.md) — spec & check reference
-- [docs/reproducibility.md](docs/reproducibility.md) — determinism policy
-- [docs/architecture.md](docs/architecture.md) — component overview
-
-## CI
-
-- **CI** (`.github/workflows/ci.yml`): lint + tests on every push/PR.
-- **Verification** (`.github/workflows/verify.yml`): runs the harness twice and
-  compares output hashes — a determinism gate on every PR.
+- **Verification** (`.github/workflows/verify.yml`): the determinism gate
+  (`harness reproduce`), plan validity and plan/task drift, re-verification of
+  every task marked `done`, then the integration spec. Reports are uploaded as
+  build artifacts.
+- **Pre-commit** (`.pre-commit-config.yaml`): the same gates locally — run
+  `pre-commit install` once per checkout. Tool-agnostic by design, so the rules
+  bind humans and any coding agent identically.

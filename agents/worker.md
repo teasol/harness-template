@@ -12,6 +12,8 @@ Planner owns the flow. Your world is one task file.
    python -m harness task show --id <id>       # read YOUR spec
    python -m harness task claim --id <id> --by <your-name>
    ```
+   A claim is refused while any dependency is unfinished — pick a task whose
+   `READY` column says `yes` rather than forcing your way in.
 2. **Implement it.** Read the task file — brief, contract, constraints,
    deliverables. Dependencies are consumed *only through their contracts*
    (e.g. call the dependency's CLI as defined in the acceptance). Write the
@@ -20,7 +22,9 @@ Planner owns the flow. Your world is one task file.
    ```bash
    python -m harness task verify --id <id>
    ```
-   Iterate until it passes. The acceptance steps are the definition of done.
+   Iterate until it passes. The acceptance steps *and* the declared
+   deliverables are the definition of done: the harness fails the task if a
+   file listed under `deliverables` is missing, even when every check passes.
 4. **Mark done.**
    ```bash
    python -m harness task done --id <id> --by <your-name>

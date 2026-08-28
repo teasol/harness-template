@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `harness reproduce --spec S [--times N]`: runs a spec repeatedly and diffs a
+  hash manifest of every artifact it produced (excluding harness bookkeeping).
+  Exits non-zero on divergence, and refuses to pass a spec that produced
+  nothing to compare. `make reproduce` and the CI determinism gate now use it.
+- `harness task verify --all [--status S]`: audit the whole board in one
+  command. CI uses `--status done` so every task claiming completion is
+  re-verified, and new tasks are gated without editing the workflow.
+- `harness plan status --check`: fails when task files have drifted from the
+  plan that spawned them (a plan edit without re-materialization leaves
+  Workers reading replaced instructions). Also `make drift`.
+- `make audit`, `make drift`; CI uploads reports as build artifacts.
+- Pre-commit now enforces pytest, plan validity, plan/task drift, and
+  `harness verify` — deliberately tool-agnostic, so the rules bind humans and
+  any coding agent identically.
+- `tests/test_cli.py`: 25 tests covering the CLI's exit-code contract
+  (previously the largest module had no coverage).
+
+- Run provenance: every `report.json`/`report.md` records the git commit,
+  branch, dirty flag, Python version and interpreter, platform, harness
+  version, and the declared seed.
+- `HARNESS_PYTHON` and `HARNESS_SEED` are exported to every step, so specs
+  never hardcode a `python` binary or duplicate the spec's `seed`.
+- `harness task claim` refuses tasks whose dependencies are not `done`;
+  `--force` overrides and records the override in the task log.
+- Declared `deliverables` are verified as part of `task verify`/`task done`.
+
+### Fixed
+
+- `plan materialize --force` no longer erases `status`, `worker`, and `log`.
+  It refreshes the task's spec from the plan and appends a re-materialization
+  entry — previously it silently destroyed the board, which `agents/planner.md`
+  explicitly told the Planner to do on every contract change.
+- `Makefile` defaults to `python3`; a plain `make verify` failed on
+  Debian/Ubuntu checkouts, which ship no `python` binary.
+- `harness task done` now honours `--root` and `--results-dir` (they were
+  parsed and ignored).
+- Restored the `README.md` and `AGENTS.md` sections truncated by 8ecdcdf
+  (README "Then instantiate"/"Documentation" and a duplicated CI section;
+  AGENTS.md's directory layout heading).
+
 ## [0.2.0] - 2026-08-28
 
 ### Added

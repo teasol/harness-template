@@ -28,17 +28,27 @@ You are always acting in ONE of three roles — know which:
 If a Worker finds a contract ambiguous or a dependency broken: `harness task
 block --reason "..."` and hand back to the Planner. Never improvise the plan.
 
+The harness enforces the handoff rather than trusting it: `task claim` refuses
+a task with unfinished dependencies, `task verify`/`done` fail when a declared
+deliverable is missing, and `plan materialize --force` refreshes a task's spec
+without erasing its status, worker, or log.
+
 ## Non-negotiable rules
 
 1. **Verify before you finish.** A task is not done until
    `make lint && make test && make verify` all pass. If your change touches
-   determinism (seeds, data loading, model code), also run `make reproduce`.
+   determinism (seeds, data loading, model code), also run `make reproduce` —
+   it runs the spec twice and diffs every artifact, so a divergence fails
+   rather than passing quietly. These gates also run as pre-commit hooks
+   (`pre-commit install`); do not bypass them with `--no-verify`.
 2. **Never commit artifacts.** `data/` (except `data/README.md`) and `results/`
    (except `results/README.md`) are gitignored. Never commit checkpoints,
    logs, or datasets.
 3. **Determinism first.** Every source of randomness must be seeded — via the
    spec's `seed`, the harness env vars, or explicit config. No unseeded
-   `random`/`numpy`/`torch` calls in committed code paths.
+   `random`/`numpy`/`torch` calls in committed code paths. Every report
+   records its provenance (commit, interpreter, platform, seed); a run made
+   from a dirty worktree is flagged and is not a citable result.
 4. **Declarative verification.** Prefer adding a check to a spec
    (`configs/*.yaml`) over writing one-off validation scripts. New behavior
    that produces outputs should come with new checks.
@@ -55,30 +65,35 @@ block --reason "..."` and hand back to the Planner. Never improvise the plan.
 | `make verify` | Run the verification spec (`configs/demo.yaml`) |
 | `make plan` | Validate the orchestration plan + refresh task files |
 | `make tasks` | Show the task board |
-| `make reproduce` | Re-run verification into a fresh results dir |
+| `make reproduce` | Run the spec twice and compare artifact hashes (determinism gate) |
+| `make drift` | Fail if task files have drifted from the plan |
+| `make audit` | Re-verify every task marked done |
 | `make clean` | Remove generated artifacts |
 
 Orchestration commands:
 
 ```bash
 python -m harness plan validate|materialize|status plans/<plan>.yaml
+python -m harness plan status plans/<plan>.yaml --check   # drift gate
 python -m harness task list|show|claim|block|verify|done --id <id>
+python -m harness task verify --all [--status done]       # audit the board
 ```
 
-Diragents/` — role contracts (planner.md, worker.md). Read the one for your role.
-- `plans/` — orchestration plans: goal, module DAG, contracts, briefs, acceptance.
-- `tasks/` — materialized work orders with lifecycle state (status/worker/log). Committed.
-- `harness/` — verification + orchestration engine. Stable, minimal, stdlib + PyYAML only.
-- `src/` — project code (`demo_pipeline/` ships as the orchestration example)
+Verification commands:
 
 ```bash
 python -m harness verify --spec configs/<spec>.yaml [--results-dir DIR]
+python -m harness reproduce --spec configs/<spec>.yaml [--times N]
 python -m harness hash <file>          # sha256 helper
 ```
 
 ## Where things live
 
-- `harness/` — verification engine. Stable, minimal, stdlib + PyYAML only.
+- `agents/` — role contracts (planner.md, worker.md). Read the one for your role.
+- `plans/` — orchestration plans: goal, module DAG, contracts, briefs, acceptance.
+- `tasks/` — materialized work orders with lifecycle state (status/worker/log). Committed.
+- `harness/` — verification + orchestration engine. Stable, minimal, stdlib + PyYAML only.
+- `src/` — project code (`demo_pipeline/` ships as the orchestration example).
 - `configs/` — specs (`name`, `seed`, `steps`) and experiment configs. Data, not logic.
 - `scripts/` — runnable steps referenced by specs.
 - `tests/` — pytest; must include coverage for any new check type.
@@ -93,6 +108,12 @@ expands `${VAR}` in check `path` params:
 
 - `HARNESS_RESULTS_DIR` — directory for this run's artifacts
 - `HARNESS_RUN_ID` — spec name
+- `HARNESS_PYTHON` — the interpreter running the harness
+- `HARNESS_SEED` — the spec's `seed` (unset if none declared)
+
+Write steps as `${HARNESS_PYTHON} script.py --seed ${HARNESS_SEED}`. A bare
+`python` breaks on machines that ship only `python3`, and a hardcoded seed
+silently drifts from the spec's `seed:`.
 
 See `docs/verification.md` for the full spec and check reference.
 

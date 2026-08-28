@@ -20,7 +20,7 @@ import yaml
 
 from harness.plan import Contract, Module, Plan
 from harness.report import write_reports
-from harness.runner import Runner, RunResult
+from harness.runner import CheckResult, Runner, RunResult, StepResult
 from harness.spec import Spec, Step
 
 TASK_STATUSES = ("todo", "in_progress", "done", "blocked")
@@ -202,16 +202,65 @@ def task_from_module(plan: Plan, module: Module) -> Task:
 
 
 def materialize(plan: Plan, tasks_dir: str | Path, force: bool = False) -> list[Path]:
-    """Write one task file per plan module. Existing files are kept unless force."""
+    """Write one task file per plan module.
+
+    Existing task files are left untouched unless ``force`` is set. With
+    ``force``, the module's *specification* (title, brief, contract,
+    deliverables, constraints, acceptance, deps) is refreshed from the plan
+    while the *lifecycle* (``status``, ``worker``, ``log``) is preserved — a
+    re-materialization must never erase the board or the audit trail. The
+    refresh itself is appended to the log.
+    """
     written: list[Path] = []
     for module_id in plan.topological_order():
         path = task_path(tasks_dir, module_id)
-        if path.exists() and not force:
-            continue
+        existing: Task | None = None
+        if path.exists():
+            if not force:
+                continue
+            existing = load_task(tasks_dir, module_id)
         task = task_from_module(plan, plan.module(module_id))
         task.path = path
+        if existing is not None:
+            task.status = existing.status
+            task.worker = existing.worker
+            task.log = list(existing.log)
+            task.log.append(f"{_now()} re-materialized from plan '{plan.name}' (--force)")
         written.append(save_task(task))
     return written
+
+
+#: Task fields owned by the plan; the rest (status/worker/log) is lifecycle.
+SPEC_FIELDS = (
+    "title",
+    "depends_on",
+    "brief",
+    "contract",
+    "deliverables",
+    "constraints",
+    "acceptance",
+)
+
+
+def spec_drift(plan: Plan, tasks_dir: str | Path) -> dict[str, list[str]]:
+    """Map module id -> plan-owned fields that differ from its materialized task.
+
+    ``materialize`` skips existing files, so editing a plan leaves task files
+    stale and Workers reading instructions the Planner has already replaced.
+    This makes that divergence visible (and CI-gateable) instead of silent.
+    """
+    drift: dict[str, list[str]] = {}
+    for module in plan.modules:
+        path = task_path(tasks_dir, module.id)
+        if not path.exists():
+            drift[module.id] = ["(not materialized)"]
+            continue
+        stored = task_to_dict(load_task(tasks_dir, module.id))["task"]
+        expected = task_to_dict(task_from_module(plan, module))["task"]
+        stale = [f for f in SPEC_FIELDS if stored.get(f) != expected.get(f)]
+        if stale:
+            drift[module.id] = stale
+    return drift
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +271,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def claim(tasks_dir: str | Path, task_id: str, worker: str) -> Task:
+def blocking_dependencies(tasks_dir: str | Path, task: Task) -> list[str]:
+    """Dependency ids of ``task`` that are not 'done' (or do not exist yet)."""
+    board = {t.id: t for t in load_board(tasks_dir)}
+    return [d for d in task.depends_on if d not in board or board[d].status != "done"]
+
+
+def claim(tasks_dir: str | Path, task_id: str, worker: str, force: bool = False) -> Task:
     task = load_task(tasks_dir, task_id)
     if task.status not in ("todo", "blocked"):
         raise TaskError(
@@ -230,9 +285,16 @@ def claim(tasks_dir: str | Path, task_id: str, worker: str) -> Task:
             + (f" (worker: {task.worker})" if task.worker else "")
             + " — only 'todo' or 'blocked' tasks can be claimed"
         )
+    pending = blocking_dependencies(tasks_dir, task)
+    if pending and not force:
+        raise TaskError(
+            f"task '{task_id}' is not ready: dependencies not done: {pending}. "
+            "Finish them first, or pass --force to claim anyway."
+        )
     task.status = "in_progress"
     task.worker = worker
-    task.log.append(f"{_now()} claimed by {worker}")
+    note = f" (--force, deps pending: {pending})" if pending else ""
+    task.log.append(f"{_now()} claimed by {worker}{note}")
     save_task(task)
     return task
 
@@ -247,12 +309,37 @@ def block(tasks_dir: str | Path, task_id: str, reason: str) -> Task:
     return task
 
 
+def _deliverables_step(task: Task, root: Path) -> StepResult:
+    """Synthesize a step asserting every declared deliverable exists.
+
+    Deliverables are part of the contract, so they are verified by the
+    harness rather than trusted — a task whose acceptance passes but whose
+    declared files are missing has not delivered.
+    """
+    results = []
+    for rel in task.deliverables:
+        path = Path(rel)
+        resolved = path if path.is_absolute() else (root / path)
+        if resolved.exists():
+            results.append(CheckResult("deliverable", True, f"deliverable present: {rel}"))
+        else:
+            results.append(CheckResult("deliverable", False, f"deliverable missing: {rel}"))
+    return StepResult(
+        step_id="deliverables",
+        command="(harness: declared deliverables exist)",
+        exit_code=0,
+        duration_s=0.0,
+        log_path="",
+        checks=results,
+    )
+
+
 def verify_task(
     task: Task,
     root: str | Path = ".",
     results_dir: str | Path = "results",
 ) -> RunResult:
-    """Run the task's acceptance steps with the standard Runner."""
+    """Run the task's acceptance steps, then assert its deliverables exist."""
     spec = Spec(
         name=f"task-{task.id}",
         description=f"Acceptance for task '{task.id}' (plan: {task.plan})",
@@ -260,16 +347,24 @@ def verify_task(
     )
     runner = Runner(root=root, results_dir=results_dir)
     result = runner.run(spec)
+    if task.deliverables:
+        step = _deliverables_step(task, runner.root)
+        result.steps.append(step)
+        result.success = result.success and step.success
     write_reports(result)
     return result
 
 
 def complete(
-    tasks_dir: str | Path, task_id: str, worker: str | None = None
+    tasks_dir: str | Path,
+    task_id: str,
+    worker: str | None = None,
+    root: str | Path = ".",
+    results_dir: str | Path = "results",
 ) -> tuple[Task, RunResult]:
-    """Verify acceptance, then mark the task done. Fails if acceptance fails."""
+    """Verify acceptance + deliverables, then mark the task done."""
     task = load_task(tasks_dir, task_id)
-    result = verify_task(task)
+    result = verify_task(task, root=root, results_dir=results_dir)
     if not result.success:
         return task, result
     task.status = "done"

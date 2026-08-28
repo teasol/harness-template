@@ -1,8 +1,8 @@
-PYTHON ?= python
+PYTHON ?= python3
 RESULTS_DIR ?= results
 
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format test verify plan tasks reproduce clean
+.PHONY: help setup lint format test verify plan tasks reproduce drift audit clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -32,8 +32,15 @@ plan: ## Validate the orchestration plan and refresh task files
 tasks: ## Show the worker task board
 	$(PYTHON) -m harness task list
 
-reproduce: ## Re-run verification into a fresh results subdir (determinism check)
-	$(PYTHON) -m harness verify --spec configs/demo.yaml --results-dir $(RESULTS_DIR)/reproduce
+reproduce: ## Run the spec twice and compare artifact hashes (determinism gate)
+	$(PYTHON) -m harness reproduce --spec configs/demo.yaml --times 2 \
+		--results-dir $(RESULTS_DIR)/reproduce
+
+drift: ## Fail if task files have drifted from the plan
+	$(PYTHON) -m harness plan status plans/demo-pipeline.yaml --check
+
+audit: ## Re-verify every task marked done (acceptance + deliverables)
+	$(PYTHON) -m harness task verify --all --status done --results-dir $(RESULTS_DIR)/audit
 
 clean: ## Remove generated artifacts
 	rm -rf $(RESULTS_DIR) .pytest_cache .ruff_cache build dist *.egg-info

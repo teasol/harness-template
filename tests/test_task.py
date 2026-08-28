@@ -37,12 +37,50 @@ def test_materialize_skips_existing(demo_plan, tmp_path: Path) -> None:
     assert task_mod.load_task(tasks_dir, "data-gen").status == "in_progress"
 
 
-def test_materialize_force_overwrites(demo_plan, tmp_path: Path) -> None:
+def test_materialize_force_refreshes_spec_but_keeps_lifecycle(demo_plan, tmp_path: Path) -> None:
+    """--force re-syncs the spec from the plan; it must never erase the board."""
     tasks_dir = tmp_path / "tasks"
     task_mod.materialize(demo_plan, tasks_dir)
     task_mod.claim(tasks_dir, "data-gen", "worker-x")
+    # Corrupt the stored spec so we can prove it gets refreshed.
+    stale = task_mod.load_task(tasks_dir, "data-gen")
+    stale.brief = "stale brief"
+    task_mod.save_task(stale)
+
     task_mod.materialize(demo_plan, tasks_dir, force=True)
-    assert task_mod.load_task(tasks_dir, "data-gen").status == "todo"
+
+    task = task_mod.load_task(tasks_dir, "data-gen")
+    assert task.brief.startswith("Implement `src/demo_pipeline/data_gen.py`")  # refreshed
+    assert task.status == "in_progress"  # lifecycle preserved
+    assert task.worker == "worker-x"
+    assert any("claimed by worker-x" in line for line in task.log)  # audit trail intact
+    assert any("re-materialized" in line for line in task.log)
+
+
+def test_claim_rejects_unready_dependencies(demo_plan, tmp_path: Path) -> None:
+    """A Worker must not claim a task whose dependencies are unfinished."""
+    tasks_dir = tmp_path / "tasks"
+    task_mod.materialize(demo_plan, tasks_dir)
+    with pytest.raises(TaskError, match="dependencies not done"):
+        task_mod.claim(tasks_dir, "stats", "agent-1")
+    # The gate is an override, not a wall — the bypass is recorded.
+    task = task_mod.claim(tasks_dir, "stats", "agent-1", force=True)
+    assert task.status == "in_progress"
+    assert any("--force" in line for line in task.log)
+
+
+def test_verify_task_fails_on_missing_deliverable(demo_plan, tmp_path: Path) -> None:
+    """Passing acceptance is not enough: declared deliverables must exist."""
+    tasks_dir = tmp_path / "tasks"
+    task_mod.materialize(demo_plan, tasks_dir)
+    task = task_mod.load_task(tasks_dir, "data-gen")
+    task.deliverables = ["src/demo_pipeline/data_gen.py", "src/demo_pipeline/ghost.py"]
+
+    result = task_mod.verify_task(task, root=".", results_dir=tmp_path / "results")
+
+    assert not result.success
+    details = [c.detail for s in result.steps for c in s.checks if not c.passed]
+    assert any("ghost.py" in d for d in details)
 
 
 def test_claim_lifecycle(tmp_path: Path, demo_plan) -> None:
@@ -102,6 +140,8 @@ def test_board_and_ready(tmp_path: Path, demo_plan) -> None:
     task_mod.complete(tasks_dir, "data-gen", worker="w1")
     board = task_mod.load_board(tasks_dir)
     assert task_mod.ready_task_ids(board) == ["stats"]
+    # With its dependency done, stats is now claimable without --force.
+    assert task_mod.claim(tasks_dir, "stats", "w2").status == "in_progress"
 
 
 def test_load_missing_task_raises(tmp_path: Path) -> None:

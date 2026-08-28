@@ -15,27 +15,39 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: python -m pip install ".[dev]"
+        run: python -m pip install -e ".[dev]"
 
-      - name: Run harness (first pass)
-        run: python -m harness verify --spec configs/demo.yaml --results-dir results/run1
+      - name: Verification spec
+        run: python -m harness verify --spec configs/demo.yaml --results-dir results/verify
 
-      - name: Run harness (second pass)
-        run: python -m harness verify --spec configs/demo.yaml --results-dir results/run2
+      # Runs the spec twice and diffs a manifest of every artifact it wrote.
+      # Fails on any divergence, and refuses to "pass" a spec that produces
+      # nothing to compare.
+      - name: Determinism gate
+        run: python -m harness reproduce --spec configs/demo.yaml --times 2
 
-      - name: Determinism gate (compare output hashes)
-        run: |
-          f1=$(ls results/run1/runs/*/output.json)
-          f2=$(ls results/run2/runs/*/output.json)
-          h1=$(python -m harness hash "$f1" | cut -d' ' -f1)
-          h2=$(python -m harness hash "$f2" | cut -d' ' -f1)
-          echo "run1: $h1"
-          echo "run2: $h2"
-          test "$h1" = "$h2"
-
-      - name: Orchestration demo (plan → tasks → integration)
+      - name: Plan validity + task/plan drift
         run: |
           python -m harness plan validate plans/demo-pipeline.yaml
-          python -m harness task verify --id data-gen --results-dir results/task1
-          python -m harness task verify --id stats --results-dir results/task2
-          python -m harness verify --spec configs/demo-pipeline.yaml --results-dir results/pipeline
+          python -m harness plan status plans/demo-pipeline.yaml --check
+
+      # Every task claiming 'done' must still pass its acceptance and produce
+      # its declared deliverables. Iterates the board, so new tasks are gated
+      # automatically without editing this workflow.
+      - name: Completed tasks still pass acceptance
+        run: python -m harness task verify --all --status done --results-dir results/tasks
+
+      - name: Integration spec
+        run: python -m harness verify --spec configs/demo-pipeline.yaml --results-dir results/pipeline
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-reports
+          path: |
+            results/**/report.json
+            results/**/report.md
+            results/**/reproduce.json
+          if-no-files-found: ignore
+          retention-days: 14

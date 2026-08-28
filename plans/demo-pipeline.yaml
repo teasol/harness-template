@@ -52,7 +52,7 @@ plan:
       acceptance:
         steps:
           - id: run-data-gen
-            run: python -m demo_pipeline.data_gen --out "${HARNESS_RESULTS_DIR}/demo_data.csv" --seed 42
+            run: ${HARNESS_PYTHON} -m demo_pipeline.data_gen --out "${HARNESS_RESULTS_DIR}/demo_data.csv" --seed 42
             timeout: 120
             checks:
               - type: file_exists
@@ -96,10 +96,10 @@ plan:
       acceptance:
         steps:
           - id: prepare-input
-            run: python -m demo_pipeline.data_gen --out "${HARNESS_RESULTS_DIR}/demo_data.csv" --seed 42
+            run: ${HARNESS_PYTHON} -m demo_pipeline.data_gen --out "${HARNESS_RESULTS_DIR}/demo_data.csv" --seed 42
             timeout: 120
           - id: run-stats
-            run: python -m demo_pipeline.stats --input "${HARNESS_RESULTS_DIR}/demo_data.csv" --out "${HARNESS_RESULTS_DIR}/stats.json"
+            run: ${HARNESS_PYTHON} -m demo_pipeline.stats --input "${HARNESS_RESULTS_DIR}/demo_data.csv" --out "${HARNESS_RESULTS_DIR}/stats.json"
             timeout: 120
             checks:
               - type: file_exists

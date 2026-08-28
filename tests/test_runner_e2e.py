@@ -80,7 +80,7 @@ def test_timeout(tmp_path: Path) -> None:
 name: slow
 steps:
   - id: sleep
-    run: python -c "import time; time.sleep(5)"
+    run: $HARNESS_PYTHON -c "import time; time.sleep(5)"
     timeout: 1
 """,
         encoding="utf-8",
@@ -91,3 +91,46 @@ steps:
     assert not result.success
     assert result.steps[0].exit_code is None
     assert any(c.check_type == "timeout" for c in result.steps[0].checks)
+
+
+def test_runner_exports_python_and_seed(tmp_path: Path) -> None:
+    """Steps get a usable interpreter path and the spec seed, not a bare `python`."""
+    spec_path = tmp_path / "env.yaml"
+    spec_path.write_text(
+        """
+name: env-probe
+seed: 7
+steps:
+  - id: probe
+    run: "$HARNESS_PYTHON -c \\"import os;print(os.environ['HARNESS_SEED'])\\" > seed.txt"
+    checks:
+      - type: text_contains
+        path: seed.txt
+        contains: "7"
+""",
+        encoding="utf-8",
+    )
+    spec = load_spec(spec_path)
+    runner = Runner(root=str(tmp_path), results_dir=tmp_path / "results")
+    result = runner.run(spec)
+    assert result.success, [c.detail for s in result.steps for c in s.checks]
+
+
+def test_report_records_provenance(tmp_path: Path) -> None:
+    """A report must answer 'what produced this?' — commit, interpreter, seed."""
+    spec = load_spec("configs/demo.yaml")
+    runner = Runner(root=".", results_dir=tmp_path / "results")
+    result = runner.run(spec)
+
+    prov = result.provenance
+    assert prov["seed"] == 42
+    assert prov["python_version"]
+    assert prov["platform"]
+    assert prov["harness_version"]
+    assert "git_commit" in prov and "git_dirty" in prov
+
+    _, md_report = write_reports(result)
+    text = md_report.read_text(encoding="utf-8")
+    assert "## Provenance" in text
+    payload = json.loads((Path(result.run_dir) / "report.json").read_text(encoding="utf-8"))
+    assert payload["provenance"]["seed"] == 42
