@@ -27,8 +27,8 @@ jobs:
         run: |
           f1=$(ls results/run1/runs/*/output.json)
           f2=$(ls results/run2/runs/*/output.json)
-          h1=$(python -m harness hash "$f1")
-          h2=$(python -m harness hash "$f2")
+          h1=$(python -m harness hash "$f1" | cut -d' ' -f1)
+          h2=$(python -m harness hash "$f2" | cut -d' ' -f1)
           echo "run1: $h1"
           echo "run2: $h2"
           test "$h1" = "$h2"
