@@ -46,6 +46,7 @@ coordinate through ordinary git commits.
 | --- | --- | --- |
 | `harness plan validate <plan>` | Planner | Check schema, DAG (cycles, unknown deps), acceptance check types |
 | `harness plan materialize <plan>` | Planner | Write `tasks/<id>.task.yaml` per module (skips existing; `--force` refreshes the spec but preserves `status`/`worker`/`log`) |
+| `harness plan check` | both | Validate **every** plan in `plans/` and flag drift — names no plan, so gates keep working as plans come and go |
 | `harness plan status <plan> [--check]` | Planner | Module progress, integration pointer, and plan/task drift (`--check` exits non-zero on drift) |
 | `harness task list [--status S]` | both | The board; `READY=yes` = todo + all deps done |
 | `harness task show --id <id>` | Worker | Print the full work order |
@@ -111,6 +112,11 @@ task:
 
 Task files are machine-managed (`harness task ...` rewrites them); keep them
 comment-free so round-trips stay clean.
+
+`tasks/` may hold task files from more than one plan — a project's earlier
+plan, or the shipped demo. Progress is therefore always counted **against the
+plan's own modules**: `plan status` and `exp report` ignore foreign task files
+and say so, rather than counting someone else's finished work as this plan's.
 
 ## Design rules
 

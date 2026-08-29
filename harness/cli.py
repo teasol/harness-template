@@ -10,6 +10,7 @@ Usage::
     python -m harness plan validate <plan.yaml>
     python -m harness plan materialize <plan.yaml> [--tasks-dir tasks] [--force]
     python -m harness plan status <plan.yaml> [--tasks-dir tasks] [--check]
+    python -m harness plan check [--plans-dir plans]   # every plan, no name needed
     python -m harness task list [--status todo] [--tasks-dir tasks]
     python -m harness task show --id <id> [--tasks-dir tasks]
     python -m harness task claim --id <id> --by <agent> [--force] [--tasks-dir tasks]
@@ -164,6 +165,42 @@ def cmd_plan_materialize(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plan_check(args: argparse.Namespace) -> int:
+    """Validate every plan and flag drift — with no plan name hardcoded.
+
+    Lets the Makefile, pre-commit, and CI gate a project's plans without
+    naming one, so removing the shipped demo (or adding a plan) needs no
+    edits to any of them.
+    """
+    plans = sorted(Path(args.plans_dir).glob("*.yaml"))
+    if not plans:
+        print(f"(no plans in {args.plans_dir})")
+        return 0
+    problems = 0
+    for path in plans:
+        try:
+            plan = load_plan(path)
+        except PlanError as exc:
+            print(f"  INVALID {path}: {exc}", file=sys.stderr)
+            problems += 1
+            continue
+        drift = task_mod.spec_drift(plan, args.tasks_dir)
+        # A plan whose tasks were never materialized is a normal early state,
+        # not drift; only a materialized task that disagrees is a problem.
+        stale = {k: v for k, v in drift.items() if v != ["(not materialized)"]}
+        if stale:
+            for module_id, fields in stale.items():
+                print(f"  DRIFT   {path}: {module_id}: {', '.join(fields)}", file=sys.stderr)
+            problems += 1
+        else:
+            unmaterialized = len(drift)
+            note = f" ({unmaterialized} module(s) not yet materialized)" if unmaterialized else ""
+            print(f"  ok      {path} — {len(plan.modules)} module(s){note}")
+    if problems:
+        print(f"{problems} plan(s) with problems", file=sys.stderr)
+    return 1 if problems else 0
+
+
 def cmd_plan_status(args: argparse.Namespace) -> int:
     try:
         plan = load_plan(args.plan)
@@ -171,6 +208,7 @@ def cmd_plan_status(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     board = {t.id: t for t in task_mod.load_board(args.tasks_dir)}
+    module_ids = [m.id for m in plan.modules]
     print(f"Plan: {plan.name}")
     print(f"Goal: {plan.goal.strip()}")
     print()
@@ -181,12 +219,19 @@ def cmd_plan_status(args: argparse.Namespace) -> int:
         worker = task.worker if task and task.worker else "-"
         deps = ", ".join(plan.module(module_id).depends_on) or "-"
         print(f"  {module_id:<12} {status:<13} {worker:<16} {deps}")
-    done = sum(1 for t in board.values() if t.is_done)
-    total = len(plan.modules)
+    # Count only this plan's modules: tasks/ can hold files from other plans,
+    # and counting those would report progress the plan has not made.
+    done = sum(1 for i in module_ids if i in board and board[i].is_done)
+    total = len(module_ids)
     print()
     print(f"Progress: {done}/{total} done")
     if plan.integration:
         print(f"Integration spec: {plan.integration}")
+
+    orphans = sorted(set(board) - set(module_ids))
+    if orphans:
+        print()
+        print(f"Task file(s) not in this plan (ignored here): {', '.join(orphans)}")
 
     drift = task_mod.spec_drift(plan, args.tasks_dir)
     if drift:
@@ -211,14 +256,19 @@ def cmd_task_list(args: argparse.Namespace) -> int:
     if not board:
         print("(no tasks)")
         return 0
+    if args.plan:
+        board = [t for t in board if t.plan == args.plan]
+        if not board:
+            print(f"(no tasks for plan '{args.plan}')")
+            return 0
     ready = set(task_mod.ready_task_ids(task_mod.load_board(args.tasks_dir)))
-    print("  ID           STATUS        WORKER           DEPENDS ON        READY")
+    print("  ID           PLAN            STATUS        WORKER           DEPENDS ON     READY")
     for task in board:
         deps = ", ".join(task.depends_on) or "-"
         can_start = "yes" if task.id in ready else "-"
         print(
-            f"  {task.id:<12} {task.status:<13} {str(task.worker or '-'):<16} "
-            f"{deps:<17} {can_start}"
+            f"  {task.id:<12} {(task.plan or '-'):<15} {task.status:<13} "
+            f"{str(task.worker or '-'):<16} {deps:<14} {can_start}"
         )
     return 0
 
@@ -359,6 +409,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan_status.set_defaults(func=cmd_plan_status)
 
+    plan_check = plan_sub.add_parser(
+        "check", help="Validate every plan and flag drift (no plan name needed)"
+    )
+    plan_check.add_argument("--plans-dir", default="plans")
+    plan_check.add_argument("--tasks-dir", default="tasks")
+    plan_check.set_defaults(func=cmd_plan_check)
+
     plan_run = plan_sub.add_parser("run", help="Run every ready task through a Worker")
     plan_run.add_argument("plan", help="Path to the plan YAML file")
     plan_run.add_argument("--tasks-dir", default="tasks")
@@ -391,6 +448,8 @@ def build_parser() -> argparse.ArgumentParser:
         parser_i.add_argument("--tasks-dir", default="tasks")
         if name in ("list", "verify"):
             parser_i.add_argument("--status", choices=list(task_mod.TASK_STATUSES))
+        if name == "list":
+            parser_i.add_argument("--plan", default=None, help="Only tasks from this plan")
         if name == "claim":
             parser_i.add_argument("--by", required=True, help="Worker/agent name")
             parser_i.add_argument(

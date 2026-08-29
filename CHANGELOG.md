@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Progress was counted across every task file, not the plan's own modules.**
+  A new project inherits the shipped demo's *finished* board, so `plan status`
+  and `exp report` reported "2/2 done" with none of the plan's modules built —
+  and could have declared an experiment READY TO MERGE on that basis. Both now
+  count only the plan's modules, list unmaterialized ones, and name foreign
+  task files as ignored. Found by walking through a fresh project end to end.
+- `exp report` could print `NOT READY` with no reason given. Every blocker is
+  now stated, in the terminal and under `Why not ready` in the report.
+- `exp start` scaffolded a plan pointing at an integration spec it did not
+  create, so the Planner's first error was a missing file rather than the TODOs
+  it had to fill in. The spec is now scaffolded too.
+- `plan validate` accepted an untouched scaffold as a valid plan. A plan still
+  carrying the scaffold marker is refused with an explanation.
+
 ### Added
 
 - **Worker adapters (Tier 2 → Tier 3).** `harness task run --id <id>` invokes a
@@ -56,6 +72,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Cross-experiment comparison belongs to the researcher.
 - `plan validate` rejects a deliverable claimed by more than one module.
 - `make experiments`; `docs/experiments.md`.
+- `harness plan check` — validates every plan in `plans/` and flags drift
+  without naming one, so the Makefile, pre-commit, and CI keep gating a project
+  whose plans have changed. `make drift`, the pre-commit hook, and CI now use it.
+- `harness task list --plan <name>`, plus a PLAN column, so a board holding
+  more than one plan's tasks is legible.
+- `scripts/instantiate.py --drop-demo` removes the shipped orchestration
+  example (plan, integration spec, task board, modules) while keeping the
+  one-step smoke test, so `make verify` still works on day one.
+- `Makefile` gained `SPEC` and `PLAN` variables; a project points them at its
+  own files instead of editing targets.
 
 ### Fixed
 

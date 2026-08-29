@@ -160,7 +160,13 @@ also written as `report.json`, which makes that collection straightforward.
 `exp report` exits `0` only when integration passed, every module is `done`,
 every task's acceptance still passes, the worktree is clean, and determinism
 (if checked) held. Anything short of that prints `NOT READY` and exits `1`,
-with the reasons under `Not verified`.
+and **every** blocker is stated under `Why not ready` — a verdict the
+researcher cannot explain is not a decision aid.
+
+Progress is counted against the plan's own modules. A `tasks/` directory can
+hold task files from other plans; counting those would report an experiment
+complete when none of its modules were built, and that number decides a merge.
+Foreign task files are ignored and listed as a caveat.
 
 `--save` also writes the report to `experiments/<name>/report.md` inside the
 branch, so merging carries the evidence into the record. Without it the report
@@ -171,14 +177,16 @@ lives only under `results/` and is gitignored.
 ```bash
 # Researcher
 python -m harness exp start sparse-attn --base main
+python -m harness planner brief sparse-attn --register session-01
 
 # Planner, inside .experiments/sparse-attn/
+# (exp start scaffolds plans/<name>.yaml and configs/<name>.yaml; fill in the
+#  TODOs first — plan validate refuses a scaffold)
 python -m harness plan validate plans/sparse-attn.yaml
 python -m harness plan materialize plans/sparse-attn.yaml
 
 # Workers, one at a time (see agents/worker.md)
-python -m harness task claim --id <id> --by <name>
-python -m harness task done  --id <id> --by <name>
+python -m harness plan run plans/sparse-attn.yaml
 
 # Planner closes the loop, then hands back
 python -m harness exp report sparse-attn --determinism --save

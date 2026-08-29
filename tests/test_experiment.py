@@ -241,3 +241,70 @@ def test_report_requires_a_plan(clone: Path) -> None:
     exp_mod.start("naked", root=clone, scaffold=False)
     with pytest.raises(ExperimentError, match="has no plan"):
         exp_mod.build_report("naked", root=clone)
+
+
+# ---------------------------------------------------------------------------
+# plan-scoped accounting: tasks/ may hold task files from other plans
+
+
+@needs_git
+def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
+    """Counting foreign task files reported an experiment complete when it was not.
+
+    The shipped demo's finished board is inherited by every new project, so an
+    unscoped count said "2/2 done" — and that number decides a merge.
+    """
+    experiment = exp_mod.start("scoped", root=clone)
+    wt = experiment.path
+    # A plan with two modules, neither materialized...
+    shutil.copy("plans/demo-pipeline.yaml", wt / "plans/scoped.yaml")
+    text = (wt / "plans/scoped.yaml").read_text(encoding="utf-8")
+    text = text.replace("name: demo-pipeline", "name: scoped", 1)
+    text = text.replace("id: data-gen", "id: alpha", 1).replace("id: stats", "id: beta", 1)
+    text = text.replace("depends_on: [data-gen]", "depends_on: [alpha]", 1)
+    (wt / "plans/scoped.yaml").write_text(text, encoding="utf-8")
+    # ...while tasks/ still holds the demo's *finished* board.
+    assert (wt / "tasks" / "data-gen.task.yaml").is_file()
+
+    report = exp_mod.build_report("scoped", root=clone, run_integration=False)
+
+    assert report.tasks_total == 2
+    assert report.tasks_done == 0  # not 2: the demo's tasks are not this plan's
+    assert report.merge_ready is False
+    assert any("never materialized" in c for c in report.caveats)
+    assert any("not part of this plan" in c for c in report.caveats)
+
+
+@needs_git
+def test_not_ready_always_states_a_reason(clone: Path) -> None:
+    """A verdict the researcher cannot explain is not a decision aid."""
+    experiment = exp_mod.start("unexplained", root=clone)
+    wt = experiment.path
+    shutil.copy("plans/demo-pipeline.yaml", wt / "plans/unexplained.yaml")
+    text = (wt / "plans/unexplained.yaml").read_text(encoding="utf-8")
+    (wt / "plans/unexplained.yaml").write_text(
+        text.replace("name: demo-pipeline", "name: unexplained", 1), encoding="utf-8"
+    )
+
+    report = exp_mod.build_report("unexplained", root=clone, run_integration=False)
+
+    assert not report.merge_ready
+    assert report.blockers, "NOT READY must always come with stated blockers"
+    assert "### Why not ready" in exp_mod.report_markdown(report)
+
+
+@needs_git
+def test_start_scaffolds_an_integration_spec(clone: Path) -> None:
+    """The scaffold must not point at a file it forgot to create."""
+    experiment = exp_mod.start("scaffolded", root=clone)
+    assert (experiment.path / "configs" / "scaffolded.yaml").is_file()
+
+
+@needs_git
+def test_a_scaffold_is_not_a_plan(clone: Path) -> None:
+    """Validating an untouched scaffold must fail, or TODOs read as a plan."""
+    experiment = exp_mod.start("stub", root=clone)
+    with pytest.raises(PlanError, match="still the scaffold"):
+        load_plan(experiment.plan_path)
+    with pytest.raises(ExperimentError, match="still the scaffold"):
+        exp_mod.build_report("stub", root=clone, run_integration=False)

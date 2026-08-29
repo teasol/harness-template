@@ -73,7 +73,7 @@ without erasing its status, worker, or log.
 | `make plan` | Validate the orchestration plan + refresh task files |
 | `make tasks` | Show the task board |
 | `make reproduce` | Run the spec twice and compare artifact hashes (determinism gate) |
-| `make drift` | Fail if task files have drifted from the plan |
+| `make drift` | Validate every plan and fail on task/plan drift |
 | `make audit` | Re-verify every task marked done |
 | `make clean` | Remove generated artifacts |
 
@@ -81,7 +81,8 @@ Orchestration commands:
 
 ```bash
 python -m harness plan validate|materialize|status plans/<plan>.yaml
-python -m harness plan status plans/<plan>.yaml --check   # drift gate
+python -m harness plan check                              # every plan, no name needed
+python -m harness plan status plans/<plan>.yaml --check   # one plan, with drift
 python -m harness task list|show|claim|block|verify|done --id <id>
 python -m harness task verify --all [--status done]       # audit the board
 python -m harness task run --id <id>                      # invoke a Worker + verify

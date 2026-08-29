@@ -27,7 +27,7 @@ make reproduce # run it twice and diff every artifact (determinism gate)
 make test      # pytest suite (includes harness end-to-end tests)
 make lint      # ruff check + format check
 make audit     # re-verify every task marked done
-make drift     # fail if task files have drifted from the plan
+make drift     # validate every plan and fail on task/plan drift
 ```
 
 `make verify` runs `configs/demo.yaml`: a seeded step that produces
@@ -200,10 +200,27 @@ cd <new-project>
 Then instantiate:
 
 ```bash
-python3 scripts/instantiate.py --name <new-project>
+python3 scripts/instantiate.py --name <new-project> --drop-demo
 git add -A && git commit -m "chore: instantiate from harness-template"
-make setup && make verify
+make setup && make verify && make test
 ```
+
+`--drop-demo` removes the shipped orchestration example. Without it your board
+starts out holding the demo's *finished* tasks — a worked example if you want
+one, clutter if you don't. The one-step smoke test (`configs/demo.yaml`) is
+kept either way, so `make verify` proves the harness works on day one.
+
+Then run your first experiment:
+
+```bash
+python -m harness exp start <hypothesis>                       # branch + worktree
+python -m harness planner brief <hypothesis> --register <you>  # a session becomes the Planner
+```
+
+The Planner fills in the scaffolded `plans/<hypothesis>.yaml` (it will not
+validate while the TODOs remain — a scaffold is not a plan), materializes
+tasks, runs `plan run` to build them, then `exp report`. You read the report
+and decide the merge.
 
 ## Documentation
 

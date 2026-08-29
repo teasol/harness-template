@@ -26,10 +26,9 @@ jobs:
       - name: Determinism gate
         run: python -m harness reproduce --spec configs/demo.yaml --times 2
 
+      # Names no plan, so it keeps gating a project whose plans have changed.
       - name: Plan validity + task/plan drift
-        run: |
-          python -m harness plan validate plans/demo-pipeline.yaml
-          python -m harness plan status plans/demo-pipeline.yaml --check
+        run: python -m harness plan check
 
       # Every task claiming 'done' must still pass its acceptance and produce
       # its declared deliverables. Iterates the board, so new tasks are gated

@@ -33,18 +33,11 @@ repos:
 
       # Specs and plans are data the harness executes — a malformed one is a
       # broken build, so it is caught at commit time rather than in CI.
-      - id: harness-plan-validate
-        name: harness plan validate
-        entry: python3 -m harness plan validate plans/demo-pipeline.yaml
-        language: system
-        files: ^plans/.*\.yaml$
-        pass_filenames: false
-
-      # Editing a plan without re-materializing leaves Workers reading
-      # instructions the Planner has already replaced.
-      - id: harness-plan-drift
-        name: harness plan/task drift
-        entry: python3 -m harness plan status plans/demo-pipeline.yaml --check
+      # Validates every plan and flags any task file left behind by a plan
+      # edit. No plan is named, so this keeps working as plans come and go.
+      - id: harness-plan-check
+        name: harness plan check
+        entry: python3 -m harness plan check
         language: system
         files: ^(plans|tasks)/.*\.yaml$
         pass_filenames: false
@@ -52,7 +45,7 @@ repos:
       # Verification must be green before code lands, not after.
       - id: harness-verify
         name: harness verify
-        entry: python3 -m harness verify --spec configs/demo.yaml
+        entry: make verify
         language: system
         files: ^(harness|src|scripts|configs)/.*$
         pass_filenames: false

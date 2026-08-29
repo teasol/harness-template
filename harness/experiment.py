@@ -85,6 +85,7 @@ class ExperimentReport:
     metrics: list[MetricValue] = dataclasses.field(default_factory=list)
     artifacts: list[str] = dataclasses.field(default_factory=list)
     caveats: list[str] = dataclasses.field(default_factory=list)
+    blockers: list[str] = dataclasses.field(default_factory=list)
     provenance: dict[str, Any] = dataclasses.field(default_factory=dict)
     run_dir: str | None = None
 
@@ -221,9 +222,17 @@ def start(
     experiment = Experiment(
         name=name, branch=branch, path=path, head=_git(path, "rev-parse", "HEAD")
     )
-    if scaffold and not experiment.plan_path.exists():
-        experiment.plan_path.parent.mkdir(parents=True, exist_ok=True)
-        experiment.plan_path.write_text(PLAN_TEMPLATE.format(name=name), encoding="utf-8")
+    if scaffold:
+        if not experiment.plan_path.exists():
+            experiment.plan_path.parent.mkdir(parents=True, exist_ok=True)
+            experiment.plan_path.write_text(PLAN_TEMPLATE.format(name=name), encoding="utf-8")
+        # Scaffold the integration spec the plan points at, so the Planner's
+        # first validation error is about the TODOs it must fill in, not about
+        # a file the scaffold neglected to create.
+        spec_path = path / "configs" / f"{name}.yaml"
+        if not spec_path.exists():
+            spec_path.parent.mkdir(parents=True, exist_ok=True)
+            spec_path.write_text(INTEGRATION_TEMPLATE.format(name=name), encoding="utf-8")
     return experiment
 
 
@@ -307,10 +316,29 @@ def build_report(
     report.dirty = report.provenance.get("git_dirty")
 
     # --- task board: is every module actually finished, and still passing? ---
-    board = load_board(exp_root / "tasks")
-    report.tasks_total = len(plan.modules)
-    report.tasks_done = sum(1 for t in board if t.is_done)
-    for task in board:
+    # Scoped to *this plan's* modules. A tasks/ directory may hold task files
+    # from other plans (the shipped demo, an earlier plan); counting those
+    # would report an experiment as complete when none of its own modules
+    # were built — and that number decides a merge.
+    board = {t.id: t for t in load_board(exp_root / "tasks")}
+    module_ids = [m.id for m in plan.modules]
+    report.tasks_total = len(module_ids)
+    report.tasks_done = sum(1 for i in module_ids if i in board and board[i].is_done)
+
+    missing: list[str] = []
+    for module_id in module_ids:
+        task = board.get(module_id)
+        if task is None:
+            missing.append(module_id)
+            report.task_results.append(
+                {
+                    "id": module_id,
+                    "status": "unmaterialized",
+                    "acceptance": "not run",
+                    "worker": None,
+                }
+            )
+            continue
         entry = {"id": task.id, "status": task.status, "acceptance": "not run"}
         if task.is_done:
             result = verify_task(task, root=exp_root, results_dir=exp_root / "results")
@@ -318,8 +346,8 @@ def build_report(
         entry["worker"] = task.worker
         report.task_results.append(entry)
 
-    if not board:
-        report.caveats.append("no tasks on the board — nothing was built through the harness")
+    if missing:
+        report.caveats.append(f"module(s) never materialized into tasks: {missing}")
     if report.tasks_done < report.tasks_total:
         report.caveats.append(
             f"{report.tasks_total - report.tasks_done} of {report.tasks_total} module(s) not done"
@@ -327,6 +355,11 @@ def build_report(
     failed = [e["id"] for e in report.task_results if e["acceptance"] == "FAILED"]
     if failed:
         report.caveats.append(f"task acceptance now failing: {failed}")
+    orphans = sorted(set(board) - set(module_ids))
+    if orphans:
+        report.caveats.append(
+            f"task file(s) not part of this plan, ignored for this report: {orphans}"
+        )
 
     # --- integration: does the assembled whole work? ---
     run_dir: Path | None = None
@@ -378,14 +411,24 @@ def build_report(
             "worktree has uncommitted changes — the reported commit does not contain them"
         )
 
-    report.merge_ready = (
-        report.integration == "PASSED"
-        and report.tasks_total > 0
-        and report.tasks_done == report.tasks_total
-        and not failed
-        and not report.dirty
-        and report.determinism != "NOT REPRODUCIBLE"
-    )
+    # Every blocker becomes a stated reason: a verdict the researcher cannot
+    # explain is not a decision aid.
+    blockers: list[str] = []
+    if report.integration != "PASSED":
+        blockers.append(f"integration did not pass ({report.integration})")
+    if report.tasks_total == 0:
+        blockers.append("the plan declares no modules")
+    if report.tasks_done != report.tasks_total:
+        blockers.append(f"{report.tasks_done}/{report.tasks_total} module(s) done")
+    if failed:
+        blockers.append(f"acceptance failing: {failed}")
+    if report.dirty:
+        blockers.append("uncommitted changes in the worktree")
+    if report.determinism == "NOT REPRODUCIBLE":
+        blockers.append("the experiment is not reproducible")
+
+    report.merge_ready = not blockers
+    report.blockers = blockers
     return report
 
 
@@ -422,6 +465,8 @@ def report_markdown(report: ExperimentReport) -> str:
         f"- Determinism: {report.determinism}",
         "",
     ]
+    if report.blockers:
+        lines += ["### Why not ready", ""] + [f"- {b}" for b in report.blockers] + [""]
 
     if report.task_results:
         lines += [
@@ -520,7 +565,19 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "",
     ]
 
-    if not experiment.plan_path.is_file():
+    plan_text = (
+        experiment.plan_path.read_text(encoding="utf-8") if experiment.plan_path.is_file() else ""
+    )
+    if plan_text and "TODO(Planner)" in plan_text:
+        lines += [
+            "## State: the plan is still a scaffold",
+            "",
+            "Every TODO in the plan is yours to replace — the goal, the report",
+            "metrics, and each module's brief, deliverables, and acceptance. Until",
+            "then `plan validate` refuses it: a scaffold is not a plan.",
+            "",
+        ]
+    elif not experiment.plan_path.is_file():
         lines += [
             "## State: no plan yet",
             "",
@@ -605,3 +662,18 @@ def planner_of(experiment: Experiment) -> str | None:
         return json.loads(marker.read_text(encoding="utf-8")).get("planner")
     except json.JSONDecodeError:
         return None
+
+
+INTEGRATION_TEMPLATE = """\
+# Integration spec for experiment '{name}' — verifies the ASSEMBLED whole once
+# every module is done. TODO(Planner): replace the placeholder step.
+name: {name}
+description: Integration check for {name}
+seed: 42
+
+steps:
+  - id: TODO-integration
+    run: ${{HARNESS_PYTHON}} -c "print('TODO: run the assembled pipeline')"
+    timeout: 60
+    checks: []
+"""

@@ -1,6 +1,11 @@
 PYTHON ?= python3
 RESULTS_DIR ?= results
 
+# Point these at your project's own spec/plan. `make drift` needs neither:
+# it checks every plan in plans/.
+SPEC ?= configs/demo.yaml
+PLAN ?= plans/demo-pipeline.yaml
+
 .DEFAULT_GOAL := help
 .PHONY: help setup lint format test verify plan tasks run reproduce drift audit experiments clean
 
@@ -22,28 +27,28 @@ test: ## Run the pytest suite
 	$(PYTHON) -m pytest
 
 verify: ## Run the verification harness (configs/demo.yaml)
-	$(PYTHON) -m harness verify --spec configs/demo.yaml --results-dir $(RESULTS_DIR)
+	$(PYTHON) -m harness verify --spec $(SPEC) --results-dir $(RESULTS_DIR)
 
 plan: ## Validate the orchestration plan and refresh task files
-	$(PYTHON) -m harness plan validate plans/demo-pipeline.yaml
-	$(PYTHON) -m harness plan materialize plans/demo-pipeline.yaml
-	$(PYTHON) -m harness plan status plans/demo-pipeline.yaml
+	$(PYTHON) -m harness plan validate $(PLAN)
+	$(PYTHON) -m harness plan materialize $(PLAN)
+	$(PYTHON) -m harness plan status $(PLAN)
 
 tasks: ## Show the worker task board
 	$(PYTHON) -m harness task list
 
 reproduce: ## Run the spec twice and compare artifact hashes (determinism gate)
-	$(PYTHON) -m harness reproduce --spec configs/demo.yaml --times 2 \
+	$(PYTHON) -m harness reproduce --spec $(SPEC) --times 2 \
 		--results-dir $(RESULTS_DIR)/reproduce
 
-drift: ## Fail if task files have drifted from the plan
-	$(PYTHON) -m harness plan status plans/demo-pipeline.yaml --check
+drift: ## Validate every plan and fail on task/plan drift
+	$(PYTHON) -m harness plan check
 
 audit: ## Re-verify every task marked done (acceptance + deliverables)
 	$(PYTHON) -m harness task verify --all --status done --results-dir $(RESULTS_DIR)/audit
 
 run: ## Run every ready task through a Worker (see configs/worker.yaml)
-	$(PYTHON) -m harness plan run plans/demo-pipeline.yaml
+	$(PYTHON) -m harness plan run $(PLAN)
 
 experiments: ## List experiment branches/worktrees
 	$(PYTHON) -m harness exp list

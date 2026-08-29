@@ -8,6 +8,7 @@ exit codes, not its Python API. Exit codes are therefore asserted explicitly —
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -279,3 +280,60 @@ def test_unknown_command_exits_two() -> None:
     with pytest.raises(SystemExit) as excinfo:
         main(["frobnicate"])
     assert excinfo.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# plan check: gates a project's plans without naming one
+
+
+def test_plan_check_passes_on_the_shipped_plan(capsys) -> None:
+    assert main(["plan", "check"]) == 0
+    assert "demo-pipeline.yaml" in capsys.readouterr().out
+
+
+def test_plan_check_on_an_empty_project(tmp_path: Path, capsys) -> None:
+    """A fresh project has no plans yet; that is not a failure."""
+    assert main(["plan", "check", "--plans-dir", str(tmp_path / "plans")]) == 0
+    assert "no plans" in capsys.readouterr().out
+
+
+def test_plan_check_reports_drift(tmp_path: Path, capsys) -> None:
+    import yaml
+
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    tasks = tmp_path / "tasks"
+    shutil.copy("plans/demo-pipeline.yaml", plans / "demo-pipeline.yaml")
+    main(["plan", "materialize", str(plans / "demo-pipeline.yaml"), "--tasks-dir", str(tasks)])
+    capsys.readouterr()
+    assert main(["plan", "check", "--plans-dir", str(plans), "--tasks-dir", str(tasks)]) == 0
+
+    stale = tasks / "stats.task.yaml"
+    data = yaml.safe_load(stale.read_text(encoding="utf-8"))
+    data["task"]["brief"] = "an instruction the plan no longer gives"
+    stale.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    assert main(["plan", "check", "--plans-dir", str(plans), "--tasks-dir", str(tasks)]) == 1
+    assert "DRIFT" in capsys.readouterr().err
+
+
+def test_plan_status_counts_only_this_plans_modules(tmp_path: Path, capsys) -> None:
+    """Foreign task files must not be counted as this plan's progress."""
+    tasks = tmp_path / "tasks"
+    tasks.mkdir()
+    # A finished task belonging to some other plan.
+    (tasks / "stranger.task.yaml").write_text(
+        "task:\n  id: stranger\n  plan: elsewhere\n  status: done\n  acceptance:\n    steps: []\n",
+        encoding="utf-8",
+    )
+    assert main(["plan", "status", "plans/demo-pipeline.yaml", "--tasks-dir", str(tasks)]) == 0
+    out = capsys.readouterr().out
+    assert "Progress: 0/2 done" in out
+    assert "not in this plan" in out
+
+
+def test_task_list_can_filter_by_plan(tasks_dir: str, capsys) -> None:
+    assert main(["task", "list", "--tasks-dir", tasks_dir, "--plan", "demo-pipeline"]) == 0
+    assert "data-gen" in capsys.readouterr().out
+    assert main(["task", "list", "--tasks-dir", tasks_dir, "--plan", "nope"]) == 0
+    assert "no tasks for plan" in capsys.readouterr().out

@@ -224,8 +224,22 @@ def _validate_steps(module_id: str, steps: list[Step]) -> None:
                 )
 
 
+#: Marker written into scaffolded plans by ``harness exp start``. A scaffold
+#: is structurally valid but says nothing, so validating one must fail — or the
+#: Planner is told its placeholder is a plan.
+SCAFFOLD_MARKER = "TODO(Planner)"
+
+
 def load_plan(path: str | Path) -> Plan:
     """Load and validate a plan from a YAML file."""
+    text = Path(path).read_text(encoding="utf-8") if Path(path).is_file() else ""
+    if SCAFFOLD_MARKER in text:
+        raise PlanError(
+            f"{path} is still the scaffold, not a plan: it contains "
+            f"'{SCAFFOLD_MARKER}'. Replace every TODO — the goal, the report "
+            "metrics, and each module's brief, deliverables, and acceptance — "
+            "then validate again."
+        )
     raw = _load_yaml(path, PlanError)
     if "plan" not in raw or not isinstance(raw["plan"], dict):
         raise PlanError("plan file must have a top-level 'plan:' mapping")
