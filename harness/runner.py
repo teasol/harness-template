@@ -21,8 +21,17 @@ _RUN_ENV_KEYS = (
     "HARNESS_RUN_ID",
     "HARNESS_PYTHON",
     "HARNESS_SEED",
+    "HARNESS_DIR",
     "PROJECT_PYTHON",
 )
+
+
+def _harness_dir(root: Path) -> Path:
+    """`<root>/.harness` when it exists, else the root itself."""
+    from harness.paths import get_harness_dir
+
+    candidate = get_harness_dir(root)
+    return candidate if candidate.is_dir() else root
 
 
 def _project_python(root: Path) -> str:
@@ -105,6 +114,11 @@ class Runner:
         # Steps must not assume a `python` binary exists (Debian/Ubuntu ship only
         # `python3`); they invoke the very interpreter running the harness.
         os.environ["HARNESS_PYTHON"] = sys.executable or "python3"
+        # Where the harness keeps its own files. `init` puts scaffolded specs
+        # and their scripts under `.harness/` so they cannot collide with the
+        # project's own `configs/` and `scripts/`; a spec that ships with the
+        # harness has to be able to find them without assuming a layout.
+        os.environ["HARNESS_DIR"] = str(_harness_dir(self.root))
         # HARNESS_PYTHON is the harness's own interpreter and usually has none
         # of the project's dependencies — a step that needs torch must not
         # reach for it. PROJECT_PYTHON is the project's, when it declares one.

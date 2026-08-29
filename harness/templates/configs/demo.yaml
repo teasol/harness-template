@@ -6,7 +6,7 @@ seed: 42
 
 steps:
   - id: generate-output
-    run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/output.json" --seed ${HARNESS_SEED}
+    run: ${HARNESS_PYTHON} ${HARNESS_DIR}/scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/output.json" --seed ${HARNESS_SEED}
     timeout: 120
     checks:
       - type: file_exists

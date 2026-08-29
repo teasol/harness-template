@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -96,3 +97,36 @@ def test_find_project_root(tmp_path: Path) -> None:
 
     found = find_project_root(nested)
     assert found == project_dir.resolve()
+
+
+def test_the_quickstart_actually_runs_on_a_fresh_project(tmp_path: Path) -> None:
+    """`harness init` then `harness verify --spec configs/demo.yaml`, verbatim.
+
+    Two things had quietly broken this, and both are exactly what a first
+    impression is made of: `init` writes specs under `.harness/` so they cannot
+    collide with a project's own `configs/`, but `--spec configs/demo.yaml` did
+    not look there; and the demo spec was shipped without the script it runs.
+    """
+    from harness.cli import main
+
+    assert main(["init", str(tmp_path), "--no-setup"]) == 0
+    # The script the demo spec runs must actually be installed.
+    assert (tmp_path / ".harness" / "scripts" / "demo_step.py").is_file()
+
+    cwd = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        assert main(["verify", "--spec", "configs/demo.yaml"]) == 0
+    finally:
+        os.chdir(cwd)
+
+
+def test_spec_path_falls_back_to_the_harness_dir(tmp_path: Path) -> None:
+    from harness.cli import _resolve_spec_path
+
+    (tmp_path / ".harness" / "configs").mkdir(parents=True)
+    (tmp_path / ".harness" / "configs" / "x.yaml").write_text("name: x\n", encoding="utf-8")
+    resolved = _resolve_spec_path("configs/x.yaml", tmp_path)
+    assert resolved.endswith(".harness/configs/x.yaml")
+    # An explicit path that exists is never rewritten.
+    assert _resolve_spec_path("configs/missing.yaml", tmp_path) == "configs/missing.yaml"

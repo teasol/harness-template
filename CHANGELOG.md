@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The quickstart did not work.** `harness init` followed by
+  `harness verify --spec configs/demo.yaml` — the first two commands in the
+  README — failed on every fresh project, for two reasons: `init` writes specs
+  under `.harness/` so they cannot collide with a project's own `configs/`, but
+  `--spec` never looked there (tasks and plans already resolved both ways), and
+  the demo spec was shipped without the script it runs. Specs now fall back to
+  the harness config directory, `init` installs the demo script, and the runner
+  exports `${HARNESS_DIR}` so a shipped spec can find its own files without
+  assuming a layout. Covered by a test that runs the quickstart verbatim.
+
 ### Added
 
 - **`harness init` notices when it lands on an existing codebase.** Most

@@ -48,6 +48,7 @@ from harness import project as project_mod
 from harness import task as task_mod
 from harness.experiment import ExperimentError
 from harness.paths import (
+    get_configs_dir,
     get_plans_dir,
     get_tasks_dir,
 )
@@ -90,9 +91,28 @@ def _resolve_plans_dir(plans_dir: str, root: str | Path = ".") -> str:
     return plans_dir
 
 
+def _resolve_spec_path(spec: str, root: str | Path = ".") -> str:
+    """Let `configs/x.yaml` find `.harness/configs/x.yaml`.
+
+    `init` writes specs under `.harness/` so they cannot collide with a
+    project's own `configs/`, but the README, the Makefile and every habit say
+    `configs/demo.yaml`. Tasks and plans already resolve both ways; specs did
+    not, so the first command in the quickstart failed on a fresh project.
+    """
+    candidate = Path(spec)
+    if candidate.is_absolute() or candidate.exists():
+        return spec
+    parts = candidate.parts
+    if len(parts) >= 2 and parts[0] == "configs":
+        fallback = get_configs_dir(root).joinpath(*parts[1:])
+        if fallback.is_file():
+            return str(fallback)
+    return spec
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     try:
-        spec = load_spec(args.spec)
+        spec = load_spec(_resolve_spec_path(args.spec, args.root))
     except SpecError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -117,7 +137,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 def cmd_reproduce(args: argparse.Namespace) -> int:
     try:
-        spec = load_spec(args.spec)
+        spec = load_spec(_resolve_spec_path(args.spec, args.root))
     except SpecError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

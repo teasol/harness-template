@@ -19,8 +19,6 @@ python -m harness status     # reads the real state, names the next command
 
 ### 0. Quickstart
 
-Install the harness package into your Python environment and initialize it in your project directory:
-
 ```bash
 # 1. Install Research Harness:
 pip install git+https://github.com/teasol/harness-template.git
@@ -31,7 +29,28 @@ harness init                                   # scaffolds AGENTS.md, agents/, c
 harness verify --spec configs/demo.yaml        # prove it works here
 ```
 
-`harness init` scaffolds all necessary agent role contracts (`agents/`), platform configurations (`configs/`), and prompts you to configure each agent tier — you can select **Manual** (copy-pasting briefings into an agent session yourself) or automated **AI platforms** (Antigravity, Claude Code, Codex, opencode, etc.). You can change this selection at any time later with `harness setup`.
+`harness init` scaffolds the agent role contracts (`agents/`), platform configurations (`configs/`), and prompts you to configure each agent tier — **Manual** (you paste briefings into an agent session yourself) or an automated **AI platform** (Antigravity, Claude Code, Codex, opencode, …). Change it later with `harness setup`.
+
+**Adopting an existing project?** That is the normal case, and `harness init`
+notices: it records how the harness arrived — the commit, and how many source
+files predate it, so "not verified yet" has a boundary instead of being a
+feeling — and prints the order that works.
+
+```bash
+harness project init                            # what a Planner must know here
+harness planner create <name> --model <model>   # a Planner that outlives one experiment
+harness exp start <name> --planner <name>       # and it plans the rest
+```
+
+The first Planner's briefing opens with the situation: none of this code is
+covered by a contract or an acceptance check yet, and making it verifiable is
+its first experiment. **The harness does not prescribe how to modularize an
+existing codebase** — deciding the decomposition is the Planner's job, and a
+pipeline baked into the tool would be wrong for the next project anyway. The
+briefing supplies only what generalizes: the conditions a module boundary has
+to satisfy, and the ordering principle that in research code the artifact of
+record is a *measurement*, so pin the numbers before anything moves. See
+[docs/experiments.md](docs/experiments.md#adopting-an-existing-project).
 
 ### 1. Start an experiment — and its Planner
 
@@ -105,14 +124,42 @@ Once you agree on the question, the Planner writes the plan and drives it:
 ```bash
 python -m harness plan validate plans/your-experiment-name.yaml
 python -m harness plan materialize plans/your-experiment-name.yaml   # one task per module
+python -m harness plan approve plans/your-experiment-name.yaml --by you
 python -m harness plan run plans/your-experiment-name.yaml           # Workers build them
 ```
 
+**A plan is a proposal until you approve it, and `plan run` requires that.**
+Approving prints what it commits you to — the module list and the worst-case
+agent time, which is otherwise invisible: two modules at six attempts and a
+30-minute cap is a six-hour ceiling. The approval is fingerprinted against the
+plan's contents, so editing the plan lapses it.
+
 `plan run` hands each module to a Worker in dependency order, checks acceptance
 **and** declared deliverables, and retries with the actual failure output — up
-to 6 attempts. A module that still fails is marked `blocked` and handed back to
-the Planner; that usually means the brief or the contract is wrong, not that
+to 6 attempts. It stops early when it stops making progress: three attempts in
+a row that change no deliverable hand back to the Planner rather than spend the
+rest of the cap repeating one failure. A module that fails is `blocked` and
+handed back; that usually means the brief or the contract is wrong, not that
 the Worker is bad.
+
+A module marked `executor: planner` is never handed to a Worker. Work that runs
+an experiment or reads a log gains nothing from Worker isolation, and briefing
+an agent to do it costs more than doing it — `plan run` skips those and names
+them as yours.
+
+**Watching a long run.** Steps and Worker attempts buffer their output until
+they exit, so from a second terminal:
+
+```bash
+python -m harness progress --watch
+```
+
+```text
+worker primary7-runner (module 1/2 · attempt 2/6) · running 12m30s · 17m30s before the cap
+```
+
+A heartbeat that stopped ticking is reported as **dead**, not slow — the
+distinction you actually need during a long wait.
 
 **Agents are manual until you configure them** — out of the box the harness
 writes a briefing and stops. `make agents-setup` (or `harness setup`) picks the
@@ -179,6 +226,12 @@ one cannot be judged.
 | `NOT REPRODUCIBLE` | Something is unseeded. See [docs/reproducibility.md](docs/reproducibility.md). |
 | `planner run` says **NEEDS_HUMAN** | No question is recorded. Record one, or drive the experiment interactively. |
 | `cost: not measured` | Expected. The harness does not estimate token spend. |
+| `plan run` says **this plan has never been approved** | Read it, then `harness plan approve <plan> --by <you>`. Editing a plan lapses its approval. |
+| A task aborted: **the Worker changed the harness** | Containment did its job. Acceptance under a rewritten harness proves nothing. Review the listed files and revert. |
+| A task stopped after **3 attempts changed no deliverable** | The Worker is wedged, not slow. The brief or the acceptance is wrong — that is yours to fix. |
+| A Worker exited in **under 5 seconds** | A misconfigured command, not a coding problem. `harness setup --check`. |
+| `plan run` printed **0 task(s) run** | It now lists why each module is not running — blocked, waiting, claimed, or `executor: planner` (yours). |
+| A long run looks hung | `harness progress --watch` from another terminal. |
 
 ## Why
 
@@ -193,6 +246,9 @@ then builds an agent workflow on top of it:
   not a gate.
 - **Measured, not narrated** — an agent says *where* a number lives; the
   harness reads the artifact. No result reaches you on an agent's word.
+- **Contained** — a Worker that edits the harness, or a tracked file it never
+  declared, fails the task. Acceptance run under a harness the agent just
+  rewrote proves nothing, so this is enforced rather than asked.
 - **Human at the end** — the harness reports readiness and stops. Which
   hypothesis enters the record is your decision, and the one thing here that is
   deliberately not automated.
@@ -220,7 +276,8 @@ An experiment is one hypothesis or investigation branch in its own git worktree,
 several run side by side without colliding.
 
 ```bash
-python -m harness exp start your-experiment-name                   # creates + briefs the Planner
+python -m harness planner create <name> --model <model>            # a Planner across experiments
+python -m harness exp start your-experiment-name --planner <name>  # creates + briefs the Planner
 python -m harness exp question your-experiment-name --set "..."   # once you have settled it
 python -m harness planner brief your-experiment-name              # current state, any time
 python -m harness planner run your-experiment-name                # or spawn one unattended
@@ -234,6 +291,14 @@ acceptance re-verified, determinism, the exact commit to merge, and an explicit
 list of what went **unverified** — then extracts the metrics you asked for from
 real run artifacts. `READY TO MERGE` means the harness found nothing wrong, not
 that the result is interesting.
+
+A Planner registered with `planner create` outlives one experiment: it carries
+its model — so a report is never "model not recorded" — and the notes it wrote
+in earlier runs, which is the hour it spent learning the project not being paid
+twice. `harness planner note <name> --add "..."` records something the next run
+should not have to rediscover. Durable project policy belongs in
+`configs/project.yaml` instead, which you own: one is a lab notebook, the other
+is the rules.
 
 Reports are self-contained by rule: a plan that reads another experiment's
 results is rejected, because comparing experiments is your job, done by reading
@@ -283,6 +348,7 @@ read stale state.
 
 ```bash
 python -m harness setup --list      # platforms available
+python -m harness setup --check     # can each tier actually be driven?
 python -m harness setup             # interactive, or:
 python -m harness setup \
   --planner-platform claude --planner-model claude-opus-5 --planner-effort high \
@@ -294,6 +360,11 @@ fully specified, so a small fast model usually suffices; reserving the
 expensive one for planning is the whole economic argument for splitting them.
 Both tiers land in `configs/agents.yaml` side by side, and both are recorded in
 the report, so which model built what is auditable rather than merely intended.
+
+`setup --check` sends one cheap prompt to each configured tier and reports
+whether the agent actually received it. A preset that does not match the
+installed CLI otherwise fails silently — six attempts in under a second each,
+with the agent never having seen the task.
 
 Platform knowledge lives in `configs/agent-platforms.yaml` as **data** — adding
 your lab's tool, or a local model, is an entry there, not a change to
@@ -318,7 +389,8 @@ flowchart LR
 
 ```yaml
 name: my-experiment
-seed: 42
+seed: 42                    # exports PYTHONHASHSEED; does NOT change your numbers
+deterministic_math: false   # opt in to CUBLAS_WORKSPACE_CONFIG — this DOES change them
 steps:
   - id: train
     run: ${HARNESS_PYTHON} scripts/train.py --seed ${HARNESS_SEED}
@@ -336,7 +408,11 @@ A task's acceptance is a spec run by this same Runner, and an experiment's
 report is that machinery run over a whole plan. One engine, three altitudes.
 
 Every report records its provenance — commit, dirty flag, interpreter,
-platform, seed — so a result found months later can be traced back to code.
+platform, seed, and every environment variable the harness injected — so a
+result found months later can be traced back to code. `seed:` seeds and nothing
+more: deterministic GPU math constrains kernel selection and therefore changes
+results, so it is opt-in via `deterministic_math` rather than something a seed
+turns on behind your back.
 `harness reproduce` runs a spec twice and diffs a hash manifest of **every**
 artifact, and refuses to pass a spec that produced nothing to compare.
 
@@ -347,6 +423,7 @@ Full reference: [docs/verification.md](docs/verification.md) ·
 
 ```bash
 make status        # where am I, what next
+python -m harness progress --watch   # what is running right now (second terminal)
 make agents-setup  # choose platform / model / reasoning level per tier
 make verify        # run the verification spec end-to-end
 make reproduce     # run it twice and diff every artifact (determinism gate)
@@ -380,15 +457,22 @@ harness-template/
 │   ├── report.py           #   JSON/Markdown report generation
 │   ├── reproduce.py        #   Determinism gate: repeat a spec, diff artifacts
 │   ├── reproducibility.py  #   Seeding, hashing, run provenance
-│   ├── plan.py             #   Plans: module DAGs, contracts, report spec
+│   ├── plan.py             #   Plans: module DAGs, contracts, approval, report spec
 │   ├── task.py             #   Task lifecycle, board, deliverable enforcement
 │   ├── worker.py           #   Agent adapters + the verify-and-retry loop
+│   ├── guard.py            #   Containment: the harness and undeclared files are off-limits
+│   ├── heartbeat.py        #   Where a run is right now, readable from another terminal
 │   ├── experiment.py       #   Experiments: worktrees, briefings, reports
+│   ├── project.py          #   What a Planner must know about THIS project
+│   ├── planners.py         #   Planners that outlive one experiment, and their notes
+│   ├── adoption.py         #   Landing on a codebase that already exists
 │   ├── setup.py            #   First-run choice of platform / model / effort
-│   └── cli.py              #   status | setup | verify | reproduce | plan | task | exp | planner
-├── configs/                # Specs, and which agent runs each tier
-│   ├── agents.yaml         #   planner + worker: platform, model, effort
-│   └── agent-platforms.yaml#   Platform presets (data, not code)
+│   └── cli.py              #   status | progress | setup | verify | plan | task | exp | planner | project
+├── .harness/               # Harness state that is not project code
+│   ├── configs/agents.yaml #   planner + worker: platform, model, effort
+│   ├── configs/project.yaml#   authoritative docs, report format, conventions
+│   ├── planners/           #   registered Planners and what they have learned
+│   └── adoption.json       #   how the harness arrived, if code predated it
 ├── src/                    # Project code (demo_pipeline ships as the example)
 ├── scripts/                # Runnable steps (bootstrap, demo, instantiate)
 ├── tests/                  # Pytest suite (incl. end-to-end harness tests)
