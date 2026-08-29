@@ -30,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It covers every stage: not yet instantiated, no experiments, plan still a
   scaffold, tasks not materialized, modules building, a worker blocked, ready
   to report. A newcomer never has to know where they are. Also `make status`.
-- **`docs/getting-started.md`** — a walkthrough for a researcher who has never
-  seen this repository: question in, merge decision out.
+- A **getting-started walkthrough at the top of `README.md`** for a researcher
+  who has never seen this repository: question in, merge decision out.
 
 - **Worker adapters (Tier 2 → Tier 3).** `harness task run --id <id>` invokes a
   Worker, verifies acceptance *and* deliverables, and retries with the real
@@ -85,9 +85,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose plans have changed. `make drift`, the pre-commit hook, and CI now use it.
 - `harness task list --plan <name>`, plus a PLAN column, so a board holding
   more than one plan's tasks is legible.
-- `scripts/instantiate.py --drop-demo` removes the shipped orchestration
-  example (plan, integration spec, task board, modules) while keeping the
-  one-step smoke test, so `make verify` still works on day one.
+- `scripts/instantiate.py` now **always** removes the shipped orchestration
+  example: a project should not begin holding someone else's finished task
+  board, so it is not a choice. `--exam-demo` runs that example end to end
+  (plan → board → acceptance → integration → determinism) so the flow can be
+  seen on real output before it goes. The one-step smoke test is kept, so
+  `make verify` still works on day one.
 - `Makefile` gained `SPEC` and `PLAN` variables; a project points them at its
   own files instead of editing targets.
 

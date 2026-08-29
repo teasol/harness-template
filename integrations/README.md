@@ -29,20 +29,21 @@ So the entire shim, for any tool, is:
 
 ### As a plain prompt
 
-Paste this into a fresh session:
+Say this to a fresh session — the agent runs the command itself, so there is
+nothing to copy back and forth:
 
 ```
-You are being registered as a Planner for a research experiment.
+You are the Planner for the <experiment> experiment in <absolute project path>.
 
-Project: <absolute path to the project>
-Experiment: <experiment name>
-
-Run this in the project directory and follow it exactly:
-
-    python -m harness planner brief <experiment> --register <your-label>
+Run `python -m harness planner brief <experiment> --register <your-label>`
+and follow it exactly. Re-run it whenever you need current state.
 
 Do not write module code yourself, and do not merge anything.
 ```
+
+The briefing is a command rather than a pasted block on purpose: a paste is a
+snapshot that goes stale the moment a Worker finishes, while a command returns
+the board as it is now.
 
 ### As a file-based command
 

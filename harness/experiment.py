@@ -632,6 +632,11 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "cap. Configure the adapter in configs/worker.yaml; the default writes a",
         "briefing for a human to hand to a Worker session.",
         "",
+        "## Staying oriented",
+        "",
+        "Re-run this command at any time for the current board — it reads real",
+        "state, so it never goes stale. `harness status` gives the short version.",
+        "",
         "## When you are done",
         "",
         f"Run `harness exp report {experiment.name}`. It exits non-zero until the",
@@ -801,7 +806,8 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
     if not instantiated:
         status.headline = "This is still the template — make it your project first."
         status.next_steps = [
-            "python3 scripts/instantiate.py --name <your-project> --drop-demo",
+            "python3 scripts/instantiate.py --exam-demo   # watch the example run first",
+            "python3 scripts/instantiate.py --name <your-project>",
             'git add -A && git commit -m "chore: instantiate from harness-template"',
             "make setup && make verify && make test",
         ]

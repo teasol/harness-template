@@ -725,7 +725,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     status = exp_mod.project_status(args.root)
     print(f"Project: {status.project_name}")
     if status.demo_present:
-        print("  (the shipped demo is still here — see scripts/instantiate.py --drop-demo)")
+        print("  (the shipped demo is here — `instantiate.py --exam-demo` runs it)")
     print()
     print(status.headline)
 
@@ -741,5 +741,5 @@ def cmd_status(args: argparse.Namespace) -> int:
     for step in status.next_steps:
         print(f"  {step}")
     print()
-    print("New here? docs/getting-started.md walks through a whole experiment.")
+    print("New here? README.md walks through a whole experiment, start to finish.")
     return 0

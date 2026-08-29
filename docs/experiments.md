@@ -1,6 +1,6 @@
 # Experiments reference (Tier 1 ↔ Tier 2)
 
-> New here? Start with [getting-started.md](getting-started.md).
+> New here? Start with the walkthrough at the top of [README.md](../README.md).
 
 An **experiment** is one research hypothesis, developed on its own branch in
 its own git worktree. The Planner works there from start to finish; the
@@ -65,6 +65,11 @@ its output:
 ```bash
 python -m harness planner brief <name> --register <label>
 ```
+
+**Tell the agent to run it; do not run it and paste the output.** Any coding
+agent with shell access can execute it, and re-run it whenever it needs current
+state. A pasted briefing is a snapshot that goes stale as soon as a Worker
+finishes; the command always returns the board as it is now.
 
 It prints the role contract to read, the worktree and branch owned, the plan's
 state, the module board, the commands to run, and how to hand back. `--register`

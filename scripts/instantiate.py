@@ -3,17 +3,21 @@
 
 Usage::
 
-    python scripts/instantiate.py --name my-awesome-project [--drop-demo]
+    python scripts/instantiate.py --exam-demo          # watch the demo run first
+    python scripts/instantiate.py --name my-project    # then make it yours
 
-Replaces every occurrence of ``harness-template`` with the new project slug in
-the key text files, optionally removes the shipped orchestration demo, then
-prints next steps.
+Instantiating **always** removes the shipped orchestration demo. The demo
+exists to develop and test the template itself; a project created from it
+would inherit the demo's *finished task board* — someone else's completed work
+sitting on your board, counted in no one's progress and cluttering every
+listing. Nobody wants that in a real project, so it is not a choice.
 
-The demo (``plans/demo-pipeline.yaml`` and the modules it builds) is a working
-example, but a new project inherits its *finished task board* — someone else's
-completed work sitting on your board. ``--drop-demo`` removes it. The one-step
-smoke test (``configs/demo.yaml``) is kept either way, so ``make verify`` still
-proves the harness itself works on day one.
+Read it before it goes: ``--exam-demo`` runs the whole example end to end
+(plan → tasks → workers → integration) and prints what happened, so you can
+see the flow on real output rather than inferring it from documentation.
+
+The one-step smoke test (``configs/demo.yaml`` + ``scripts/demo_step.py``) is
+kept, so ``make verify`` still proves the harness works on day one.
 """
 
 from __future__ import annotations
@@ -21,10 +25,11 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+import sys
 from pathlib import Path
 
 #: The orchestration example: a plan, its integration spec, its task board,
-#: and the modules it builds. Removed by --drop-demo.
+#: and the modules it builds. Always removed on instantiation.
 DEMO_PATHS = [
     "plans/demo-pipeline.yaml",
     "configs/demo-pipeline.yaml",
@@ -56,13 +61,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--name", required=True, help="New project name (e.g. my-awesome-project)")
+    parser.add_argument("--name", help="New project name (e.g. my-awesome-project)")
     parser.add_argument(
-        "--drop-demo",
+        "--exam-demo",
         action="store_true",
-        help="Remove the shipped orchestration demo (plan, integration spec, task board, modules)",
+        help="Run the shipped demo end to end and exit, without instantiating",
     )
     args = parser.parse_args()
+
+    if args.exam_demo:
+        raise SystemExit(_exam_demo(Path(__file__).resolve().parent.parent))
+    if not args.name:
+        parser.error("--name is required (or use --exam-demo to watch the demo first)")
 
     new_name = slugify(args.name)
     root = Path(__file__).resolve().parent.parent
@@ -81,16 +91,18 @@ def main() -> None:
     for rel in changed:
         print(f"  - {rel}")
 
-    if args.drop_demo:
-        removed = _drop_demo(root)
-        print(f"\nRemoved the orchestration demo ({len(removed)} path(s)):")
-        for rel in removed:
-            print(f"  - {rel}")
-        print(
-            "  configs/demo.yaml and scripts/demo_step.py were kept: `make verify`",
-            "  still proves the harness works before you write anything.",
-            sep="\n",
-        )
+    removed = _drop_demo(root)
+    print(f"\nRemoved the orchestration demo ({len(removed)} path(s)):")
+    for rel in removed:
+        print(f"  - {rel}")
+    print(
+        "  It was the template's own worked example; a project should not start",
+        "  with someone else's finished task board. Run --exam-demo on a fresh",
+        "  clone of the template if you want to watch it again.",
+        "  configs/demo.yaml and scripts/demo_step.py were kept, so `make verify`",
+        "  still proves the harness works before you write anything.",
+        sep="\n",
+    )
 
     steps = [
         "  1. Review the diff and commit.",
@@ -101,15 +113,51 @@ def main() -> None:
         "       python -m harness exp start <hypothesis-name>",
         "       python -m harness planner brief <hypothesis-name> --register <label>",
     ]
-    if not args.drop_demo:
-        steps.insert(
-            0,
-            "  0. The shipped demo's finished tasks are on your board"
-            " (`harness task list`).\n"
-            "     Re-run with --drop-demo to remove them, or keep them as a"
-            " worked example.",
-        )
     print("\nNext steps:", *steps, sep="\n")
+
+
+def _exam_demo(root: Path) -> int:
+    """Run the shipped example end to end so the flow can be seen, not inferred."""
+    plan = root / "plans" / "demo-pipeline.yaml"
+    spec = root / "configs" / "demo-pipeline.yaml"
+    if not plan.is_file():
+        print(
+            "The demo is not present in this checkout — it is removed on"
+            " instantiation.\nClone the template itself to run it.",
+        )
+        return 1
+
+    steps = [
+        ("The plan the Planner would write", ["plan", "validate", str(plan)]),
+        ("Its module board", ["task", "list"]),
+        ("Re-verifying every finished module", ["task", "verify", "--all", "--status", "done"]),
+        ("The integration check of the assembled whole", ["verify", "--spec", str(spec)]),
+        ("Determinism: same inputs, same artifacts", ["reproduce", "--spec", str(spec)]),
+    ]
+    from harness.cli import main as harness_main
+
+    for index, (title, argv) in enumerate(steps, start=1):
+        print(f"\n{'=' * 70}\n{index}. {title}\n   $ harness {' '.join(argv)}\n{'=' * 70}")
+        code = harness_main(argv)
+        if code != 0:
+            print(f"\nDemo step {index} failed (exit {code}).", file=sys.stderr)
+            return code
+
+    print(
+        f"\n{'=' * 70}",
+        "That is the whole shape: a plan declares modules with contracts and",
+        "machine-checkable acceptance; tasks carry them to Workers; the harness",
+        "judges the result; the integration spec checks the assembled whole; the",
+        "determinism gate proves it reproduces.",
+        "",
+        "Your project runs the same flow inside an experiment worktree:",
+        "  harness exp start <hypothesis>",
+        "  harness planner brief <hypothesis> --register <label>",
+        "",
+        "Ready? python scripts/instantiate.py --name <your-project>",
+        sep="\n",
+    )
+    return 0
 
 
 def _drop_demo(root: Path) -> list[str]:

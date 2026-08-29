@@ -4,8 +4,8 @@ Ground rules for AI coding agents (and humans) working in repositories created
 from this template. Read this before making any change.
 
 Lost? `python -m harness status` reads the repository's real state and names
-the next action. [docs/getting-started.md](docs/getting-started.md) is the
-human walkthrough.
+the next action. The walkthrough at the top of
+[README.md](README.md) is the human version.
 
 ## Repository purpose
 

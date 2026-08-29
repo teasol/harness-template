@@ -345,4 +345,4 @@ def test_status_command_runs_and_points_somewhere(capsys) -> None:
     out = capsys.readouterr().out
     assert "Project:" in out
     assert "Next:" in out
-    assert "getting-started" in out
+    assert "README.md" in out

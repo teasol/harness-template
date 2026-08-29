@@ -1,6 +1,6 @@
 # Orchestration reference
 
-> New here? Start with [getting-started.md](getting-started.md).
+> New here? Start with the walkthrough at the top of [README.md](../README.md).
 
 This document covers Tier 2 ↔ Tier 3. The tier above — experiments, worktrees,
 and the report a researcher reads to decide a merge — is in

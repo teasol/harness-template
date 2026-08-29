@@ -3,24 +3,135 @@
 Standard agent-first harness engineering template for **reproducible research**
 and **automated verification workflows**.
 
-## Start here
+## Getting started
 
-New to this repository? Two things:
+You state a research question. An AI **Planner** breaks it into modules, hands
+each to an AI **Worker**, and verifies the result. Every experiment lives on its
+own git branch. When one finishes you get a report — did integration pass, which
+modules were built, does it reproduce, and the numbers you asked for — and **you**
+decide whether to merge. The harness measures; it never decides.
+
+Lost at any point:
 
 ```bash
-python -m harness status     # reads the actual state, tells you what to do next
+python -m harness status     # reads the real state, names the next command
 ```
 
-and [**docs/getting-started.md**](docs/getting-started.md), which walks a
-researcher through one complete experiment — question in, merge decision out.
+### 0. See it work, then make it yours
 
-`harness status` works at every stage, so you never have to remember where you
-are in the flow.
+```bash
+python scripts/instantiate.py --exam-demo      # watch the whole flow on real output
+python scripts/instantiate.py --name my-project
+git add -A && git commit -m "chore: instantiate from harness-template"
+make setup && make verify && make test
+```
 
-Every lab project should be created from this repository as a template. It ships
-with a small, dependency-light verification harness that turns declarative YAML
-specs into executable, checkable, report-producing pipelines — runnable locally
-via `make` and enforced in CI.
+`--exam-demo` runs the shipped example end to end — plan, board, acceptance,
+integration, determinism — so you see the shape before adopting it.
+Instantiating then removes that example: a project should not begin holding
+someone else's finished task board.
+
+### 1. Start an experiment
+
+An experiment is **one question**:
+
+```bash
+python -m harness exp start sparse-attention
+```
+
+This creates the branch `exp/sparse-attention` and a separate working directory
+(a git *worktree*) under `.experiments/`. Several experiments coexist without
+disturbing each other or your main checkout. It also writes a plan skeleton
+full of `TODO`s — which is not yet a plan, and `plan validate` says so.
+
+### 2. Hand it to a Planner
+
+Open an agent session and tell it, in your own words:
+
+> You are the Planner for the `sparse-attention` experiment in `<path>`.
+> Run `python -m harness planner brief sparse-attention --register session-01`
+> and follow it exactly.
+>
+> The question: does keeping only the top 10% of attention weights preserve
+> most of the attention mass? Report the retained mass and the fraction kept.
+
+The agent runs that command itself and gets its own briefing — which worktree
+it owns, the rules, the current board, what to do next. Nothing to copy and
+paste, and it can re-run the command whenever it needs current state.
+
+State what you want reported in plain language. The Planner records **where
+each number will come from**; the harness extracts the values from real run
+artifacts. A number in your report was measured, never asserted.
+
+### 3. Let the Planner work
+
+It writes the plan, then:
+
+```bash
+python -m harness plan validate plans/sparse-attention.yaml
+python -m harness plan materialize plans/sparse-attention.yaml   # one task per module
+python -m harness plan run plans/sparse-attention.yaml           # Workers build them
+```
+
+`plan run` hands each module to a Worker, checks the result, and retries with
+the actual failure output — up to 6 attempts. A module that still fails is
+marked `blocked` and handed back to the Planner; that usually means the brief
+or the contract is wrong, not that the Worker is bad.
+
+Workers are configured in `configs/worker.yaml`. The default writes a briefing
+file for you to hand to another session; point it at your coding agent's
+headless mode to automate. The harness names no vendor.
+
+### 4. Read the report and decide
+
+```bash
+python -m harness exp report sparse-attention --determinism --save
+```
+
+```
+[sparse-attention] READY TO MERGE
+  integration: PASSED
+  tasks:       2/2 done
+  determinism: REPRODUCIBLE
+  commit:      1ebd0bed...
+  retained_mass: 0.198128
+```
+
+**`READY TO MERGE` means the harness could not find anything wrong — not that
+the result is interesting.** That judgement is yours. `NOT READY` lists exactly
+what is missing.
+
+Then, if you want it:
+
+```bash
+git merge exp/sparse-attention
+```
+
+Nothing merges on your behalf. Decide against an experiment and simply don't
+merge — the branch remains, so the attempt stays on the record.
+
+### Running several at once
+
+```bash
+python -m harness exp start baseline
+python -m harness exp start sparse-attention
+python -m harness exp list
+```
+
+Each report stands on its own: an experiment may not read another's results,
+and the harness rejects a plan that tries. Comparing them is **your** job, done
+by reading the finished reports — a result that only makes sense beside another
+one cannot be judged.
+
+### When something goes wrong
+
+| Symptom | What it means |
+| --- | --- |
+| `plan validate` says "still the scaffold" | The TODOs have not been filled in yet. |
+| A task is `blocked` | A Worker used up its attempts. Read the task log; usually the brief is ambiguous. |
+| `exp report` says `NOT READY` | It lists every blocker. Fix them — or decide the experiment failed, which is a valid outcome. |
+| `NOT REPRODUCIBLE` | Something is unseeded. See [docs/reproducibility.md](docs/reproducibility.md). |
+| `cost: not measured` | Expected. The harness does not estimate token spend. |
 
 ## Why
 
@@ -32,21 +143,17 @@ the numbers." This template makes verification a first-class artifact:
 - **Agent-first** — `AGENTS.md` gives AI coding agents (and humans) the same ground rules, and `make verify` is the machine-checkable definition of "done."
 - **Reportable** — every run produces `report.json` + `report.md` under `results/runs/`.
 
-## Quickstart
+## Everyday commands
 
 ```bash
-make setup     # editable install + dev tools (or: bash scripts/bootstrap.sh)
-make verify    # run the demo verification spec end-to-end
+make status    # where am I, what next
+make verify    # run the verification spec end-to-end
 make reproduce # run it twice and diff every artifact (determinism gate)
-make test      # pytest suite (includes harness end-to-end tests)
+make test      # pytest suite
 make lint      # ruff check + format check
 make audit     # re-verify every task marked done
-make drift     # validate every plan and fail on task/plan drift
+make drift     # validate every plan, fail on task/plan drift
 ```
-
-`make verify` runs `configs/demo.yaml`: a seeded step that produces
-`output.json`, verified by checks (`file_exists`, `json_metric`), with a report
-written to `results/runs/<name>-<timestamp>/`.
 
 ## How verification works
 
@@ -211,30 +318,11 @@ gh repo create <owner>/<new-project> --template teasol/harness-template --clone
 cd <new-project>
 ```
 
-Then instantiate:
+Then follow the walkthrough at the top of this file — or just run:
 
 ```bash
-python3 scripts/instantiate.py --name <new-project> --drop-demo
-git add -A && git commit -m "chore: instantiate from harness-template"
-make setup && make verify && make test
+python -m harness status
 ```
-
-`--drop-demo` removes the shipped orchestration example. Without it your board
-starts out holding the demo's *finished* tasks — a worked example if you want
-one, clutter if you don't. The one-step smoke test (`configs/demo.yaml`) is
-kept either way, so `make verify` proves the harness works on day one.
-
-Then run your first experiment:
-
-```bash
-python -m harness exp start <hypothesis>                       # branch + worktree
-python -m harness planner brief <hypothesis> --register <you>  # a session becomes the Planner
-```
-
-The Planner fills in the scaffolded `plans/<hypothesis>.yaml` (it will not
-validate while the TODOs remain — a scaffold is not a plan), materializes
-tasks, runs `plan run` to build them, then `exp report`. You read the report
-and decide the merge.
 
 ## Documentation
 
