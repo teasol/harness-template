@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `configs/worker.yaml` now ships **working** commands for several coding
+  agents, with flags checked against installed versions rather than guessed.
+  The cli adapter always could spawn Workers, but no runnable example was
+  provided, so in practice nobody could turn it on.
+- `harness status` and `plan run` say when the adapter is `manual` — that no
+  Workers will be spawned and how to change it — instead of letting a Planner
+  wonder why nothing was built.
+- The briefing reaches a Worker command as a file (`{brief_file}`) as well as
+  on stdin, so agents that take a prompt argument work too. Both paths tested.
+
 - **`harness status`** — reads the repository's real state (template or
   project, experiments in flight, each one's stage) and names the next command.
   It covers every stage: not yet instantiated, no experiments, plan still a

@@ -666,6 +666,12 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
     if args.attempts is not None:
         config.attempts = args.attempts
 
+    if config.adapter == "manual":
+        print(
+            "worker adapter is 'manual': each task writes a briefing and stops.\n"
+            "Set `adapter: cli` in configs/worker.yaml to have Workers built here.\n"
+        )
+
     completed = 0
     while True:
         board = task_mod.load_board(args.tasks_dir)
@@ -735,6 +741,14 @@ def cmd_status(args: argparse.Namespace) -> int:
         for exp in status.experiments:
             marker = "*" if exp.name == status.here else " "
             print(f" {marker}{exp.name:<17} {exp.state:<18} {exp.detail}")
+
+    if status.worker_adapter == "manual" and status.experiments:
+        print()
+        print(
+            "  Workers are MANUAL: `plan run` writes a briefing and stops rather\n"
+            "  than building anything. To have the Planner spawn Workers itself,\n"
+            "  set `adapter: cli` in configs/worker.yaml (examples are in there)."
+        )
 
     print()
     print("Next:")

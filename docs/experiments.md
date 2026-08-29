@@ -103,12 +103,23 @@ Configure the adapter in `configs/worker.yaml`:
 
 | Adapter | Behaviour |
 | --- | --- |
-| `manual` (default) | Write the briefing to a file and stop, for a human to hand to a session. Works with no configuration and no API key. |
-| `cli` | Run a configured shell command — a coding agent in headless mode. The command is *your* configuration; the harness names no vendor. |
+| `manual` (default) | Write the briefing to a file and stop, for a human to hand to a session. Works with no configuration and no API key — and builds nothing. |
+| `cli` | Run a configured shell command — a coding agent in headless mode. **This is what makes the Planner spawn Workers by itself.** The command is *your* configuration; the harness names no vendor. |
 
-The briefing is passed on stdin and contains the task's brief, contract,
-deliverables, constraints, and the exact acceptance commands that will judge
-the work.
+Because the default is `manual`, automatic Workers are off until you turn them
+on. `harness status` and `plan run` both say so rather than letting you wonder
+why nothing was built. `configs/worker.yaml` carries worked examples for
+several coding agents; check their flags against your installed version.
+
+The briefing contains the task's brief, contract, deliverables, constraints,
+and the exact acceptance commands that will judge the work. It reaches the
+command two ways, so any tool fits: on **stdin**, and as a file via the
+`{brief_file}` placeholder (`{task_id}`, `{task_file}`, and `{root}` are also
+substituted).
+
+A Worker edits files unattended, so it runs with permission prompts relaxed.
+An experiment worktree is the right place for that: it is isolated, and its
+branch is disposable.
 
 ### On cost
 

@@ -1,36 +1,65 @@
 # How a Planner invokes a Worker (Tier 2 -> Tier 3).
 #
-# The harness names no vendor: the command is YOUR configuration, so point it
-# at whichever coding agent — or local model — your lab already uses. Swapping
-# tools is an edit here, not a change to the harness.
+# With `adapter: cli`, `harness plan run` spawns a Worker per module on its
+# own — no human in the loop between the Planner deciding and the module being
+# built. `adapter: manual` (the default) stops and writes a briefing instead,
+# so the template works with no setup and no API key.
 #
-# The briefing is passed on stdin. These placeholders are also available in the
-# command string: {task_id} {task_file} {brief_file} {root}
+# The harness names no vendor: the command below is YOUR configuration. Point
+# it at whichever coding agent — or local model — your lab already uses.
+# Swapping tools is an edit here, not a change to the harness.
+#
+# The briefing reaches the command two ways, so any tool fits:
+#   - on **stdin**, for agents that read a prompt from stdin
+#   - as a **file**, via the {brief_file} placeholder
+# Also available: {task_id} {task_file} {root}
 worker:
-  # manual  — write the briefing to a file and stop, for a human to hand to a
-  #           Worker session. The default: works with no config and no API key.
-  # cli     — run a coding agent in headless/non-interactive mode.
   adapter: manual
 
-  # Example for `adapter: cli` — replace with your tool's non-interactive
-  # invocation. It must read the briefing from stdin, edit files under {root},
-  # and exit when finished.
+  # ---------------------------------------------------------------------
+  # Turning on automatic Workers
   #
-  # command: "<your-coding-agent> --non-interactive --cwd {root}"
+  # Set `adapter: cli` above and uncomment ONE command below. Flags change
+  # between releases — check `<tool> --help` against your installed version
+  # before trusting any of these. Whatever you choose must:
+  #   1. take the briefing (stdin or {brief_file}),
+  #   2. edit files under {root},
+  #   3. exit when finished.
   #
-  # Optional: used from the second attempt on. If your tool can continue an
-  # existing session, use that here — resuming preserves the worker's context,
-  # which is why retries are usually cheaper than starting over.
+  # A Worker edits files unattended, so every example runs the agent with
+  # permission prompts relaxed. Only do that where you are willing to let it
+  # write — an experiment worktree is a good place, since it is isolated and
+  # its branch is throwaway.
   #
-  # resume_command: "<your-coding-agent> --continue --non-interactive --cwd {root}"
+  # Claude Code (`-p` is non-interactive; reads the prompt from stdin):
+  #   command: "claude -p --permission-mode acceptEdits --add-dir {root}"
+  #   resume_command: "claude -p --continue --permission-mode acceptEdits --add-dir {root}"
+  #
+  # Codex (`exec` is non-interactive; takes the prompt as an argument):
+  #   command: "codex exec --cd {root} \"$(cat {brief_file})\""
+  #   resume_command: "codex exec resume --last --cd {root} \"$(cat {brief_file})\""
+  #
+  # opencode (`run` takes the message as an argument):
+  #   command: "opencode run \"$(cat {brief_file})\""
+  #   resume_command: "opencode run --continue \"$(cat {brief_file})\""
+  #
+  # Anything else: any command that satisfies the three requirements above,
+  # including a script of your own wrapping an API call or a local model.
+  # ---------------------------------------------------------------------
+  # command: ""
+
+  # Used from the second attempt on. If your tool can continue a session, put
+  # that here: resuming keeps the worker's context, which is why retrying
+  # usually beats starting over. Falls back to `command` when unset.
+  # resume_command: ""
 
   # A coding agent handed its own failing test usually fixes it, so retrying
   # the same worker beats restarting. Capped so a wedged worker cannot burn
   # budget forever; on exhaustion the task is blocked for the Planner.
   attempts: 6
 
-  # Seconds per attempt.
+  # Seconds per attempt. Raise it for modules whose tests are slow.
   timeout: 1800
 
-  # Recorded in the task log and the board.
+  # Recorded in the task log and on the board.
   label: worker

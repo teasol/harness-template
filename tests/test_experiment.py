@@ -384,3 +384,16 @@ def test_status_knows_which_worktree_you_are_in(clone: Path) -> None:
     experiment = exp_mod.start("here", root=clone)
     assert exp_mod.project_status(clone, cwd=clone).here is None
     assert exp_mod.project_status(clone, cwd=experiment.path).here == "here"
+
+
+@needs_git
+def test_status_reports_the_worker_adapter(clone: Path) -> None:
+    """A manual adapter means no Workers are spawned; status must say so."""
+    (clone / "pyproject.toml").write_text('name = "p"\n', encoding="utf-8")
+    exp_mod.start("w", root=clone)
+    assert exp_mod.project_status(clone, cwd=clone).worker_adapter == "manual"
+
+    (clone / "configs" / "worker.yaml").write_text(
+        "worker:\n  adapter: cli\n  command: 'true'\n", encoding="utf-8"
+    )
+    assert exp_mod.project_status(clone, cwd=clone).worker_adapter == "cli"

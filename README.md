@@ -78,9 +78,20 @@ the actual failure output — up to 6 attempts. A module that still fails is
 marked `blocked` and handed back to the Planner; that usually means the brief
 or the contract is wrong, not that the Worker is bad.
 
-Workers are configured in `configs/worker.yaml`. The default writes a briefing
-file for you to hand to another session; point it at your coding agent's
-headless mode to automate. The harness names no vendor.
+**Workers are manual until you say otherwise.** Out of the box, `plan run`
+writes a briefing file and stops — nothing is built. To have the Planner spawn
+Workers itself, set `adapter: cli` in `configs/worker.yaml` and uncomment the
+command for your coding agent (examples for several are in that file):
+
+```yaml
+worker:
+  adapter: cli
+  command: "<your coding agent's non-interactive invocation>"
+```
+
+Then `plan run` builds each module with no human in between. The harness names
+no vendor — the command is yours, so a different tool, or a local model, is an
+edit to one line. `harness status` tells you which mode you are in.
 
 ### 4. Read the report and decide
 

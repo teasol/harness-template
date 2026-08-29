@@ -706,6 +706,7 @@ class ProjectStatus:
     instantiated: bool
     project_name: str
     demo_present: bool
+    worker_adapter: str = "manual"
     experiments: list[ExperimentState] = dataclasses.field(default_factory=list)
     here: str | None = None
     headline: str = ""
@@ -801,6 +802,7 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         demo_present=demo_present,
         experiments=experiments,
         here=here,
+        worker_adapter=_worker_adapter(root),
     )
 
     if not instantiated:
@@ -832,3 +834,13 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
     if focus.state == "ready to report":
         status.next_steps.append(f"git merge {focus.branch}    # only after you read the report")
     return status
+
+
+def _worker_adapter(root: Path) -> str:
+    """Which Worker adapter is configured — 'manual' means no Workers are spawned."""
+    from harness.worker import WorkerError, load_worker_config
+
+    try:
+        return load_worker_config(root=root).adapter
+    except WorkerError:
+        return "misconfigured"

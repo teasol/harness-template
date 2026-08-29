@@ -227,3 +227,44 @@ def test_worker_report_records_only_observed_facts(project: Path) -> None:
     assert payload["attempts"][0]["exit_code"] == 0
     # Cost is never estimated — the harness says plainly that it does not know.
     assert "not measured" in payload["cost"]
+
+
+def test_brief_reaches_the_command_as_a_file_too(project: Path) -> None:
+    """Agents that take a prompt argument (not stdin) must work as well.
+
+    Both paths are advertised in configs/worker.yaml, so both are tested.
+    """
+    script = project / "argtool.sh"
+    script.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            prompt="$1"
+            case "$prompt" in
+              *"Create src/widget.py"*) touch src/widget.py ;;
+            esac
+            """
+        ),
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+    outcome = run_task(
+        project / "tasks",
+        "widget",
+        _config(project, 'bash argtool.sh "$(cat {brief_file})"'),
+        root=project,
+    )
+
+    assert outcome.succeeded, [a.detail for a in outcome.attempts]
+    assert (project / "src" / "widget.py").is_file()
+
+
+def test_root_placeholder_is_substituted(project: Path) -> None:
+    outcome = run_task(
+        project / "tasks",
+        "widget",
+        _config(project, "touch {root}/src/widget.py"),
+        root=project,
+    )
+    assert outcome.succeeded
