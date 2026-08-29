@@ -17,54 +17,84 @@ Lost at any point:
 python -m harness status     # reads the real state, names the next command
 ```
 
-### 0. See it work, then make it yours
+### 0. Make it yours (or see the demo first)
 
 ```bash
-python scripts/instantiate.py --exam-demo      # watch the whole flow on real output
+# Instantiate your new project:
 python scripts/instantiate.py --name my-project
 git add -A && git commit -m "chore: instantiate from harness-template"
 make setup && make verify && make test         # install, then prove it works here
 make agents-setup                              # which model runs each tier
 ```
 
-`--exam-demo` runs the shipped example end to end — plan, board, acceptance,
-integration, determinism — so you see the shape before adopting it.
-Instantiating then removes that example: a project should not begin holding
-someone else's finished task board.
+`instantiate.py --name my-project` removes the demo example so your project starts with a clean slate.
+
+*(Optional)* If you want to watch the shipped example run end-to-end first before instantiating — plan, board, acceptance, integration, determinism — you can run:
+```bash
+python scripts/instantiate.py --exam-demo
+```
 
 `make agents-setup` is optional: skip it and the harness writes briefings for
-you to hand to a session yourself. Run it and the harness spawns agents.
+you to hand to a session yourself. Run it and the harness spawns agents automatically.
 
 ### 1. Start an experiment — and its Planner
 
-An experiment is **one question**, and one experiment has exactly one Planner.
-So starting an experiment creates both:
+An experiment has **exactly one Planner** who owns it end to end (and can explore or refine questions/hypotheses within it).
+Starting an experiment creates its branch, its isolated working directory (a git *worktree*) under `.experiments/`, a plan skeleton, and prints the Planner's briefing:
 
 ```bash
-python -m harness exp start sparse-attention
+python -m harness exp start your-experiment-name
 ```
 
-That creates the branch `exp/sparse-attention`, a separate working directory (a
-git *worktree*) under `.experiments/`, a plan skeleton, and prints the Planner's
-briefing. Hand that session to whoever will be the Planner — or, if a coding
-agent runs the command itself, it is already briefed.
+Example command output:
 
-You do not need the question phrased yet. One usually gets sharper by talking
-it through, so the briefing tells the Planner to settle it with you first, and
-to plan nothing and spawn no Worker until you agree. When it settles:
+```text
+Experiment 'your-experiment-name' created on exp/your-experiment-name.
+Its Planner is 'planner'. Everything below is that Planner's briefing —
+follow it, or hand this session to whoever will.
+
+======================================================================
+# Planner briefing: your-experiment-name
+
+## Question
+
+**Not settled yet.** That is normal — a question gets sharper by
+talking it through. Work it out with the researcher first: what is
+being asked, what would count as an answer, what they want reported.
+Plan nothing and spawn no Worker until you agree, then record it
+verbatim so it survives this session and reaches the report.
+
+## State
+
+**question unsettled** — the question has not been agreed with the researcher yet
+
+## Next
+
+  harness exp question your-experiment-name --set "<their question, verbatim>"
+
+## Your role
+
+Read agents/planner.md. In short:
+  - You own plans/your-experiment-name.yaml, the module DAG, typed contracts,
+    and the experiment report the researcher asked for.
+  - Work inside .experiments/your-experiment-name.
+  - Never write module code yourself; hand each module off to a Worker.
+```
+
+👉 **Copy and paste everything below the separator (`====`) into your AI agent session** (e.g. Antigravity, Claude Code, Cursor, Codex, etc.) to brief the Planner on its role and current tasks. (Or, if an unattended coding agent runs the command itself, it is already briefed.)
+
+An experiment can explore multiple questions as you work through it. You do not need the question phrased yet — one usually gets sharper by talking it through, so the briefing tells the Planner to settle it with you first, and to plan nothing and spawn no Worker until you agree. When it settles:
 
 ```bash
-python -m harness exp question sparse-attention --set "<what you agreed on>"
+python -m harness exp question your-experiment-name --set "<what you agreed on>"
 ```
 
-If you already know the question, pass it up front — `exp start <name>
---question "..."`. That is also what an unattended `planner run` needs, since a
-spawned Planner has nobody to ask.
+If you already know the question, pass it up front — `exp start your-experiment-name --question "..."`. That is also what an unattended `planner run` needs, since a spawned Planner has nobody to ask.
 
 ### 2. Stay oriented
 
 ```bash
-python -m harness planner brief sparse-attention
+python -m harness planner brief your-experiment-name
 ```
 
 The same briefing, re-read from current state. It always has the same sections
@@ -77,9 +107,9 @@ question, validate the plan, run the Workers, or write the report.
 Once you agree on the question, the Planner writes the plan and drives it:
 
 ```bash
-python -m harness plan validate plans/sparse-attention.yaml
-python -m harness plan materialize plans/sparse-attention.yaml   # one task per module
-python -m harness plan run plans/sparse-attention.yaml           # Workers build them
+python -m harness plan validate plans/your-experiment-name.yaml
+python -m harness plan materialize plans/your-experiment-name.yaml   # one task per module
+python -m harness plan run plans/your-experiment-name.yaml           # Workers build them
 ```
 
 `plan run` hands each module to a Worker in dependency order, checks acceptance
@@ -96,7 +126,7 @@ With both tiers configured you can also skip sitting in the experiment
 altogether:
 
 ```bash
-python -m harness planner run sparse-attention   # spawns the Planner, drives it to a report
+python -m harness planner run your-experiment-name   # spawns the Planner, drives it to a report
 ```
 
 That needs a recorded question, since a spawned Planner has nobody to ask.
@@ -104,11 +134,11 @@ That needs a recorded question, since a spawned Planner has nobody to ask.
 ### 4. Read the report and decide
 
 ```bash
-python -m harness exp report sparse-attention --determinism --save
+python -m harness exp report your-experiment-name --determinism --save
 ```
 
 ```
-[sparse-attention] READY TO MERGE
+[your-experiment-name] READY TO MERGE
   integration: PASSED
   tasks:       2/2 done
   determinism: REPRODUCIBLE
@@ -123,7 +153,7 @@ what is missing.
 Then, if you want it:
 
 ```bash
-git merge exp/sparse-attention
+git merge exp/your-experiment-name
 ```
 
 Nothing merges on your behalf. Decide against an experiment and simply don't
@@ -133,7 +163,7 @@ merge — the branch remains, so the attempt stays on the record.
 
 ```bash
 python -m harness exp start baseline
-python -m harness exp start sparse-attention
+python -m harness exp start your-experiment-name
 python -m harness exp list
 ```
 
@@ -190,17 +220,17 @@ flowchart TD
 
 ### Tier 1 ↔ 2 — experiments
 
-An experiment is one hypothesis, on its own branch in its own git worktree, so
+An experiment is one hypothesis or investigation branch in its own git worktree, so
 several run side by side without colliding.
 
 ```bash
-python -m harness exp start sparse-attn                   # creates + briefs the Planner
-python -m harness exp question sparse-attn --set "..."   # once you have settled it
-python -m harness planner brief sparse-attn              # current state, any time
-python -m harness planner run sparse-attn                # or spawn one unattended
-python -m harness exp list                    # what is in flight
-python -m harness exp report sparse-attn --determinism --save
-git merge exp/sparse-attn                     # only you do this
+python -m harness exp start your-experiment-name                   # creates + briefs the Planner
+python -m harness exp question your-experiment-name --set "..."   # once you have settled it
+python -m harness planner brief your-experiment-name              # current state, any time
+python -m harness planner run your-experiment-name                # or spawn one unattended
+python -m harness exp list                                        # what is in flight
+python -m harness exp report your-experiment-name --determinism --save
+git merge exp/your-experiment-name                                # only you do this
 ```
 
 `exp report` measures the spine itself — integration result, per-task
@@ -234,9 +264,9 @@ flowchart TD
 ```
 
 ```bash
-python -m harness plan validate plans/sparse-attn.yaml
-python -m harness plan materialize plans/sparse-attn.yaml   # one task per module
-python -m harness plan run plans/sparse-attn.yaml           # Workers build them
+python -m harness plan validate plans/your-experiment-name.yaml
+python -m harness plan materialize plans/your-experiment-name.yaml   # one task per module
+python -m harness plan run plans/your-experiment-name.yaml           # Workers build them
 ```
 
 `plan run` invokes a Worker per module in dependency order, verifies acceptance

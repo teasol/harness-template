@@ -80,6 +80,26 @@ platforms:
     session_command: 'opencode run -s {session} -m {model} --variant {effort} "$(cat {brief_file})"'
     reads_brief_from: argument
 
+  antigravity:
+    label: Google Antigravity (agy)
+    docs: agy --help
+    command: >-
+      agy -p --model {model} --effort {effort}
+      --dangerously-skip-permissions --add-dir {root}
+    resume_command: >-
+      agy -p --continue --model {model} --effort {effort}
+      --dangerously-skip-permissions --add-dir {root}
+    efforts: [low, medium, high]
+    default_effort: low
+    model_hint: "a model name or alias (e.g. gemini-3.7-flash, flash, flash_lite)"
+    default_model: gemini-3.7-flash
+    planner_model: gemini-3.7-flash
+    planner_effort: high
+    session_command: >-
+      agy -p --conversation {session} --model {model} --effort {effort}
+      --dangerously-skip-permissions --add-dir {root}
+    reads_brief_from: stdin
+
   custom:
     label: Anything else (write the command yourself)
     docs: ""
@@ -90,3 +110,4 @@ platforms:
     model_hint: "whatever your command expects"
     default_model: ""
     reads_brief_from: stdin
+
