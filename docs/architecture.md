@@ -24,13 +24,15 @@ flowchart LR
 | `harness/report.py` | Serialize `RunResult` to JSON + Markdown |
 | `harness/reproduce.py` | Determinism gate: repeat a spec, diff artifact manifests |
 | `harness/reproducibility.py` | Seeding helpers, deterministic env vars, sha256, run provenance |
-| `harness/plan.py` | Plans: module DAGs, contracts, acceptance — the Planner's output format |
+| `harness/plan.py` | Plans: module DAGs, contracts, acceptance, report spec — the Planner's output format |
+| `harness/experiment.py` | Experiments: worktree/branch lifecycle and the researcher's report |
 | `harness/task.py` | Task materialization, lifecycle (claim/block/done), dependency + deliverable enforcement, board — the Worker's world |
-| `harness/cli.py` | `python -m harness verify\|reproduce\|hash\|plan\|task` |
+| `harness/cli.py` | `python -m harness verify\|reproduce\|hash\|plan\|task\|exp` |
 
-The orchestration layer builds on the verification layer: a task's acceptance
-is a standard spec run by the standard Runner (see
-[orchestration.md](orchestration.md)).
+The layers stack: a task's acceptance is a standard spec run by the standard
+Runner ([orchestration.md](orchestration.md)), and an experiment's report is
+that same machinery run over a whole plan ([experiments.md](experiments.md)).
+One engine, three altitudes.
 
 ## Design rules
 
@@ -44,5 +46,10 @@ is a standard spec run by the standard Runner (see
   details, and run provenance (commit, interpreter, platform, seed) are always
   captured in the run directory.
 - **Declared contracts are enforced**: anything a plan or task declares
-  (`deliverables`, `depends_on`) is machine-checked. A rule the harness cannot
-  check belongs in prose, and prose is not a gate.
+  (`deliverables`, `depends_on`, report `source` paths) is machine-checked. A
+  rule the harness cannot check belongs in prose, and prose is not a gate.
+- **Agents report where, the harness reports what**: an agent declares where a
+  number lives; the harness reads the artifact. No result reaches the
+  researcher on an agent's word alone.
+- **The merge is human**: the harness measures readiness and stops. Choosing
+  which hypothesis enters the record is the researcher's judgement.

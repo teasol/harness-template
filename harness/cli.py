@@ -17,6 +17,12 @@ Usage::
     python -m harness task verify (--id <id> | --all) [--status S] [--tasks-dir tasks]
     python -m harness task done --id <id> [--by <agent>] [--tasks-dir tasks]
 
+    # Experiments (researcher <-> Planner): one hypothesis per branch+worktree
+    python -m harness exp start <name> [--base main] [--path DIR]
+    python -m harness exp list
+    python -m harness exp report <name> [--no-run] [--determinism] [--save]
+    python -m harness exp remove <name> [--force]
+
 """
 
 from __future__ import annotations
@@ -26,7 +32,9 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from harness import experiment as exp_mod
 from harness import task as task_mod
+from harness.experiment import ExperimentError
 from harness.plan import PlanError, load_plan
 from harness.report import write_reports
 from harness.reproduce import (
@@ -381,6 +389,41 @@ def build_parser() -> argparse.ArgumentParser:
             parser_i.add_argument("--results-dir", default="results")
         parser_i.set_defaults(func=func)
 
+    exp_cmd = sub.add_parser("exp", help="Experiment commands (researcher <-> Planner)")
+    exp_sub = exp_cmd.add_subparsers(dest="exp_command", required=True)
+
+    exp_start = exp_sub.add_parser("start", help="Create an experiment branch + worktree")
+    exp_start.add_argument("name", help="Experiment name (lowercase, hyphens)")
+    exp_start.add_argument("--base", default="HEAD", help="Commit/branch to branch from")
+    exp_start.add_argument(
+        "--path",
+        default=exp_mod.DEFAULT_WORKTREE_ROOT,
+        help="Directory holding experiment worktrees",
+    )
+    exp_start.set_defaults(func=cmd_exp_start)
+
+    exp_list = exp_sub.add_parser("list", help="List experiments")
+    exp_list.set_defaults(func=cmd_exp_list)
+
+    exp_report = exp_sub.add_parser("report", help="Build the researcher's merge decision aid")
+    exp_report.add_argument("name", help="Experiment name")
+    exp_report.add_argument("--no-run", action="store_true", help="Do not run the integration spec")
+    exp_report.add_argument(
+        "--determinism", action="store_true", help="Also run the determinism gate"
+    )
+    exp_report.add_argument(
+        "--save", action="store_true", help="Also write the report into the experiment branch"
+    )
+    exp_report.set_defaults(func=cmd_exp_report)
+
+    exp_remove = exp_sub.add_parser("remove", help="Remove an experiment worktree (keeps branch)")
+    exp_remove.add_argument("name", help="Experiment name")
+    exp_remove.add_argument("--force", action="store_true", help="Remove even if dirty")
+    exp_remove.set_defaults(func=cmd_exp_remove)
+
+    for exp_parser in (exp_start, exp_list, exp_report, exp_remove):
+        exp_parser.add_argument("--root", default=".", help="Repo root (default: cwd)")
+
     return parser
 
 
@@ -388,3 +431,80 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     return int(args.func(args))
+
+
+# ---------------------------------------------------------------------------
+# Experiments (researcher <-> Planner)
+
+
+def cmd_exp_start(args: argparse.Namespace) -> int:
+    try:
+        experiment = exp_mod.start(
+            args.name, root=args.root, worktree_root=args.path, base=args.base
+        )
+    except ExperimentError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"experiment '{experiment.name}' created")
+    print(f"  branch:   {experiment.branch}")
+    print(f"  worktree: {experiment.path}")
+    print(f"  plan:     {experiment.plan_path}")
+    print()
+    print("Next (Planner, from inside the worktree):")
+    print(f"  cd {experiment.path}")
+    print(f"  # fill in plans/{experiment.name}.yaml, then:")
+    print(f"  python -m harness plan validate plans/{experiment.name}.yaml")
+    print(f"  python -m harness plan materialize plans/{experiment.name}.yaml")
+    return 0
+
+
+def cmd_exp_list(args: argparse.Namespace) -> int:
+    experiments = exp_mod.list_experiments(args.root)
+    if not experiments:
+        print("(no experiments)")
+        return 0
+    print("  NAME              BRANCH                 WORKTREE")
+    for experiment in experiments:
+        print(f"  {experiment.name:<17} {experiment.branch:<22} {experiment.path}")
+    return 0
+
+
+def cmd_exp_report(args: argparse.Namespace) -> int:
+    try:
+        report = exp_mod.build_report(
+            args.name,
+            root=args.root,
+            run_integration=not args.no_run,
+            check_determinism=args.determinism,
+        )
+        experiment = exp_mod.find_experiment(args.name, args.root)
+    except ExperimentError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    written = exp_mod.write_experiment_report(report, experiment.path, save=args.save)
+    verdict = "READY TO MERGE" if report.merge_ready else "NOT READY"
+    print(f"[{report.experiment}] {verdict}")
+    print(f"  integration: {report.integration}")
+    print(f"  tasks:       {report.tasks_done}/{report.tasks_total} done")
+    print(f"  determinism: {report.determinism}")
+    print(f"  commit:      {report.commit or 'unknown'}{' (dirty)' if report.dirty else ''}")
+    for value in report.metrics:
+        print(f"  {value.name}: {value.error or value.value}")
+    for caveat in report.caveats:
+        print(f"  not verified: {caveat}")
+    for path in written:
+        print(f"  report: {path}")
+    if report.merge_ready:
+        print(f"\n  Merging is your call: git merge {report.branch}")
+    return 0 if report.merge_ready else 1
+
+
+def cmd_exp_remove(args: argparse.Namespace) -> int:
+    try:
+        experiment = exp_mod.remove(args.name, root=args.root, force=args.force)
+    except ExperimentError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"removed worktree {experiment.path} (branch {experiment.branch} kept)")
+    return 0

@@ -67,6 +67,42 @@ steps:
 Run it with `python -m harness verify --spec configs/my-experiment.yaml`.
 Full reference: [docs/verification.md](docs/verification.md).
 
+## Three-tier research workflow
+
+The researcher sets direction and decides what enters the record; a Planner
+owns one experiment end to end; Workers each implement one module.
+
+```mermaid
+flowchart TD
+    R["Tier 1 · Researcher<br/>defines the question, decides the merge"]
+    P["Tier 2 · Planner<br/>one experiment, own branch + worktree"]
+    W["Tier 3 · Workers<br/>one module each, sequential"]
+    R -->|"instruction"| P
+    P -->|"tasks with contracts"| W
+    W -->|"acceptance + deliverables"| P
+    P -->|"measured report"| R
+    R -->|"git merge (researcher's call)"| R
+```
+
+Each experiment gets its own branch and git worktree, so several hypotheses run
+side by side without colliding:
+
+```bash
+python -m harness exp start sparse-attn      # branch exp/sparse-attn + worktree
+python -m harness exp list                   # what is in flight
+python -m harness exp report sparse-attn --determinism --save
+git merge exp/sparse-attn                    # only the researcher does this
+```
+
+`exp report` measures the spine itself — integration result, per-task
+acceptance, determinism, the commit to merge, and what went **unverified** —
+and extracts the metrics the researcher asked for from real run artifacts. The
+Planner declares *where* each number lives; it never supplies a value. Reports
+are self-contained by rule: a plan that reads another experiment's results is
+rejected, because comparing experiments is the researcher's job.
+
+Full reference: [docs/experiments.md](docs/experiments.md).
+
 ## Two-tier agent orchestration
 
 Beyond single pipelines, this template orchestrates **multiple agents
@@ -104,6 +140,7 @@ harness-template/
 ├── AGENTS.md               # Agent-facing ground rules (read this first)
 ├── Makefile                # setup / lint / test / verify / plan / tasks
 ├── pyproject.toml          # Project metadata + tool config
+├── .experiments/           # Experiment worktrees (gitignored, one per hypothesis)
 ├── agents/                 # Role contracts for hierarchical agents
 │   ├── planner.md          #   Planner: owns plans, DAGs, contracts, flow
 │   └── worker.md           #   Worker: owns one module task, in isolation
@@ -116,7 +153,8 @@ harness-template/
 │   ├── checks.py           #   Built-in checks + registry
 │   ├── report.py           #   JSON/Markdown report generation
 │   ├── reproducibility.py  #   Seeding & hashing utilities
-│   ├── plan.py             #   Plans: module DAGs + contracts
+│   ├── experiment.py       #   Experiments: worktrees, branches, reports
+│   ├── plan.py             #   Plans: module DAGs + contracts + report spec
 │   ├── task.py             #   Task lifecycle, board, materialization
 │   └── cli.py              #   `python -m harness verify|hash|plan|task`
 ├── src/                    # Project code (demo_pipeline ships as example)
@@ -155,6 +193,7 @@ make setup && make verify
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — ground rules for agents & contributors
+- [docs/experiments.md](docs/experiments.md) — experiments, worktrees, reports
 - [docs/orchestration.md](docs/orchestration.md) — two-tier orchestration reference
 - [docs/verification.md](docs/verification.md) — spec & check reference
 - [docs/reproducibility.md](docs/reproducibility.md) — determinism policy

@@ -65,7 +65,9 @@ def _git(root: Path, *args: str) -> str | None:
         return None
     if proc.returncode != 0:
         return None
-    return proc.stdout.strip() or None
+    # Empty output is a real answer: `status --porcelain` prints nothing when
+    # the worktree is clean. Only a non-zero exit means "unavailable".
+    return proc.stdout.strip()
 
 
 def collect_provenance(root: str | Path = ".", seed: int | None = None) -> dict[str, Any]:

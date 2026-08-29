@@ -40,6 +40,16 @@ jobs:
       - name: Integration spec
         run: python -m harness verify --spec configs/demo-pipeline.yaml --results-dir results/pipeline
 
+      # The experiment layer creates real branches and worktrees, so exercise
+      # it against a throwaway clone rather than the checkout itself.
+      - name: Experiment lifecycle (worktree isolation + report)
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          python -m harness exp start ci-smoke
+          python -m harness exp list
+          python -m harness exp remove ci-smoke --force
+
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4

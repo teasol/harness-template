@@ -12,6 +12,27 @@ plan:
     this file; Workers own one task file each (materialize with
     `python -m harness plan materialize plans/demo-pipeline.yaml`).
 
+  # What this experiment reports back to the researcher. The researcher states
+  # what they want to see; the Planner records WHERE each number comes from;
+  # the harness extracts the value from the real artifact. Paths must stay
+  # inside this experiment — comparing experiments is the researcher's job.
+  report:
+    question: |
+      Does the seeded pipeline recover the generating line (slope 2, intercept 1)
+      from 100 samples, deterministically?
+    metrics:
+      - name: sample_count
+        source: ${HARNESS_RESULTS_DIR}/stats.json
+        metric: n
+      - name: regression_slope
+        source: ${HARNESS_RESULTS_DIR}/stats.json
+        metric: slope
+      - name: regression_intercept
+        source: ${HARNESS_RESULTS_DIR}/stats.json
+        metric: intercept
+    artifacts:
+      - stats.json
+
   # Verification of the ASSEMBLED pipeline — run once every module is done.
   integration:
     spec: configs/demo-pipeline.yaml

@@ -13,11 +13,18 @@ keep using the harness for anything that needs to be trusted or reproduced.
 
 ## Orchestration roles
 
+Work happens in three tiers. The researcher (Tier 1) sets direction and
+decides what gets merged; the Planner (Tier 2) owns one experiment end to end;
+Workers (Tier 3) each implement one module. **Never merge an experiment branch
+yourself** — reporting is the Planner's job, merging is the researcher's.
+
 You are always acting in ONE of three roles — know which:
 
 - **Planner** ([agents/planner.md](agents/planner.md)): own `plans/*.yaml`,
-  module DAGs, contracts, acceptance, and the integration spec. Never write
-  module code. Hand off via `harness plan materialize`.
+  module DAGs, contracts, acceptance, the integration spec, and the experiment
+  `report:` the researcher asked for. Work inside your experiment's worktree.
+  Never write module code. Hand off via `harness plan materialize`; hand back
+  via `harness exp report`.
 - **Worker** ([agents/worker.md](agents/worker.md)): claim exactly one task
   (`harness task claim`), implement it fully against the task file's brief
   and contract, verify (`harness task verify`), mark done (`harness task
@@ -79,6 +86,15 @@ python -m harness task list|show|claim|block|verify|done --id <id>
 python -m harness task verify --all [--status done]       # audit the board
 ```
 
+Experiment commands (Tier 1 boundary):
+
+```bash
+python -m harness exp start <name> [--base main]
+python -m harness exp list
+python -m harness exp report <name> [--determinism] [--save]
+python -m harness exp remove <name>
+```
+
 Verification commands:
 
 ```bash
@@ -90,6 +106,7 @@ python -m harness hash <file>          # sha256 helper
 ## Where things live
 
 - `agents/` — role contracts (planner.md, worker.md). Read the one for your role.
+- `.experiments/` — experiment worktrees (gitignored; one per hypothesis).
 - `plans/` — orchestration plans: goal, module DAG, contracts, briefs, acceptance.
 - `tasks/` — materialized work orders with lifecycle state (status/worker/log). Committed.
 - `harness/` — verification + orchestration engine. Stable, minimal, stdlib + PyYAML only.

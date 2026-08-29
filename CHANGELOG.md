@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Experiments (Tier 1 ↔ Tier 2).** `harness exp start|list|report|remove`.
+  Each experiment is one hypothesis on its own branch in its own git worktree,
+  so several run side by side. `exp remove` keeps the branch — a rejected
+  experiment stays inspectable. Workers remain sequential within an
+  experiment, which keeps the task board coherent and dependency gates correct.
+- **Experiment reports.** `exp report` measures the spine itself (integration
+  result, per-task acceptance re-verification, determinism, the commit to
+  merge, and an explicit *Not verified* list) and extracts the metrics the
+  researcher asked for from real run artifacts. Exits non-zero unless
+  merge-ready. `--save` writes the report into the branch. The harness never
+  merges: that decision stays with the researcher.
+- **`report:` section in plans.** The researcher states what they want to see;
+  the Planner declares *where* each number lives; the harness supplies the
+  value. An agent can no longer report a result it was not made to measure.
+- Report `source`/`artifacts` paths must stay inside the experiment (no
+  absolute paths, no `..`), so every report can be judged on its own terms.
+  Cross-experiment comparison belongs to the researcher.
+- `plan validate` rejects a deliverable claimed by more than one module.
+- `make experiments`; `docs/experiments.md`.
+
+### Fixed
+
+- Provenance reported `git_dirty: null` for a *clean* worktree, conflating
+  "no changes" with "git unavailable" — empty `git status` output was being
+  treated as failure.
+- Steps now run with the verified tree at the front of `PYTHONPATH`. An
+  editable install points at one checkout, so a step inside an experiment
+  worktree imported the **main** checkout's code and silently verified the
+  wrong source.
+
 - `harness reproduce --spec S [--times N]`: runs a spec repeatedly and diffs a
   hash manifest of every artifact it produced (excluding harness bookkeeping).
   Exits non-zero on divergence, and refuses to pass a spec that produced

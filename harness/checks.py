@@ -53,7 +53,8 @@ def check_file_hash(root: Path, params: dict[str, Any]) -> str:
     return f"sha256 ok: {actual}"
 
 
-def _lookup_metric(data: Any, metric: str) -> Any:
+def lookup_metric(data: Any, metric: str) -> Any:
+    """Resolve a dotted metric path inside a loaded JSON document."""
     node: Any = data
     for part in metric.split("."):
         if isinstance(node, dict) and part in node:
@@ -75,7 +76,7 @@ def check_json_metric(root: Path, params: dict[str, Any]) -> str:
     except json.JSONDecodeError as exc:
         raise CheckError(f"invalid JSON in {resolved}: {exc}") from exc
 
-    value = _lookup_metric(data, metric)
+    value = lookup_metric(data, metric)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise CheckError(f"metric '{metric}' is not numeric: {value!r}")
 

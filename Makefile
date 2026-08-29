@@ -2,7 +2,7 @@ PYTHON ?= python3
 RESULTS_DIR ?= results
 
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format test verify plan tasks reproduce drift audit clean
+.PHONY: help setup lint format test verify plan tasks reproduce drift audit experiments clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -41,6 +41,9 @@ drift: ## Fail if task files have drifted from the plan
 
 audit: ## Re-verify every task marked done (acceptance + deliverables)
 	$(PYTHON) -m harness task verify --all --status done --results-dir $(RESULTS_DIR)/audit
+
+experiments: ## List experiment branches/worktrees
+	$(PYTHON) -m harness exp list
 
 clean: ## Remove generated artifacts
 	rm -rf $(RESULTS_DIR) .pytest_cache .ruff_cache build dist *.egg-info

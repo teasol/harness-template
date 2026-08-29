@@ -96,6 +96,7 @@ class Runner:
         step_results: list[StepResult] = []
         try:
             base_env = os.environ.copy()
+            base_env["PYTHONPATH"] = _python_path(self.root, base_env.get("PYTHONPATH"))
             if spec.seed is not None:
                 base_env.update(deterministic_env(spec.seed))
             for index, step in enumerate(spec.steps):
@@ -187,6 +188,19 @@ class Runner:
             log_path=str(log_path),
             checks=check_results,
         )
+
+
+def _python_path(root: Path, existing: str | None) -> str:
+    """Put the tree being verified ahead of anything installed.
+
+    Without this a step run inside an experiment worktree would import the
+    main checkout's code (an editable install points at one tree only), so
+    the experiment would verify somebody else's source.
+    """
+    entries = [str(root)] + [str(root / "src")] * (root / "src").is_dir()
+    if existing:
+        entries.append(existing)
+    return os.pathsep.join(entries)
 
 
 def _as_text(data: str | bytes | None) -> str:

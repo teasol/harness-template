@@ -6,6 +6,12 @@ machine-checkable acceptance criteria. Plans are materialized into
 self-contained task files (see :mod:`harness.task`) that Worker agents
 execute one at a time, each in isolation.
 
+A plan also declares what the experiment *reports* back to the researcher
+(``report:``). The researcher states what they want to see when instructing
+the Planner; the Planner records **where** each number comes from, and the
+harness extracts the values from real run artifacts. An agent never narrates
+a result it was not made to measure.
+
 Schema reference: ``docs/orchestration.md``.
 """
 
@@ -67,6 +73,83 @@ class Contract:
 
 
 @dataclasses.dataclass
+class MetricRef:
+    """Where a reported number lives — never the number itself."""
+
+    name: str
+    source: str
+    metric: str
+    description: str = ""
+
+    @classmethod
+    def from_dict(cls, data: Any) -> MetricRef:
+        if not isinstance(data, dict):
+            raise PlanError(f"report metric must be a mapping, got: {data!r}")
+        for key in ("name", "source", "metric"):
+            if not data.get(key):
+                raise PlanError(f"report metric requires '{key}': {data!r}")
+        _require_self_contained(str(data["source"]), f"report metric '{data['name']}' source")
+        return cls(
+            name=str(data["name"]),
+            source=str(data["source"]),
+            metric=str(data["metric"]),
+            description=str(data.get("description", "")),
+        )
+
+
+@dataclasses.dataclass
+class Report:
+    """What this experiment reports back to the researcher.
+
+    Free-form by design: the researcher says what they want when they give
+    the instruction. Self-contained by rule: a report may only draw on this
+    experiment's own artifacts, never another experiment's, so it can be
+    judged on its own terms.
+    """
+
+    question: str = ""
+    metrics: list[MetricRef] = dataclasses.field(default_factory=list)
+    artifacts: list[str] = dataclasses.field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Report:
+        if data is None:
+            return cls()
+        if not isinstance(data, dict):
+            raise PlanError(f"'plan.report' must be a mapping, got: {data!r}")
+        for key in ("metrics", "artifacts"):
+            if key in data and not isinstance(data[key], list):
+                raise PlanError(f"'plan.report.{key}' must be a list")
+        artifacts = [str(a) for a in data.get("artifacts", [])]
+        for artifact in artifacts:
+            _require_self_contained(artifact, "report artifact")
+        return cls(
+            question=str(data.get("question", "")),
+            metrics=[MetricRef.from_dict(m) for m in data.get("metrics", [])],
+            artifacts=artifacts,
+        )
+
+
+def _require_self_contained(path: str, where: str) -> None:
+    """Reject a report path that could reach outside this experiment.
+
+    Cross-experiment comparison is the researcher's job (Tier 1), performed by
+    collecting finished reports. An experiment that reads another experiment's
+    files cannot be judged on its own, so the harness refuses to produce one.
+    """
+    if path.startswith(("/", "~")):
+        raise PlanError(
+            f"{where} must stay inside the experiment: absolute path '{path}'. "
+            "Reports may only draw on this experiment's own artifacts."
+        )
+    if ".." in Path(path).parts:
+        raise PlanError(
+            f"{where} must stay inside the experiment: '{path}' escapes via '..'. "
+            "Comparing experiments is the researcher's job, not the plan's."
+        )
+
+
+@dataclasses.dataclass
 class Module:
     """One unit of work in a plan: owned by exactly one Worker task."""
 
@@ -88,6 +171,7 @@ class Plan:
     goal: str
     description: str = ""
     integration: str | None = None
+    report: Report = dataclasses.field(default_factory=Report)
     modules: list[Module] = dataclasses.field(default_factory=list)
     source: Path | None = None
 
@@ -169,11 +253,19 @@ def load_plan(path: str | Path) -> Plan:
         modules.append(module)
 
     _validate_dag(modules)
+    _validate_disjoint_deliverables(modules)
+
+    report = Report.from_dict(data.get("report"))
 
     if integration is not None:
         source_dir = Path(path).resolve().parent
         integration_path = Path(integration)
-        if not (integration_path.is_file() or (source_dir / integration_path).is_file()):
+        candidates = [
+            integration_path,
+            source_dir / integration_path,
+            source_dir.parent / integration_path,
+        ]
+        if not any(c.is_file() for c in candidates):
             raise PlanError(f"integration spec not found: {integration}")
 
     return Plan(
@@ -181,6 +273,7 @@ def load_plan(path: str | Path) -> Plan:
         goal=goal,
         description=str(data.get("description", "")),
         integration=integration,
+        report=report,
         modules=modules,
         source=Path(path),
     )
@@ -218,6 +311,25 @@ def _module_from_dict(entry: Any) -> Module:
         contract=Contract.from_dict(entry.get("contract")),
         acceptance=acceptance,
     )
+
+
+def _validate_disjoint_deliverables(modules: list[Module]) -> None:
+    """Two modules claiming the same file is a planning error, not a merge problem.
+
+    Workers own their deliverables outright; overlapping ownership means two
+    Workers would write the same file with no contract between them.
+    """
+    owners: dict[str, list[str]] = {}
+    for module in modules:
+        for deliverable in module.deliverables:
+            owners.setdefault(deliverable, []).append(module.id)
+    shared = {path: ids for path, ids in owners.items() if len(ids) > 1}
+    if shared:
+        detail = "; ".join(f"'{path}' claimed by {ids}" for path, ids in sorted(shared.items()))
+        raise PlanError(
+            f"deliverables must be owned by exactly one module: {detail}. "
+            "Split the file, or give one module ownership and a contract to the other."
+        )
 
 
 def _validate_dag(modules: list[Module]) -> None:

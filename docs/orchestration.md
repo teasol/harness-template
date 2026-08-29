@@ -1,5 +1,9 @@
 # Orchestration reference
 
+This document covers Tier 2 ↔ Tier 3. The tier above — experiments, worktrees,
+and the report a researcher reads to decide a merge — is in
+[experiments.md](experiments.md).
+
 This template implements a **two-tier agent harness**: a Planner agent owns
 the direction and the module DAG; Worker agents each own one module, built in
 isolation against a self-contained spec. The harness is the contract between
@@ -81,8 +85,9 @@ plan:
 ```
 
 Validation enforces: unique ids, resolvable `depends_on`, acyclic DAG,
-non-empty brief and acceptance per module, known check types, and (if set) an
-existing integration spec file.
+non-empty brief and acceptance per module, known check types, deliverables
+owned by exactly one module, report paths that stay inside the experiment, and
+(if set) an existing integration spec file.
 
 ## Task schema (`tasks/*.task.yaml`)
 
