@@ -828,10 +828,7 @@ def cmd_planner_brief(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     status = exp_mod.project_status(args.root)
-    print(f"Project: {status.project_name}")
-    if status.demo_present:
-        print("  (the shipped demo is here — `instantiate.py --exam-demo` runs it)")
-    print()
+    print(f"Project: {status.project_name}\n")
     print(status.headline)
 
     if status.experiments:

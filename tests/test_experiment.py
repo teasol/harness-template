@@ -317,10 +317,9 @@ def test_a_scaffold_is_not_a_plan(clone: Path) -> None:
 
 
 def test_status_on_the_uninstantiated_template(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text('name = "harness-template"\n', encoding="utf-8")
     status = exp_mod.project_status(tmp_path, cwd=tmp_path)
     assert not status.instantiated
-    assert "instantiate" in " ".join(status.next_steps)
+    assert "harness init" in " ".join(status.next_steps)
 
 
 @needs_git

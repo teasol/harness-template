@@ -879,7 +879,7 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
             if line.startswith("name ="):
                 project_name = line.split("=", 1)[1].strip().strip('"').strip("'")
                 break
-    instantiated = project_name != "harness-template"
+    instantiated = (root / "configs" / "agents.yaml").is_file()
     demo_present = (root / "plans" / "demo-pipeline.yaml").is_file()
 
     try:
@@ -906,12 +906,9 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
     )
 
     if not instantiated:
-        status.headline = "This is still the template — make it your project first."
+        status.headline = "Project not initialized yet — run 'harness init' to scaffold it."
         status.next_steps = [
-            "python3 scripts/instantiate.py --exam-demo   # watch the example run first",
-            "python3 scripts/instantiate.py --name <your-project>",
-            'git add -A && git commit -m "chore: instantiate from harness-template"',
-            "make setup && make verify && make test",
+            "harness init   # scaffold project files and configure agents",
         ]
         return status
 
