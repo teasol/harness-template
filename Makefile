@@ -4,7 +4,7 @@ RESULTS_DIR ?= results
 # Point these at your project's own spec/plan. `make drift` needs neither:
 # it checks every plan in plans/.
 SPEC ?= configs/demo.yaml
-PLAN ?= plans/demo-pipeline.yaml
+PLAN ?= plans/plan.yaml
 
 .DEFAULT_GOAL := help
 .PHONY: help status setup agents-setup lint format test verify plan tasks run reproduce drift audit experiments clean

@@ -1,0 +1,15 @@
+name: demo-pipeline
+description: Integration check — assembled two-module demo pipeline
+seed: 42
+
+steps:
+  - id: compute-stats
+    run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/stats.json" --seed 42
+    timeout: 120
+    checks:
+      - type: file_exists
+        path: ${HARNESS_RESULTS_DIR}/stats.json
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/stats.json
+        metric: seed
+        equals: 42

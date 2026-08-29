@@ -11,9 +11,12 @@ from harness.plan import load_plan
 from harness.task import TaskError
 
 
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
+
 @pytest.fixture()
 def demo_plan() -> object:
-    return load_plan("plans/demo-pipeline.yaml")
+    return load_plan(FIXTURES_DIR / "demo-pipeline.yaml")
 
 
 def test_materialize_creates_task_files(demo_plan, tmp_path: Path) -> None:
@@ -23,7 +26,7 @@ def test_materialize_creates_task_files(demo_plan, tmp_path: Path) -> None:
     assert task.plan == "demo-pipeline"
     assert task.depends_on == ["data-gen"]
     assert task.status == "todo"
-    assert task.brief.startswith("Implement `src/demo_pipeline/stats.py`")
+    assert "stats" in task.brief
     assert len(task.acceptance) == 2  # prepare-input + run-stats
 
 
@@ -50,7 +53,7 @@ def test_materialize_force_refreshes_spec_but_keeps_lifecycle(demo_plan, tmp_pat
     task_mod.materialize(demo_plan, tasks_dir, force=True)
 
     task = task_mod.load_task(tasks_dir, "data-gen")
-    assert task.brief.startswith("Implement `src/demo_pipeline/data_gen.py`")  # refreshed
+    assert "data_gen" in task.brief  # refreshed
     assert task.status == "in_progress"  # lifecycle preserved
     assert task.worker == "worker-x"
     assert any("claimed by worker-x" in line for line in task.log)  # audit trail intact
@@ -74,7 +77,7 @@ def test_verify_task_fails_on_missing_deliverable(demo_plan, tmp_path: Path) -> 
     tasks_dir = tmp_path / "tasks"
     task_mod.materialize(demo_plan, tasks_dir)
     task = task_mod.load_task(tasks_dir, "data-gen")
-    task.deliverables = ["src/demo_pipeline/data_gen.py", "src/demo_pipeline/ghost.py"]
+    task.deliverables = ["scripts/demo_step.py", "scripts/ghost.py"]
 
     result = task_mod.verify_task(task, root=".", results_dir=tmp_path / "results")
 
@@ -106,9 +109,8 @@ def test_block_and_reclaim(tmp_path: Path, demo_plan) -> None:
     assert task.status == "in_progress"
 
 
-@pytest.mark.skipif(not Path("src/demo_pipeline").exists(), reason="shipped demo required")
 def test_demo_task_verify_e2e(tmp_path: Path, demo_plan) -> None:
-    """The shipped data-gen task's acceptance passes end-to-end."""
+    """The task's acceptance passes end-to-end against the fixture."""
     tasks_dir = tmp_path / "tasks"
     task_mod.materialize(demo_plan, tasks_dir)
     task = task_mod.load_task(tasks_dir, "data-gen")

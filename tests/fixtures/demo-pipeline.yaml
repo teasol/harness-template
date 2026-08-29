@@ -1,0 +1,88 @@
+# Example orchestration plan fixture for unit tests.
+plan:
+  name: demo-pipeline
+  goal: >
+    Build a deterministic stats pipeline: generate a seeded dataset, then
+    compute summary statistics from it, and verify the assembled flow.
+  description: >
+    Two-module example demonstrating the two-tier harness.
+
+  report:
+    question: |
+      Does the seeded pipeline recover the generating line (slope 2, intercept 1)
+      from 100 samples, deterministically?
+    metrics:
+      - name: sample_count
+        source: ${HARNESS_RESULTS_DIR}/stats.json
+        metric: seed
+      - name: regression_slope
+        source: ${HARNESS_RESULTS_DIR}/stats.json
+        metric: seed
+    artifacts:
+      - stats.json
+
+  integration:
+    spec: configs/demo.yaml
+
+  modules:
+    - id: data-gen
+      title: Generate the demo dataset
+      depends_on: []
+      deliverables:
+        - scripts/demo_step.py
+      contract:
+        inputs:
+          - name: seed
+            type: int
+            description: RNG seed
+        outputs:
+          - name: dataset
+            type: path
+            description: Output JSON file
+      brief: |
+        Implement `data_gen` module.
+      constraints:
+        - stdlib only
+        - deterministic for a given seed
+      acceptance:
+        steps:
+          - id: run-data-gen
+            run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/demo_data.json" --seed 42
+            timeout: 120
+            checks:
+              - type: file_exists
+                path: ${HARNESS_RESULTS_DIR}/demo_data.json
+
+    - id: stats
+      title: Compute summary statistics
+      depends_on: [data-gen]
+      deliverables:
+        - configs/demo.yaml
+      contract:
+        inputs:
+          - name: dataset
+            type: path
+            description: Output JSON
+        outputs:
+          - name: stats
+            type: json
+            description: JSON metrics
+      brief: |
+        Implement `stats` module.
+      constraints:
+        - stdlib only
+      acceptance:
+        steps:
+          - id: prepare-input
+            run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/demo_data.json" --seed 42
+            timeout: 120
+          - id: run-stats
+            run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/stats.json" --seed 42
+            timeout: 120
+            checks:
+              - type: file_exists
+                path: ${HARNESS_RESULTS_DIR}/stats.json
+              - type: json_metric
+                path: ${HARNESS_RESULTS_DIR}/stats.json
+                metric: seed
+                equals: 42

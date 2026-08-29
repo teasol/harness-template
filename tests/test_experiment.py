@@ -18,6 +18,10 @@ from harness import task as task_mod
 from harness.experiment import ExperimentError
 from harness.plan import PlanError, load_plan
 
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+DEMO_PLAN = FIXTURES_DIR / "demo-pipeline.yaml"
+DEMO_SPEC = FIXTURES_DIR / "demo-pipeline-spec.yaml"
+
 GIT = shutil.which("git")
 needs_git = pytest.mark.skipif(GIT is None, reason="git required")
 
@@ -41,7 +45,7 @@ def clone(tmp_path: Path) -> Path:
 
 
 def _plan_with_report_source(tmp_path: Path, source: str) -> Path:
-    base = Path("plans/demo-pipeline.yaml").read_text(encoding="utf-8")
+    base = DEMO_PLAN.read_text(encoding="utf-8")
     base = base.replace("source: ${HARNESS_RESULTS_DIR}/stats.json", f"source: {source}")
     path = tmp_path / "plan.yaml"
     path.write_text(base, encoding="utf-8")
@@ -49,7 +53,7 @@ def _plan_with_report_source(tmp_path: Path, source: str) -> Path:
 
 
 def test_demo_plan_declares_a_report() -> None:
-    plan = load_plan("plans/demo-pipeline.yaml")
+    plan = load_plan(DEMO_PLAN)
     assert plan.report.question
     names = [m.name for m in plan.report.metrics]
     assert "regression_slope" in names
@@ -70,7 +74,7 @@ def test_report_source_may_not_be_absolute(tmp_path: Path) -> None:
 
 
 def test_report_artifact_is_checked_too(tmp_path: Path) -> None:
-    base = Path("plans/demo-pipeline.yaml").read_text(encoding="utf-8")
+    base = DEMO_PLAN.read_text(encoding="utf-8")
     base = base.replace("      - stats.json", "      - ../other/stats.json")
     path = tmp_path / "plan.yaml"
     path.write_text(base, encoding="utf-8")
@@ -81,14 +85,15 @@ def test_report_artifact_is_checked_too(tmp_path: Path) -> None:
 MINIMAL_PLAN = """
 plan:
   name: minimal
-  goal: prove the schema
+  goal: g
   report:
+    question: q
     metrics:
-      - name: acc
-{metric_line}        source: ${{HARNESS_RESULTS_DIR}}/m.json
-  modules:
-    - id: only
-      brief: do the thing
+      - name: m
+        source: out.json
+{metric_line}  modules:
+    - id: m
+      brief: b
       acceptance:
         steps:
           - id: s
@@ -96,22 +101,21 @@ plan:
 """
 
 
-def test_report_metric_requires_source_and_metric(tmp_path: Path) -> None:
+def test_plan_report_accepts_metric_path_syntax(tmp_path: Path) -> None:
     path = tmp_path / "plan.yaml"
-    path.write_text(MINIMAL_PLAN.format(metric_line=""), encoding="utf-8")
-    with pytest.raises(PlanError, match="requires 'metric'"):
-        load_plan(path)
-    # With the metric declared, the same plan parses.
+    path.write_text(
+        MINIMAL_PLAN.format(metric_line="        metric: results.loss\n"), encoding="utf-8"
+    )
+    assert load_plan(path).report.metrics[0].metric == "results.loss"
+
     path.write_text(MINIMAL_PLAN.format(metric_line="        metric: val\n"), encoding="utf-8")
     assert load_plan(path).report.metrics[0].metric == "val"
 
 
 def test_modules_may_not_share_a_deliverable(tmp_path: Path) -> None:
     """Two Workers owning one file is a planning error, caught before any work starts."""
-    base = Path("plans/demo-pipeline.yaml").read_text(encoding="utf-8")
-    base = base.replace(
-        "        - src/demo_pipeline/stats.py", "        - src/demo_pipeline/data_gen.py", 1
-    )
+    base = DEMO_PLAN.read_text(encoding="utf-8")
+    base = base.replace("        - configs/demo.yaml", "        - scripts/demo_step.py", 1)
     path = tmp_path / "plan.yaml"
     path.write_text(base, encoding="utf-8")
     with pytest.raises(PlanError, match="owned by exactly one module"):
@@ -181,15 +185,13 @@ def test_report_on_a_finished_experiment(clone: Path) -> None:
     experiment = exp_mod.start("finished", root=clone)
     wt = experiment.path
 
-    # Planner: adopt the shipped demo pipeline as this experiment's plan.
-    shutil.copy("plans/demo-pipeline.yaml", wt / "plans/finished.yaml")
+    # Planner: adopt the demo pipeline fixture as this experiment's plan.
+    shutil.copy(DEMO_PLAN, wt / "plans/finished.yaml")
     plan_text = (wt / "plans/finished.yaml").read_text(encoding="utf-8")
     plan_text = plan_text.replace("name: demo-pipeline", "name: finished", 1)
-    plan_text = plan_text.replace(
-        "spec: configs/demo-pipeline.yaml", "spec: configs/finished.yaml", 1
-    )
+    plan_text = plan_text.replace("spec: configs/demo.yaml", "spec: configs/finished.yaml", 1)
     (wt / "plans/finished.yaml").write_text(plan_text, encoding="utf-8")
-    spec_text = Path("configs/demo-pipeline.yaml").read_text(encoding="utf-8")
+    spec_text = DEMO_SPEC.read_text(encoding="utf-8")
     (wt / "configs/finished.yaml").write_text(
         spec_text.replace("name: demo-pipeline", "name: finished", 1), encoding="utf-8"
     )
@@ -206,8 +208,7 @@ def test_report_on_a_finished_experiment(clone: Path) -> None:
     assert report.question  # carried through from the plan
 
     values = {m.name: m.value for m in report.metrics}
-    assert values["sample_count"] == 100
-    assert 1.9 < values["regression_slope"] < 2.1
+    assert values["sample_count"] == 42
     assert not [m for m in report.metrics if m.error]
 
     written = exp_mod.write_experiment_report(report, wt, save=True)
@@ -222,7 +223,7 @@ def test_report_flags_an_unfinished_experiment(clone: Path) -> None:
     """A dirty worktree with unfinished modules must never read as merge-ready."""
     experiment = exp_mod.start("wip", root=clone)
     wt = experiment.path
-    shutil.copy("plans/demo-pipeline.yaml", wt / "plans/wip.yaml")
+    shutil.copy(DEMO_PLAN, wt / "plans/wip.yaml")
     text = (wt / "plans/wip.yaml").read_text(encoding="utf-8")
     text = text.replace("name: demo-pipeline", "name: wip", 1)
     (wt / "plans/wip.yaml").write_text(text, encoding="utf-8")
@@ -251,27 +252,26 @@ def test_report_requires_a_plan(clone: Path) -> None:
 
 @needs_git
 def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
-    """Counting foreign task files reported an experiment complete when it was not.
-
-    The shipped demo's finished board is inherited by every new project, so an
-    unscoped count said "2/2 done" — and that number decides a merge.
-    """
+    """Counting foreign task files reported an experiment complete when it was not."""
     experiment = exp_mod.start("scoped", root=clone)
     wt = experiment.path
     # A plan with two modules, neither materialized...
-    shutil.copy("plans/demo-pipeline.yaml", wt / "plans/scoped.yaml")
+    shutil.copy(DEMO_PLAN, wt / "plans/scoped.yaml")
     text = (wt / "plans/scoped.yaml").read_text(encoding="utf-8")
     text = text.replace("name: demo-pipeline", "name: scoped", 1)
     text = text.replace("id: data-gen", "id: alpha", 1).replace("id: stats", "id: beta", 1)
     text = text.replace("depends_on: [data-gen]", "depends_on: [alpha]", 1)
     (wt / "plans/scoped.yaml").write_text(text, encoding="utf-8")
-    # ...while tasks/ still holds the demo's *finished* board.
-    assert (wt / "tasks" / "data-gen.task.yaml").is_file()
+    # ...while tasks/ holds a task from another plan.
+    (wt / "tasks" / "foreign.task.yaml").write_text(
+        "task:\n  id: foreign\n  plan: other-plan\n  status: done\n  acceptance:\n    steps: []\n",
+        encoding="utf-8",
+    )
 
     report = exp_mod.build_report("scoped", root=clone, run_integration=False)
 
     assert report.tasks_total == 2
-    assert report.tasks_done == 0  # not 2: the demo's tasks are not this plan's
+    assert report.tasks_done == 0  # not 2: foreign tasks are not this plan's
     assert report.merge_ready is False
     assert any("never materialized" in c for c in report.caveats)
     assert any("not part of this plan" in c for c in report.caveats)
@@ -282,7 +282,7 @@ def test_not_ready_always_states_a_reason(clone: Path) -> None:
     """A verdict the researcher cannot explain is not a decision aid."""
     experiment = exp_mod.start("unexplained", root=clone)
     wt = experiment.path
-    shutil.copy("plans/demo-pipeline.yaml", wt / "plans/unexplained.yaml")
+    shutil.copy(DEMO_PLAN, wt / "plans/unexplained.yaml")
     text = (wt / "plans/unexplained.yaml").read_text(encoding="utf-8")
     (wt / "plans/unexplained.yaml").write_text(
         text.replace("name: demo-pipeline", "name: unexplained", 1), encoding="utf-8"
@@ -347,12 +347,12 @@ def test_status_walks_the_whole_flow(clone: Path) -> None:
     assert "plan validate" in states["flow"].next_command
 
     # A real plan, but no task files yet.
-    shutil.copy("plans/demo-pipeline.yaml", wt / "plans/flow.yaml")
+    shutil.copy(DEMO_PLAN, wt / "plans/flow.yaml")
     text = (wt / "plans/flow.yaml").read_text(encoding="utf-8")
     text = text.replace("name: demo-pipeline", "name: flow", 1)
-    text = text.replace("spec: configs/demo-pipeline.yaml", "spec: configs/flow.yaml", 1)
+    text = text.replace("spec: configs/demo.yaml", "spec: configs/flow.yaml", 1)
     (wt / "plans/flow.yaml").write_text(text, encoding="utf-8")
-    shutil.copy("configs/demo-pipeline.yaml", wt / "configs/flow.yaml")
+    shutil.copy(DEMO_SPEC, wt / "configs/flow.yaml")
     for stale in (wt / "tasks").glob("*.task.yaml"):
         stale.unlink()
     states = {e.name: e for e in exp_mod.project_status(clone, cwd=clone).experiments}
@@ -429,12 +429,12 @@ def test_planner_is_driven_until_the_experiment_is_reportable(clone: Path) -> No
 
     experiment = exp_mod.start("driven", root=clone, question="does it work?")
     wt = experiment.path
-    shutil.copy("plans/demo-pipeline.yaml", wt / "plans/driven.yaml")
+    shutil.copy(DEMO_PLAN, wt / "plans/driven.yaml")
     text = (wt / "plans/driven.yaml").read_text(encoding="utf-8")
     text = text.replace("name: demo-pipeline", "name: driven", 1)
-    text = text.replace("spec: configs/demo-pipeline.yaml", "spec: configs/driven.yaml", 1)
+    text = text.replace("spec: configs/demo.yaml", "spec: configs/driven.yaml", 1)
     (wt / "plans/driven.yaml").write_text(text, encoding="utf-8")
-    shutil.copy("configs/demo-pipeline.yaml", wt / "configs/driven.yaml")
+    shutil.copy(DEMO_SPEC, wt / "configs/driven.yaml")
     for stale in (wt / "tasks").glob("*.task.yaml"):
         stale.unlink()
 

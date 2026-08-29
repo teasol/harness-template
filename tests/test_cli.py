@@ -15,6 +15,9 @@ import pytest
 
 from harness.cli import main
 
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+DEMO_PLAN = str(FIXTURES_DIR / "demo-pipeline.yaml")
+
 NONDET_SPEC = """
 name: nondet
 steps:
@@ -119,7 +122,7 @@ def test_reproduce_reports_failing_spec_as_usage_error(
 
 
 def test_plan_validate(capsys) -> None:
-    assert main(["plan", "validate", "plans/demo-pipeline.yaml"]) == 0
+    assert main(["plan", "validate", DEMO_PLAN]) == 0
     assert "valid" in capsys.readouterr().out
 
 
@@ -131,12 +134,12 @@ def test_plan_validate_bad_plan_returns_two(tmp_path: Path) -> None:
 
 def test_plan_materialize_and_status(tmp_path: Path, capsys) -> None:
     tasks = str(tmp_path / "tasks")
-    assert main(["plan", "materialize", "plans/demo-pipeline.yaml", "--tasks-dir", tasks]) == 0
+    assert main(["plan", "materialize", DEMO_PLAN, "--tasks-dir", tasks]) == 0
     assert "wrote" in capsys.readouterr().out
     # Second run is a no-op without --force.
-    assert main(["plan", "materialize", "plans/demo-pipeline.yaml", "--tasks-dir", tasks]) == 0
+    assert main(["plan", "materialize", DEMO_PLAN, "--tasks-dir", tasks]) == 0
     assert "already exist" in capsys.readouterr().out
-    assert main(["plan", "status", "plans/demo-pipeline.yaml", "--tasks-dir", tasks]) == 0
+    assert main(["plan", "status", DEMO_PLAN, "--tasks-dir", tasks]) == 0
     assert "Progress: 0/2 done" in capsys.readouterr().out
 
 
@@ -146,8 +149,8 @@ def test_plan_status_check_detects_drift(tmp_path: Path, capsys) -> None:
 
     tasks_dir = tmp_path / "tasks"
     tasks = str(tasks_dir)
-    status_check = ["plan", "status", "plans/demo-pipeline.yaml", "--tasks-dir", tasks, "--check"]
-    main(["plan", "materialize", "plans/demo-pipeline.yaml", "--tasks-dir", tasks])
+    status_check = ["plan", "status", DEMO_PLAN, "--tasks-dir", tasks, "--check"]
+    main(["plan", "materialize", DEMO_PLAN, "--tasks-dir", tasks])
     assert main(status_check) == 0
 
     stale = tasks_dir / "stats.task.yaml"
@@ -167,7 +170,7 @@ def test_plan_status_check_detects_drift(tmp_path: Path, capsys) -> None:
 @pytest.fixture()
 def tasks_dir(tmp_path: Path) -> str:
     path = str(tmp_path / "tasks")
-    main(["plan", "materialize", "plans/demo-pipeline.yaml", "--tasks-dir", path])
+    main(["plan", "materialize", DEMO_PLAN, "--tasks-dir", path])
     return path
 
 
@@ -264,7 +267,7 @@ def test_task_done_fails_on_missing_deliverable(tasks_dir: str, results: str, ca
 
     path = Path(tasks_dir) / "data-gen.task.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    data["task"]["deliverables"].append("src/demo_pipeline/ghost.py")
+    data["task"]["deliverables"].append("scripts/ghost.py")
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
     code = main(
@@ -286,8 +289,14 @@ def test_unknown_command_exits_two() -> None:
 # plan check: gates a project's plans without naming one
 
 
-def test_plan_check_passes_on_the_shipped_plan(capsys) -> None:
-    assert main(["plan", "check"]) == 0
+def test_plan_check_passes_on_a_plan(tmp_path: Path, capsys) -> None:
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    tasks = tmp_path / "tasks"
+    shutil.copy(DEMO_PLAN, plans / "demo-pipeline.yaml")
+    main(["plan", "materialize", str(plans / "demo-pipeline.yaml"), "--tasks-dir", str(tasks)])
+    capsys.readouterr()
+    assert main(["plan", "check", "--plans-dir", str(plans), "--tasks-dir", str(tasks)]) == 0
     assert "demo-pipeline.yaml" in capsys.readouterr().out
 
 
@@ -303,7 +312,7 @@ def test_plan_check_reports_drift(tmp_path: Path, capsys) -> None:
     plans = tmp_path / "plans"
     plans.mkdir()
     tasks = tmp_path / "tasks"
-    shutil.copy("plans/demo-pipeline.yaml", plans / "demo-pipeline.yaml")
+    shutil.copy(DEMO_PLAN, plans / "demo-pipeline.yaml")
     main(["plan", "materialize", str(plans / "demo-pipeline.yaml"), "--tasks-dir", str(tasks)])
     capsys.readouterr()
     assert main(["plan", "check", "--plans-dir", str(plans), "--tasks-dir", str(tasks)]) == 0
@@ -326,7 +335,7 @@ def test_plan_status_counts_only_this_plans_modules(tmp_path: Path, capsys) -> N
         "task:\n  id: stranger\n  plan: elsewhere\n  status: done\n  acceptance:\n    steps: []\n",
         encoding="utf-8",
     )
-    assert main(["plan", "status", "plans/demo-pipeline.yaml", "--tasks-dir", str(tasks)]) == 0
+    assert main(["plan", "status", DEMO_PLAN, "--tasks-dir", str(tasks)]) == 0
     out = capsys.readouterr().out
     assert "Progress: 0/2 done" in out
     assert "not in this plan" in out
