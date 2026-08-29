@@ -15,7 +15,23 @@ from harness import checks as checks_mod
 from harness.reproducibility import collect_provenance, math_env, seed_env
 from harness.spec import Spec, Step
 
-_RUN_ENV_KEYS = ("HARNESS_RESULTS_DIR", "HARNESS_RUN_ID", "HARNESS_PYTHON", "HARNESS_SEED")
+_RUN_ENV_KEYS = (
+    "HARNESS_RESULTS_DIR",
+    "HARNESS_RUN_ID",
+    "HARNESS_PYTHON",
+    "HARNESS_SEED",
+    "PROJECT_PYTHON",
+)
+
+
+def _project_python(root: Path) -> str:
+    """The project's own interpreter, if it declared one. Never fatal."""
+    from harness.project import ProjectError, load_project_context
+
+    try:
+        return load_project_context(root).python
+    except ProjectError:
+        return ""
 
 
 @dataclasses.dataclass
@@ -88,6 +104,14 @@ class Runner:
         # Steps must not assume a `python` binary exists (Debian/Ubuntu ship only
         # `python3`); they invoke the very interpreter running the harness.
         os.environ["HARNESS_PYTHON"] = sys.executable or "python3"
+        # HARNESS_PYTHON is the harness's own interpreter and usually has none
+        # of the project's dependencies — a step that needs torch must not
+        # reach for it. PROJECT_PYTHON is the project's, when it declares one.
+        project_python = _project_python(self.root)
+        if project_python:
+            os.environ["PROJECT_PYTHON"] = project_python
+        else:
+            os.environ.pop("PROJECT_PYTHON", None)
         if spec.seed is not None:
             os.environ["HARNESS_SEED"] = str(spec.seed)
         else:

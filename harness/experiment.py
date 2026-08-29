@@ -17,6 +17,7 @@ finished reports — not something one experiment may reach across to do.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import re
@@ -25,6 +26,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from harness import planners as planners_mod
+from harness import project as project_mod
 from harness.checks import CheckError, lookup_metric
 from harness.paths import (
     get_agents_config_path,
@@ -499,7 +502,7 @@ def build_report(
 
     # A result whose Planner model is unknown cannot be compared with any other
     # result, so the gap is stated rather than left to be noticed.
-    if not (report.tiers.get("planner") or {}).get("model"):
+    if not ((report.tiers.get("planner") or {}).get("model") or _planner_model(experiment, root)):
         report.caveats.append(
             "Planner model not recorded — this run cannot be compared with another. "
             f"Register it: harness planner brief {name} --register <label> --model <model>"
@@ -651,6 +654,24 @@ def write_experiment_report(
 # Planner registration
 
 
+def _planner_model(experiment: Experiment, root: str | Path = ".") -> str:
+    """The model driving this experiment, from the marker or the registry.
+
+    A registered Planner carries its own model, so an experiment linked to one
+    is never "model not recorded" — the registry answers on its behalf.
+    """
+    marker = planner_of(experiment) or {}
+    if marker.get("model"):
+        return str(marker["model"])
+    label = marker.get("planner")
+    if label:
+        try:
+            return planners_mod.load(str(label), root).model
+        except planners_mod.PlannerError:
+            return ""
+    return ""
+
+
 def planner_brief(name: str, root: str | Path = ".") -> str:
     """The Planner's working briefing: question, state, and the next command.
 
@@ -688,7 +709,25 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
             "Plan nothing and spawn no Worker until you agree, then record it",
             "verbatim so it survives this session and reaches the report.",
         ]
-    lines += ["", "## State", "", f"**{state.state}** — {state.detail}", ""]
+    lines += [""]
+    # A Planner with a memory opens with it: everything it learned in earlier
+    # experiments, so the hour spent learning this project is paid once.
+    registered = planner_of(experiment) or {}
+    if registered.get("planner"):
+        with contextlib.suppress(planners_mod.PlannerError):
+            lines += planners_mod.brief_lines(
+                planners_mod.load(registered["planner"], root), experiment.name
+            )
+
+    # Before the state and long before any plan: what this project already
+    # decided. A Planner that reads the wrong document plans against the wrong
+    # facts, and it has no way to know which document is which unless told.
+    try:
+        lines += project_mod.brief_lines(project_mod.load_project_context(exp_root), exp_root)
+    except project_mod.ProjectError as exc:
+        lines += ["## Project context", "", f"> Could not be read: {exc}", ""]
+
+    lines += ["## State", "", f"**{state.state}** — {state.detail}", ""]
 
     if experiment.plan_path.is_file() and experiment.question:
         try:
@@ -712,8 +751,7 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
                 lines.append(f"| `{module_id}` | {status} | {worker} | {deps} |")
             lines.append("")
 
-    registered = planner_of(experiment)
-    if not (registered or {}).get("model"):
+    if not _planner_model(experiment, root):
         # A hand-appointed Planner is the one agent the harness cannot inspect.
         # If it does not say what it is, the report cannot either.
         lines += [

@@ -22,6 +22,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`harness project` — the project describes itself once, instead of every
+  Planner rediscovering it.** `configs/project.yaml` registers the documents a
+  Planner must read (with `docs.authority` naming the one that wins when two
+  sources disagree), the house reporting format, the environment script, the
+  project interpreter, and conventions a plan must respect. Every Planner
+  briefing opens with it, `exp start` copies it into the new worktree, and
+  `project show` fails when a declared path does not exist. Motivated by a near
+  miss: a summary line reading `SMAD4 0.4282 -> 0.5483` is a single-branch
+  figure, while the authoritative per-task table said the arm scored `0.4465`.
+- **`${PROJECT_PYTHON}`** is exported to every step when the project declares an
+  interpreter. `${HARNESS_PYTHON}` is the harness's own and generally has none
+  of the project's dependencies; conflating them fails at acceptance time.
+- **Planners that outlive one experiment.** `planner create|list|show|note`
+  registers a named Planner with a model and an accumulating memory;
+  `exp start --planner <name>` hangs an experiment off it, inheriting the model
+  and opening the briefing with what that Planner already learned. The registry
+  lives in the main repository, so every experiment under one Planner appends
+  to the same memory rather than to a copy that dies with the branch. Notes
+  carry an explicit staleness warning; durable policy belongs in
+  `project.yaml`, which the researcher owns.
 - **`plan approve`, and `plan run` requires it.** A plan is a proposal until a
   person agrees to it. Approval is fingerprinted against the plan's contents,
   so editing a plan lapses its approval. Approving prints what it commits you

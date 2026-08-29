@@ -43,6 +43,7 @@ Orchestration commands:
 
 ```bash
 python -m harness plan validate|materialize|status <plan>.yaml
+python -m harness plan approve <plan>.yaml --by <who>      # plan run requires this
 python -m harness plan check                              # every plan, no name needed
 python -m harness task list|show|claim|block|verify|done --id <id>
 python -m harness task verify --all [--status done]       # audit the board
@@ -53,7 +54,11 @@ python -m harness plan run <plan>.yaml                    # drain the ready queu
 Experiment commands (Tier 1 boundary):
 
 ```bash
-python -m harness exp start <name> [--question "..."] [--base main]
+python -m harness project init|show                        # what a Planner must know here
+python -m harness planner create <name> --model M [--effort E]
+python -m harness planner list|show <name>
+python -m harness planner note <name> --add "..." [--experiment E]
+python -m harness exp start <name> [--question "..."] [--planner P] [--base main]
 python -m harness exp question <name> [--set "..."]       # record it later
 python -m harness exp list
 python -m harness exp report <name> [--determinism] [--save]

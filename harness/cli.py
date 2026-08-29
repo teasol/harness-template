@@ -41,6 +41,8 @@ from pathlib import Path
 
 from harness import experiment as exp_mod
 from harness import plan as plan_mod
+from harness import planners as planners_mod
+from harness import project as project_mod
 from harness import task as task_mod
 from harness.experiment import ExperimentError
 from harness.paths import (
@@ -628,8 +630,49 @@ def build_parser() -> argparse.ArgumentParser:
     setup_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
     setup_cmd.set_defaults(func=cmd_setup)
 
+    project_cmd = sub.add_parser(
+        "project", help="What a Planner must know before it plans anything here"
+    )
+    project_sub = project_cmd.add_subparsers(dest="project_command", required=True)
+    project_init = project_sub.add_parser("init", help="Scaffold configs/project.yaml")
+    project_init.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    project_init.add_argument("--force", action="store_true", help="Overwrite an existing file")
+    project_init.set_defaults(func=cmd_project_init)
+    project_show = project_sub.add_parser(
+        "show", help="Print the project context and flag paths that do not exist"
+    )
+    project_show.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    project_show.set_defaults(func=cmd_project_show)
+
     planner_cmd = sub.add_parser("planner", help="Planner registration")
     planner_sub = planner_cmd.add_subparsers(dest="planner_command", required=True)
+    planner_create = planner_sub.add_parser(
+        "create", help="Register a Planner that outlives one experiment"
+    )
+    planner_create.add_argument("name", help="Planner name (lowercase, digits, hyphens)")
+    planner_create.add_argument("--model", required=True, help="Model this Planner runs on")
+    planner_create.add_argument("--effort", default=None, help="Reasoning level")
+    planner_create.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    planner_create.set_defaults(func=cmd_planner_create)
+
+    planner_list = planner_sub.add_parser("list", help="Every registered Planner")
+    planner_list.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    planner_list.set_defaults(func=cmd_planner_list)
+
+    planner_show = planner_sub.add_parser("show", help="One Planner and everything it knows")
+    planner_show.add_argument("name", help="Planner name")
+    planner_show.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    planner_show.set_defaults(func=cmd_planner_show)
+
+    planner_note = planner_sub.add_parser(
+        "note", help="Record something the next run should not rediscover"
+    )
+    planner_note.add_argument("name", help="Planner name")
+    planner_note.add_argument("--add", required=True, help="The finding, in one sentence")
+    planner_note.add_argument("--experiment", default=None, help="Where it was learned")
+    planner_note.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    planner_note.set_defaults(func=cmd_planner_note)
+
     planner_brief = planner_sub.add_parser(
         "brief", help="Print everything a session needs to act as this experiment's Planner"
     )
@@ -681,17 +724,26 @@ def cmd_exp_start(args: argparse.Namespace) -> int:
             base=args.base,
             question=args.question or "",
         )
+        # A registered Planner already knows what it runs on and what it has
+        # learned, so starting an experiment under one carries both across
+        # instead of beginning from nothing.
+        model, effort = (args.model or ""), (args.effort or "")
+        if planners_mod.exists(args.planner, args.root):
+            planner = planners_mod.link_experiment(args.planner, args.name, root=args.root)
+            model = model or planner.model
+            effort = effort or planner.effort
+
         # At creation time nobody knows which model will drive this yet, so an
         # unknown model leaves the Planner unregistered rather than recorded as
         # blank. The briefing then opens by asking the session to say what it
         # is — a placeholder would just look like an answer.
-        if (args.model or "").strip():
+        if model.strip():
             exp_mod.register_planner(
                 args.name,
                 args.planner,
                 root=args.root,
-                model=args.model,
-                effort=args.effort or "",
+                model=model,
+                effort=effort,
             )
         brief = exp_mod.planner_brief(args.name, root=args.root)
     except ExperimentError as exc:
@@ -941,7 +993,132 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Project context
+
+
+def cmd_project_init(args: argparse.Namespace) -> int:
+    try:
+        path = project_mod.write_template(args.root, force=args.force)
+    except project_mod.ProjectError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"wrote {path}")
+    print(
+        "Edit it, then every Planner briefing opens with it.\n"
+        "The one that matters most is `docs.authority`: the document that wins\n"
+        "when two sources disagree about a number."
+    )
+    return 0
+
+
+def cmd_project_show(args: argparse.Namespace) -> int:
+    try:
+        context = project_mod.load_project_context(args.root)
+    except project_mod.ProjectError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if context.is_empty:
+        print("No project context declared.")
+        print(f"  expected at: {project_mod.config_path(args.root)}")
+        print("  create one:  python -m harness project init")
+        return 1
+
+    print(f"Project context: {context.source}\n")
+    if context.authority_doc:
+        print(f"  numbers of record  {context.authority_doc}")
+    for name, rel in sorted(context.docs.items()):
+        if name != "authority":
+            print(f"  {name:<18} {rel}")
+    if context.report_format:
+        print(f"  {'report format':<18} {context.report_format}")
+    if context.environment:
+        print(f"  {'environment':<18} {context.environment}")
+    if context.python:
+        print(f"  {'project python':<18} {context.python}  (steps: ${{PROJECT_PYTHON}})")
+    if context.conventions:
+        print("\n  conventions:")
+        for i, rule in enumerate(context.conventions, 1):
+            print(f"    {i}. {rule}")
+
+    gaps = project_mod.missing_docs(context, args.root)
+    if gaps:
+        print("\n  DECLARED BUT MISSING — a Planner would be sent to nothing:")
+        for gap in gaps:
+            print(f"    {gap}")
+        return 1
+    print()
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Planner registration
+
+
+def cmd_planner_create(args: argparse.Namespace) -> int:
+    try:
+        planner = planners_mod.create(args.name, args.model, args.effort or "", root=args.root)
+    except planners_mod.PlannerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(
+        f"Planner '{planner.name}' created ({planner.model}"
+        + (f", effort {planner.effort}" if planner.effort else "")
+        + ")."
+    )
+    print(f"  record: {planner.path}")
+    print(
+        f"\nStart experiments under it, and they share its memory:\n"
+        f"  python -m harness exp start <name> --planner {planner.name}"
+    )
+    return 0
+
+
+def cmd_planner_list(args: argparse.Namespace) -> int:
+    planners = planners_mod.list_planners(args.root)
+    if not planners:
+        print("No planners registered.")
+        print("  create one: python -m harness planner create <name> --model <model>")
+        return 1
+    print(f"  {'NAME':<16} {'MODEL':<28} {'EFFORT':<8} EXPERIMENTS  NOTES")
+    for planner in planners:
+        print(
+            f"  {planner.name:<16} {planner.model:<28} {planner.effort or '-':<8} "
+            f"{len(planner.experiments):<12} {len(planner.notes)}"
+        )
+    return 0
+
+
+def cmd_planner_show(args: argparse.Namespace) -> int:
+    try:
+        planner = planners_mod.load(args.name, args.root)
+    except planners_mod.PlannerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"Planner: {planner.name}")
+    print(f"  model:   {planner.model}" + (f" (effort {planner.effort})" if planner.effort else ""))
+    print(f"  created: {planner.created_at}")
+    print(f"  drove:   {', '.join(planner.experiments) or '(none yet)'}")
+    if planner.notes:
+        print(f"\n  Carried forward ({len(planner.notes)}):")
+        for note in planner.notes:
+            where = f" [{note.experiment}]" if note.experiment else ""
+            print(f"    - {note.text}{where}")
+            print(f"      {note.at}")
+    else:
+        print("\n  No notes yet.")
+    return 0
+
+
+def cmd_planner_note(args: argparse.Namespace) -> int:
+    try:
+        planner = planners_mod.add_note(
+            args.name, args.add, experiment=args.experiment or "", root=args.root
+        )
+    except planners_mod.PlannerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"recorded — {planner.name} now carries {len(planner.notes)} note(s) forward")
+    return 0
 
 
 def cmd_planner_brief(args: argparse.Namespace) -> int:

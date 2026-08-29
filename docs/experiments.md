@@ -86,6 +86,73 @@ Worktrees default to `.experiments/<name>` inside the repo and are gitignored.
 Removing a worktree never deletes the branch, so a rejected experiment remains
 inspectable.
 
+## Project context: what every Planner is told
+
+A harness dropped into an existing project inherits a world it did not build.
+Where the numbers of record live, which interpreter has the dependencies, which
+directions are already closed — a Planner rediscovers all of it, differently
+each time, and a Planner that reads the wrong document plans against the wrong
+facts.
+
+```bash
+python -m harness project init    # scaffold configs/project.yaml, then edit it
+python -m harness project show    # print it, and flag paths that do not exist
+```
+
+```yaml
+project:
+  docs:
+    authority: docs/current_status.md      # wins when two sources disagree
+    architecture: docs/current_architecture.md
+  report_format: docs/current_status.md    # this project's own reporting shape
+  environment: scripts/node_env.sh         # resolves per-machine paths
+  python: /opt/envs/proj/bin/python        # steps get it as ${PROJECT_PYTHON}
+  conventions:
+    - "No t-tests on deterministic arms."
+```
+
+Every Planner briefing opens with this, and `exp start` copies it into the new
+worktree. `project show` exits non-zero when a declared path is missing —
+pointing a Planner at a moved file is worse than pointing it at nothing,
+because it is told where the truth lives and finds none.
+
+**`docs.authority` is the one that matters.** Point it at the detailed table,
+not a summary. Summaries compress, and a compressed figure read as an
+authoritative one is how a Planner reports a result nobody measured. This is
+not hypothetical: a status document's summary line once read
+`SMAD4 0.4282 -> 0.5483` — a single-branch figure — while the authoritative
+per-task table said the arm scored `0.4465`.
+
+**`${PROJECT_PYTHON}` is not `${HARNESS_PYTHON}`.** The latter is whatever
+interpreter is running the harness, typically a bare `python3` with none of the
+project's dependencies. Steps that need the project's packages must use
+`${PROJECT_PYTHON}`.
+
+## Planners that outlive one experiment
+
+A Planner spends its first hour learning the project. Discarding that at the
+end of every experiment means paying the hour again — and repeating the same
+first-time mistakes, because what would have prevented them was never written
+down.
+
+```bash
+python -m harness planner create icf --model claude-opus-5 --effort high
+python -m harness exp start baseline --planner icf     # inherits model + memory
+python -m harness planner note icf --experiment baseline \
+  --add "ICF_CKPT is empty on this node; that is correct for a training-free arm."
+python -m harness planner show icf
+```
+
+An experiment started under a registered Planner inherits its model (so it is
+never "model not recorded") and opens its briefing with everything that Planner
+has learned. The registry lives in the **main** repository, not in a worktree,
+so every experiment under one Planner appends to the same memory.
+
+Notes are that Planner's operational findings, carried forward with an explicit
+warning that they may have gone stale. Durable project policy belongs in
+`project.yaml` instead, which the researcher owns — one is a lab notebook, the
+other is the rules.
+
 ## Registering a Planner
 
 A Planner can be spawned rather than opened by hand:
