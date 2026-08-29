@@ -106,6 +106,32 @@ Configure the adapter in `configs/worker.yaml`:
 | `manual` (default) | Write the briefing to a file and stop, for a human to hand to a session. Works with no configuration and no API key — and builds nothing. |
 | `cli` | Run a configured shell command — a coding agent in headless mode. **This is what makes the Planner spawn Workers by itself.** The command is *your* configuration; the harness names no vendor. |
 
+### Choosing the tier
+
+```bash
+harness setup --list
+harness setup --platform <p> --model <m> --effort <level>
+```
+
+A Worker's task is bounded and fully specified, so it can usually run on a
+small fast model; keeping the expensive one for planning is the reason to
+separate the tiers at all. **A tier you cannot choose is not a tier**, so the
+platform, model, and reasoning level are explicit settings rather than
+whatever a tool happens to default to. A command that references `{model}` or
+`{effort}` without a value configured is refused, so a Worker never silently
+runs at the platform default.
+
+Presets live in `configs/worker-platforms.yaml` as **data** — adding a tool, or
+a local model, is an entry there rather than a change to `harness/`. Nothing in
+the harness core names a vendor.
+
+Both tiers are recorded: `harness planner brief --register <label> --model <m>
+--effort <e>` notes what the Planner session runs on (the harness cannot set
+it — a person opened that session — but it can record it), and every Worker
+invocation writes its platform, model, and effort to the task log and the
+worker report. `exp report` shows both under **Tiers**, so which model built
+what is auditable rather than merely intended.
+
 Because the default is `manual`, automatic Workers are off until you turn them
 on. `harness status` and `plan run` both say so rather than letting you wonder
 why nothing was built. `configs/worker.yaml` carries worked examples for

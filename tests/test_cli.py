@@ -346,3 +346,63 @@ def test_status_command_runs_and_points_somewhere(capsys) -> None:
     assert "Project:" in out
     assert "Next:" in out
     assert "README.md" in out
+
+
+# ---------------------------------------------------------------------------
+# setup: choosing the Worker tier
+
+
+def test_setup_lists_platforms(capsys) -> None:
+    assert main(["setup", "--list"]) == 0
+    out = capsys.readouterr().out
+    assert "claude" in out and "reasoning levels" in out
+
+
+def test_setup_writes_a_runnable_config(tmp_path: Path, capsys) -> None:
+    shutil.copytree("configs", tmp_path / "configs")
+    code = main(
+        [
+            "setup",
+            "--platform",
+            "claude",
+            "--model",
+            "haiku",
+            "--effort",
+            "low",
+            "--root",
+            str(tmp_path),
+        ]
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "model:    haiku" in out and "effort:   low" in out
+
+    from harness.worker import load_worker_config
+
+    config = load_worker_config(root=tmp_path)
+    assert config.adapter == "cli" and config.model == "haiku"
+
+
+def test_setup_rejects_an_unknown_platform(tmp_path: Path, capsys) -> None:
+    shutil.copytree("configs", tmp_path / "configs")
+    assert main(["setup", "--platform", "nope", "--root", str(tmp_path)]) == 2
+    assert "unknown platform" in capsys.readouterr().err
+
+
+def test_setup_rejects_an_unknown_reasoning_level(tmp_path: Path, capsys) -> None:
+    shutil.copytree("configs", tmp_path / "configs")
+    code = main(
+        [
+            "setup",
+            "--platform",
+            "claude",
+            "--model",
+            "haiku",
+            "--effort",
+            "turbo",
+            "--root",
+            str(tmp_path),
+        ]
+    )
+    assert code == 2
+    assert "not a reasoning level" in capsys.readouterr().err

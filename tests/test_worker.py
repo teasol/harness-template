@@ -268,3 +268,24 @@ def test_root_placeholder_is_substituted(project: Path) -> None:
         root=project,
     )
     assert outcome.succeeded
+
+
+def test_model_and_effort_reach_the_command(project: Path) -> None:
+    """The chosen tier must actually be passed through, not just recorded."""
+    config = WorkerConfig(
+        adapter="cli",
+        platform="fake",
+        model="tiny-7b",
+        effort="low",
+        command="echo model={model} effort={effort} > seen.txt && touch src/widget.py",
+        attempts=2,
+        label="tier3",
+    )
+    outcome = run_task(project / "tasks", "widget", config, root=project)
+
+    assert outcome.succeeded
+    assert (project / "seen.txt").read_text(encoding="utf-8").strip() == "model=tiny-7b effort=low"
+    assert (outcome.platform, outcome.model, outcome.effort) == ("fake", "tiny-7b", "low")
+    # The tier is on the audit trail, so a report can say what built what.
+    log = "\n".join(load_task(project / "tasks", "widget").log)
+    assert "[fake tiny-7b low]" in log

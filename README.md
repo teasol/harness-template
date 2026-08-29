@@ -55,6 +55,10 @@ Open an agent session and tell it, in your own words:
 > The question: does keeping only the top 10% of attention weights preserve
 > most of the attention mass? Report the retained mass and the fraction kept.
 
+Add `--model <m> --effort <level>` to record which tier that Planner session
+is running on. The harness cannot set a model for a session a person opened,
+but recording it makes the tier split checkable.
+
 The agent runs that command itself and gets its own briefing — which worktree
 it owns, the rules, the current board, what to do next. Nothing to copy and
 paste, and it can re-run the command whenever it needs current state.
@@ -78,20 +82,27 @@ the actual failure output — up to 6 attempts. A module that still fails is
 marked `blocked` and handed back to the Planner; that usually means the brief
 or the contract is wrong, not that the Worker is bad.
 
-**Workers are manual until you say otherwise.** Out of the box, `plan run`
-writes a briefing file and stops — nothing is built. To have the Planner spawn
-Workers itself, set `adapter: cli` in `configs/worker.yaml` and uncomment the
-command for your coding agent (examples for several are in that file):
+**Workers are manual until you configure them.** Out of the box `plan run`
+writes a briefing and stops. One command turns them on:
 
-```yaml
-worker:
-  adapter: cli
-  command: "<your coding agent's non-interactive invocation>"
+```bash
+python -m harness setup --list                                    # what's available
+python -m harness setup --platform claude --model haiku --effort low
 ```
 
-Then `plan run` builds each module with no human in between. The harness names
-no vendor — the command is yours, so a different tool, or a local model, is an
-edit to one line. `harness status` tells you which mode you are in.
+That picks the platform, **the model, and the reasoning level** Workers run on,
+and writes `configs/worker.yaml`. After it, `plan run` builds each module with
+no human in between.
+
+Choosing the tier is the point: a Worker's job is bounded and fully specified,
+so a small fast model usually suffices — and reserving the expensive one for
+planning is the whole economic argument for splitting the tiers. If you cannot
+choose, the split buys you nothing.
+
+Platform knowledge lives in `configs/worker-platforms.yaml` as **data**, so
+adding your lab's tool (or a local model) is an entry there, not a change to
+the harness. Both tiers are recorded in the report, so which model built what
+is auditable rather than merely intended.
 
 ### 4. Read the report and decide
 
@@ -158,6 +169,7 @@ the numbers." This template makes verification a first-class artifact:
 
 ```bash
 make status    # where am I, what next
+make setup     # choose the Worker platform / model / reasoning level
 make verify    # run the verification spec end-to-end
 make reproduce # run it twice and diff every artifact (determinism gate)
 make test      # pytest suite

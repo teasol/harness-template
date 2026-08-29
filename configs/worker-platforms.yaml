@@ -1,0 +1,68 @@
+# Worker platform presets — vendor knowledge as DATA, never in harness/ code.
+#
+# `harness setup` reads this to offer choices; you can edit it, add your lab's
+# own entry, or ignore it entirely and write configs/worker.yaml by hand. The
+# harness core knows nothing about any of these tools: it substitutes
+# placeholders into a string and runs it.
+#
+# Placeholders: {model} {effort} {root} {brief_file} {task_file} {task_id}
+#
+# FLAGS GO STALE. Each entry was checked against a real installation, but your
+# version may differ — run `<tool> --help` if a command misbehaves, then fix it
+# here. A preset is a starting point, not a promise.
+
+platforms:
+  claude:
+    label: Claude Code
+    docs: claude --help
+    command: >-
+      claude -p --model {model} --effort {effort}
+      --permission-mode acceptEdits --add-dir {root}
+    resume_command: >-
+      claude -p --continue --model {model} --effort {effort}
+      --permission-mode acceptEdits --add-dir {root}
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: low
+    model_hint: "an alias (fable, opus, sonnet, haiku) or a full model id"
+    default_model: haiku
+    reads_brief_from: stdin
+
+  codex:
+    label: Codex CLI
+    docs: codex exec --help
+    # Effort is a config override rather than a flag; verify the key name
+    # against your version with `codex --help` / your config.toml.
+    command: >-
+      codex exec --cd {root} -m {model}
+      -c model_reasoning_effort={effort} "$(cat {brief_file})"
+    resume_command: >-
+      codex exec resume --last --cd {root} -m {model}
+      -c model_reasoning_effort={effort} "$(cat {brief_file})"
+    efforts: [minimal, low, medium, high]
+    default_effort: low
+    model_hint: "a model id your Codex install accepts"
+    default_model: ""
+    reads_brief_from: argument
+
+  opencode:
+    label: opencode
+    docs: opencode run --help
+    # `--variant` is opencode's provider-specific reasoning effort.
+    command: 'opencode run -m {model} --variant {effort} "$(cat {brief_file})"'
+    resume_command: 'opencode run --continue -m {model} --variant {effort} "$(cat {brief_file})"'
+    efforts: [minimal, low, medium, high, max]
+    default_effort: low
+    model_hint: "provider/model, e.g. anthropic/claude-haiku-4-5-20251001"
+    default_model: ""
+    reads_brief_from: argument
+
+  custom:
+    label: Anything else (write the command yourself)
+    docs: ""
+    command: ""
+    resume_command: ""
+    efforts: []
+    default_effort: ""
+    model_hint: "whatever your command expects"
+    default_model: ""
+    reads_brief_from: stdin

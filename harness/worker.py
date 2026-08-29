@@ -56,6 +56,9 @@ class WorkerConfig:
     """How to invoke a Worker. Every field is the lab's choice, not ours."""
 
     adapter: str = "manual"
+    platform: str = ""
+    model: str = ""
+    effort: str = ""
     command: str = ""
     resume_command: str = ""
     attempts: int = DEFAULT_ATTEMPTS
@@ -76,6 +79,9 @@ class WorkerConfig:
             raise WorkerError(f"'worker.attempts' must be a positive integer, got: {attempts!r}")
         config = cls(
             adapter=adapter,
+            platform=str(data.get("platform", "")),
+            model=str(data.get("model", "")),
+            effort=str(data.get("effort", "")),
             command=str(data.get("command", "")),
             resume_command=str(data.get("resume_command", "")),
             attempts=attempts,
@@ -84,6 +90,15 @@ class WorkerConfig:
         )
         if config.adapter == "cli" and not config.command.strip():
             raise WorkerError("worker adapter 'cli' requires a 'command'")
+        # A command asking for a model or an effort it was never given would
+        # silently run at the platform default — which defeats the point of
+        # choosing a tier at all.
+        for field in ("model", "effort"):
+            if "{" + field + "}" in config.command and not getattr(config, field):
+                raise WorkerError(
+                    f"the worker command uses {{{field}}} but no '{field}' is set. "
+                    f"Run `harness setup` or set '{field}' in the worker config."
+                )
         return config
 
 
@@ -212,6 +227,9 @@ class WorkerOutcome:
     task_id: str
     adapter: str
     status: str = "pending"  # done | failed | needs_human | error
+    platform: str = ""
+    model: str = ""
+    effort: str = ""
     attempts: list[Attempt] = dataclasses.field(default_factory=list)
     brief_path: str | None = None
     cost: str = "not measured (adapter reports none)"
@@ -230,6 +248,8 @@ def _invoke_cli(config: WorkerConfig, task: Task, root: Path, prompt: str, brief
         task_file=str(task.path),
         brief_file=str(brief_path),
         root=str(root),
+        model=config.model,
+        effort=config.effort,
     )
     return subprocess.run(  # noqa: S602 - the command is the lab's configuration
         command,
@@ -260,7 +280,13 @@ def run_task(
     root = Path(root).resolve()
     task = load_task(tasks_dir, task_id)
     label = worker_name or config.label
-    outcome = WorkerOutcome(task_id=task.id, adapter=config.adapter)
+    outcome = WorkerOutcome(
+        task_id=task.id,
+        adapter=config.adapter,
+        platform=config.platform,
+        model=config.model,
+        effort=config.effort,
+    )
 
     brief_dir = Path(results_dir)
     if not brief_dir.is_absolute():
@@ -309,8 +335,11 @@ def run_task(
             attempt.detail = "acceptance passed" if result.success else "acceptance failed"
         outcome.attempts.append(attempt)
 
+        tier = " ".join(x for x in (config.platform, config.model, config.effort) if x)
         task.log.append(
-            f"{_now()} worker {label} attempt {number}/{config.attempts}: {attempt.detail}"
+            f"{_now()} worker {label}"
+            + (f" [{tier}]" if tier else "")
+            + f" attempt {number}/{config.attempts}: {attempt.detail}"
         )
         save_task(task)
 

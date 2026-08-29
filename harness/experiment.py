@@ -86,6 +86,7 @@ class ExperimentReport:
     artifacts: list[str] = dataclasses.field(default_factory=list)
     caveats: list[str] = dataclasses.field(default_factory=list)
     blockers: list[str] = dataclasses.field(default_factory=list)
+    tiers: dict[str, Any] = dataclasses.field(default_factory=dict)
     provenance: dict[str, Any] = dataclasses.field(default_factory=dict)
     run_dir: str | None = None
 
@@ -314,6 +315,10 @@ def build_report(
     )
     report.commit = report.provenance.get("git_commit")
     report.dirty = report.provenance.get("git_dirty")
+    report.tiers = {
+        "planner": planner_of(experiment),
+        "worker": _worker_tier(exp_root),
+    }
 
     # --- task board: is every module actually finished, and still passing? ---
     # Scoped to *this plan's* modules. A tasks/ directory may hold task files
@@ -496,6 +501,25 @@ def report_markdown(report: ExperimentReport) -> str:
     lines += [f"- {c}" for c in report.caveats] or ["- (nothing outstanding)"]
     lines.append("")
 
+    planner = (report.tiers or {}).get("planner") or {}
+    worker = (report.tiers or {}).get("worker") or {}
+    if planner or worker:
+
+        def _tier(entry: dict[str, Any], fallback: str) -> str:
+            parts = [entry.get("model") or "", entry.get("effort") or ""]
+            shown = " · ".join(p for p in parts if p)
+            return shown or fallback
+
+        lines += [
+            "## Tiers",
+            "",
+            f"- Planner: {planner.get('planner') or 'unregistered'}"
+            f" ({_tier(planner, 'model not recorded')})",
+            f"- Workers: {worker.get('platform') or worker.get('adapter') or 'unknown'}"
+            f" ({_tier(worker, 'model not recorded')})",
+            "",
+        ]
+
     prov = report.provenance
     lines += [
         "## Provenance",
@@ -647,24 +671,46 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
     return "\n".join(lines)
 
 
-def register_planner(name: str, label: str, root: str | Path = ".") -> Path:
-    """Record who is driving an experiment, so idle ones are visible."""
+def register_planner(
+    name: str,
+    label: str,
+    root: str | Path = ".",
+    model: str = "",
+    effort: str = "",
+) -> Path:
+    """Record who is driving an experiment, and on what.
+
+    The harness cannot choose the Planner's model — that session was opened by
+    a person — but recording it makes the tier split auditable: a report can
+    then say which tier ran what, instead of the split being an intention
+    nobody can check.
+    """
     experiment = find_experiment(name, root)
     marker = experiment.path / "results" / "experiments" / experiment.name / "planner.json"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(
-        json.dumps({"experiment": experiment.name, "planner": label}, indent=2) + "\n",
+        json.dumps(
+            {
+                "experiment": experiment.name,
+                "planner": label,
+                "model": model,
+                "effort": effort,
+            },
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return marker
 
 
-def planner_of(experiment: Experiment) -> str | None:
+def planner_of(experiment: Experiment) -> dict[str, Any] | None:
+    """The registered Planner for an experiment, with its declared tier."""
     marker = experiment.path / "results" / "experiments" / experiment.name / "planner.json"
     if not marker.is_file():
         return None
     try:
-        return json.loads(marker.read_text(encoding="utf-8")).get("planner")
+        return json.loads(marker.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
 
@@ -707,6 +753,7 @@ class ProjectStatus:
     project_name: str
     demo_present: bool
     worker_adapter: str = "manual"
+    worker_tier: dict[str, Any] = dataclasses.field(default_factory=dict)
     experiments: list[ExperimentState] = dataclasses.field(default_factory=list)
     here: str | None = None
     headline: str = ""
@@ -803,6 +850,7 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         experiments=experiments,
         here=here,
         worker_adapter=_worker_adapter(root),
+        worker_tier=_worker_tier(root),
     )
 
     if not instantiated:
@@ -834,6 +882,22 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
     if focus.state == "ready to report":
         status.next_steps.append(f"git merge {focus.branch}    # only after you read the report")
     return status
+
+
+def _worker_tier(root: Path) -> dict[str, Any]:
+    """The Worker tier this experiment is configured to use."""
+    from harness.worker import WorkerError, load_worker_config
+
+    try:
+        config = load_worker_config(root=root)
+    except WorkerError as exc:
+        return {"adapter": "misconfigured", "detail": str(exc)}
+    return {
+        "adapter": config.adapter,
+        "platform": config.platform,
+        "model": config.model,
+        "effort": config.effort,
+    }
 
 
 def _worker_adapter(root: Path) -> str:

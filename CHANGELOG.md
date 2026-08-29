@@ -25,6 +25,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`harness setup`** — chooses the platform, **model, and reasoning level**
+  Workers run on, and writes `configs/worker.yaml`. Interactive, or fully
+  non-interactive via `--platform/--model/--effort`; `--list` shows what is
+  available. A tier that cannot be chosen is not a tier: without this, Workers
+  ran at whatever a tool defaulted to and the Tier 2/3 split bought nothing.
+- `configs/worker-platforms.yaml` — platform presets as **data**, with model
+  and reasoning-level flags checked against real installations. Adding a tool
+  or a local model is an entry there, not a change to `harness/`.
+- Worker commands substitute `{model}` and `{effort}`. A command referencing
+  either without a configured value is refused, so a Worker never silently runs
+  at the platform default.
+- Both tiers are recorded and reported. `planner brief --register` takes
+  `--model`/`--effort` for the Planner session (the harness cannot set it, but
+  it can record it); every Worker invocation writes its platform, model, and
+  effort to the task log and worker report; `exp report` shows both under
+  **Tiers**. `harness status` shows the configured Worker tier.
+
 - `configs/worker.yaml` now ships **working** commands for several coding
   agents, with flags checked against installed versions rather than guessed.
   The cli adapter always could spawn Workers, but no runnable example was

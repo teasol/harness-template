@@ -27,6 +27,7 @@ flowchart LR
 | `harness/plan.py` | Plans: module DAGs, contracts, acceptance, report spec — the Planner's output format |
 | `harness/experiment.py` | Experiments: worktree/branch lifecycle, Planner briefing, researcher's report |
 | `harness/worker.py` | Worker adapters (manual/cli) and the verify-and-retry loop |
+| `harness/setup.py` | First-run choice of Worker platform, model, and reasoning level |
 | `harness/task.py` | Task materialization, lifecycle (claim/block/done), dependency + deliverable enforcement, board — the Worker's world |
 | `harness/cli.py` | `python -m harness verify\|reproduce\|hash\|plan\|task\|exp` |
 
@@ -58,5 +59,9 @@ One engine, three altitudes.
   retrying with real output, and capping attempts are tested code. An agent
   decides *what* to run, never whether the result was good enough.
 - **No vendor in the core**: how a Worker is invoked, and how a Planner is
-  registered, are configuration and plain commands. Tool-specific shims live
-  in `integrations/` and are always optional.
+  registered, are configuration and plain commands. Platform presets are data
+  (`configs/worker-platforms.yaml`); tool-specific shims live in
+  `integrations/`. Both are optional and neither is referenced by name in code.
+- **A tier you cannot choose is not a tier**: platform, model, and reasoning
+  level are explicit settings, and both tiers are recorded in the report — so
+  the split is auditable, not just intended.

@@ -3,6 +3,7 @@
 Usage::
 
     python -m harness status                          # where am I, what next
+    python -m harness setup [--platform P --model M --effort E]  # choose the Worker tier
     python -m harness verify --spec configs/demo.yaml [--results-dir DIR]
     python -m harness reproduce --spec configs/demo.yaml [--times 2]
     python -m harness hash <file> [<file> ...]
@@ -48,6 +49,12 @@ from harness.reproduce import (
 )
 from harness.reproducibility import file_sha256
 from harness.runner import Runner
+from harness.setup import (
+    SetupError,
+    build_config,
+    load_platforms,
+    write_worker_config,
+)
 from harness.spec import SpecError, load_spec
 from harness.task import TaskError
 from harness.worker import (
@@ -515,6 +522,21 @@ def build_parser() -> argparse.ArgumentParser:
     status_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
     status_cmd.set_defaults(func=cmd_status)
 
+    setup_cmd = sub.add_parser(
+        "setup", help="Choose the Worker platform, model, and reasoning level"
+    )
+    setup_cmd.add_argument("--platform", default=None, help="Platform name (see --list)")
+    setup_cmd.add_argument("--model", default=None, help="Model to run Workers on")
+    setup_cmd.add_argument("--effort", default=None, help="Reasoning level")
+    setup_cmd.add_argument("--command", default=None, help="Override the platform's command")
+    setup_cmd.add_argument("--attempts", type=int, default=6, help="Retry cap per task")
+    setup_cmd.add_argument("--label", default="worker", help="Name recorded on the board")
+    setup_cmd.add_argument("--list", action="store_true", help="List platforms and exit")
+    setup_cmd.add_argument("--platforms", default=None, help="Platform presets YAML")
+    setup_cmd.add_argument("--out", default=None, help="Where to write the worker config")
+    setup_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    setup_cmd.set_defaults(func=cmd_setup)
+
     planner_cmd = sub.add_parser("planner", help="Planner registration")
     planner_sub = planner_cmd.add_subparsers(dest="planner_command", required=True)
     planner_brief = planner_sub.add_parser(
@@ -523,6 +545,12 @@ def build_parser() -> argparse.ArgumentParser:
     planner_brief.add_argument("name", help="Experiment name")
     planner_brief.add_argument(
         "--register", default=None, help="Record this label as the experiment's Planner"
+    )
+    planner_brief.add_argument(
+        "--model", default=None, help="Model this Planner session runs on (recorded, not set)"
+    )
+    planner_brief.add_argument(
+        "--effort", default=None, help="Reasoning level of this Planner session (recorded)"
     )
     planner_brief.add_argument("--root", default=".", help="Repo root (default: cwd)")
     planner_brief.set_defaults(func=cmd_planner_brief)
@@ -715,7 +743,13 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
 def cmd_planner_brief(args: argparse.Namespace) -> int:
     try:
         if args.register:
-            exp_mod.register_planner(args.name, args.register, root=args.root)
+            exp_mod.register_planner(
+                args.name,
+                args.register,
+                root=args.root,
+                model=args.model or "",
+                effort=args.effort or "",
+            )
         print(exp_mod.planner_brief(args.name, root=args.root))
     except ExperimentError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -742,12 +776,19 @@ def cmd_status(args: argparse.Namespace) -> int:
             marker = "*" if exp.name == status.here else " "
             print(f" {marker}{exp.name:<17} {exp.state:<18} {exp.detail}")
 
+    if status.worker_tier.get("adapter") == "cli":
+        print()
+        tier = status.worker_tier
+        shown = " · ".join(
+            x for x in (tier.get("platform"), tier.get("model"), tier.get("effort")) if x
+        )
+        print(f"  Workers run on: {shown or 'cli'}")
     if status.worker_adapter == "manual" and status.experiments:
         print()
         print(
             "  Workers are MANUAL: `plan run` writes a briefing and stops rather\n"
-            "  than building anything. To have the Planner spawn Workers itself,\n"
-            "  set `adapter: cli` in configs/worker.yaml (examples are in there)."
+            "  than building anything. Run `harness setup` to pick a platform,\n"
+            "  model, and reasoning level, and Workers will be spawned for you."
         )
 
     print()
@@ -756,4 +797,94 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"  {step}")
     print()
     print("New here? README.md walks through a whole experiment, start to finish.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# First-run configuration
+
+
+def _prompt(question: str, default: str, choices: list[str] | None = None) -> str:
+    suffix = f" [{default}]" if default else ""
+    if choices:
+        suffix = f" ({'/'.join(choices)})" + suffix
+    try:
+        answer = input(f"{question}{suffix}: ").strip()
+    except EOFError:
+        # Non-interactive (a pipe, CI): take the defaults rather than hanging.
+        return default
+    return answer or default
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    try:
+        platforms = load_platforms(args.platforms, root=args.root)
+    except SetupError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.list:
+        print("Worker platforms (from the presets file — edit it to add your own):\n")
+        for platform in platforms.values():
+            print(f"  {platform.name:<10} {platform.label}")
+            if platform.efforts:
+                print(f"  {'':<10} reasoning levels: {', '.join(platform.efforts)}")
+            if platform.model_hint:
+                print(f"  {'':<10} model: {platform.model_hint}")
+            if platform.docs:
+                print(f"  {'':<10} check flags with: {platform.docs}")
+            print()
+        return 0
+
+    name = args.platform
+    if not name:
+        print("Tier 3 — the Workers that write module code.\n")
+        print("Their work is bounded and specified, so a small fast model is usually")
+        print("right; keep the expensive one for planning. Available platforms:\n")
+        for platform in platforms.values():
+            print(f"  {platform.name:<10} {platform.label}")
+        print()
+        name = _prompt("Platform", next(iter(platforms)))
+
+    platform = platforms.get(name)
+    if platform is None:
+        print(
+            f"error: unknown platform '{name}'. available: {', '.join(platforms)}",
+            file=sys.stderr,
+        )
+        return 2
+
+    model = args.model
+    if model is None:
+        model = _prompt(f"Model ({platform.model_hint})", platform.default_model)
+    effort = args.effort
+    if effort is None:
+        effort = _prompt("Reasoning level", platform.default_effort, platform.efforts or None)
+    command = args.command
+    if command is None and platform.is_custom:
+        command = _prompt("Command (takes the briefing, edits {root}, exits)", "")
+
+    try:
+        config = build_config(
+            platform,
+            model=model,
+            effort=effort,
+            attempts=args.attempts,
+            command=command,
+            label=args.label,
+        )
+        path = write_worker_config(config, args.out, root=args.root)
+    except SetupError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"\nwrote {path}")
+    print(f"  platform: {config.platform}")
+    print(f"  model:    {config.model or '(platform default)'}")
+    print(f"  effort:   {config.effort or '(platform default)'}")
+    print(f"  attempts: {config.attempts}")
+    print(f"  command:  {config.command}")
+    if platform.docs:
+        print(f"\nFlags change between releases — verify with: {platform.docs}")
+    print("\nWorkers will now be spawned by `harness plan run`.")
     return 0
