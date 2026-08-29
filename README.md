@@ -94,6 +94,19 @@ python -m harness exp report sparse-attn --determinism --save
 git merge exp/sparse-attn                    # only the researcher does this
 ```
 
+The Planner hands modules to Workers through the harness, not by hand:
+
+```bash
+python -m harness planner brief sparse-attn --register session-01  # become the Planner
+python -m harness plan run plans/sparse-attn.yaml                  # drain the ready queue
+```
+
+`task run` invokes the configured Worker, verifies acceptance and deliverables,
+and retries with the real failure output up to a cap (default 6) — then blocks
+the task for the Planner. Workers are configured in `configs/worker.yaml`; the
+default writes a briefing for a human, and `adapter: cli` points at whichever
+headless coding agent your lab uses. The harness names no vendor.
+
 `exp report` measures the spine itself — integration result, per-task
 acceptance, determinism, the commit to merge, and what went **unverified** —
 and extracts the metrics the researcher asked for from real run artifacts. The
@@ -154,6 +167,7 @@ harness-template/
 │   ├── report.py           #   JSON/Markdown report generation
 │   ├── reproducibility.py  #   Seeding & hashing utilities
 │   ├── experiment.py       #   Experiments: worktrees, branches, reports
+│   ├── worker.py           #   Worker adapters + the retry loop
 │   ├── plan.py             #   Plans: module DAGs + contracts + report spec
 │   ├── task.py             #   Task lifecycle, board, materialization
 │   └── cli.py              #   `python -m harness verify|hash|plan|task`
@@ -162,6 +176,7 @@ harness-template/
 ├── scripts/                # Runnable steps (bootstrap, demo, instantiate)
 ├── tests/                  # Pytest suite (incl. end-to-end harness tests)
 ├── docs/                   # Architecture & reference docs
+├── integrations/           # Optional tool-specific shims (nothing required)
 ├── data/                   # Datasets (gitignored; see data/README.md)
 ├── results/                # Run outputs & reports (gitignored)
 └── .github/                # CI workflows, issue/PR templates

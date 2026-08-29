@@ -84,6 +84,8 @@ python -m harness plan validate|materialize|status plans/<plan>.yaml
 python -m harness plan status plans/<plan>.yaml --check   # drift gate
 python -m harness task list|show|claim|block|verify|done --id <id>
 python -m harness task verify --all [--status done]       # audit the board
+python -m harness task run --id <id>                      # invoke a Worker + verify
+python -m harness plan run plans/<plan>.yaml              # drain the ready queue
 ```
 
 Experiment commands (Tier 1 boundary):
@@ -93,7 +95,12 @@ python -m harness exp start <name> [--base main]
 python -m harness exp list
 python -m harness exp report <name> [--determinism] [--save]
 python -m harness exp remove <name>
+python -m harness planner brief <name> --register <label> # become a Planner
 ```
+
+Workers are invoked through `configs/worker.yaml`. The default adapter writes a
+briefing for a human; set `adapter: cli` to point at a headless coding agent.
+The harness names no vendor — the command is configuration.
 
 Verification commands:
 

@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Worker adapters (Tier 2 → Tier 3).** `harness task run --id <id>` invokes a
+  Worker, verifies acceptance *and* deliverables, and retries with the real
+  failure output — failing checks plus step logs — until an attempt cap
+  (default 6). Retrying the same worker beats restarting: a coding agent handed
+  its own failing test usually fixes it. On exhaustion the task is `blocked`
+  with the reason logged, returning control to the Planner.
+- `harness plan run <plan>` drains the ready queue in dependency order, so the
+  Planner chooses *what* to run while the harness owns the loop.
+- Two adapters, configured in `configs/worker.yaml`: `manual` (default — write
+  a briefing for a human; no API key, works out of the box) and `cli` (run a
+  headless coding agent). The command is the lab's configuration; the harness
+  names no vendor and ships no tool-specific flags.
+- Worker briefings are assembled from the task: brief, contract, deliverables,
+  constraints, and the exact acceptance commands that will judge the work.
+- **`harness planner brief <name> [--register <label>]`** — everything a session
+  needs to act as an experiment's Planner, as plain text any runtime can follow.
+  `--register` records who is driving an experiment.
+- `integrations/` — optional tool-specific shims. Nothing there is required;
+  the harness is driven entirely by `python -m harness ...`.
+- `make run`.
+
+### Notes
+
+- Cost is never estimated. The harness records attempts, durations, exit codes,
+  and the configured adapter, and reports `cost: not measured` when an adapter
+  supplies none — the same rule that stops an agent narrating an unmeasured
+  result.
+
 - **Experiments (Tier 1 ↔ Tier 2).** `harness exp start|list|report|remove`.
   Each experiment is one hypothesis on its own branch in its own git worktree,
   so several run side by side. `exp remove` keeps the branch — a rejected

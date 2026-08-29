@@ -25,7 +25,8 @@ flowchart LR
 | `harness/reproduce.py` | Determinism gate: repeat a spec, diff artifact manifests |
 | `harness/reproducibility.py` | Seeding helpers, deterministic env vars, sha256, run provenance |
 | `harness/plan.py` | Plans: module DAGs, contracts, acceptance, report spec — the Planner's output format |
-| `harness/experiment.py` | Experiments: worktree/branch lifecycle and the researcher's report |
+| `harness/experiment.py` | Experiments: worktree/branch lifecycle, Planner briefing, researcher's report |
+| `harness/worker.py` | Worker adapters (manual/cli) and the verify-and-retry loop |
 | `harness/task.py` | Task materialization, lifecycle (claim/block/done), dependency + deliverable enforcement, board — the Worker's world |
 | `harness/cli.py` | `python -m harness verify\|reproduce\|hash\|plan\|task\|exp` |
 
@@ -53,3 +54,9 @@ One engine, three altitudes.
   researcher on an agent's word alone.
 - **The merge is human**: the harness measures readiness and stops. Choosing
   which hypothesis enters the record is the researcher's judgement.
+- **The loop belongs to the harness**: invoking a Worker, judging the result,
+  retrying with real output, and capping attempts are tested code. An agent
+  decides *what* to run, never whether the result was good enough.
+- **No vendor in the core**: how a Worker is invoked, and how a Planner is
+  registered, are configuration and plain commands. Tool-specific shims live
+  in `integrations/` and are always optional.

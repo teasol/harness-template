@@ -55,6 +55,61 @@ Worktrees default to `.experiments/<name>` inside the repo and are gitignored.
 Removing a worktree never deletes the branch, so a rejected experiment remains
 inspectable.
 
+## Registering a Planner
+
+A session becomes an experiment's Planner by running one command and following
+its output:
+
+```bash
+python -m harness planner brief <name> --register <label>
+```
+
+It prints the role contract to read, the worktree and branch owned, the plan's
+state, the module board, the commands to run, and how to hand back. `--register`
+records the label so `exp list` shows who is driving which experiment.
+
+This is a plain command producing plain text on purpose. Tool-specific shims
+(a slash command, a skill, a saved prompt) are thin optional wrappers around it
+— see [integrations/](../integrations/README.md). Binding registration to one
+vendor's feature would make the template unusable for anyone with a different
+tool.
+
+## Running Workers
+
+The Planner decides *which* task to run; the harness runs it. `task run`
+invokes the configured Worker, verifies acceptance **and** deliverables, and
+retries with the real failure output until the attempt cap:
+
+```bash
+python -m harness task run --id <id>          # one module
+python -m harness plan run plans/<plan>.yaml  # drain the ready queue in order
+```
+
+Retries keep the same worker and hand it the failing checks and step logs,
+rather than starting over: a coding agent given its own failing test usually
+fixes it, and continuing preserves context that a fresh start throws away. The
+cap (default 6) exists so a wedged worker cannot burn budget forever — on
+exhaustion the task is `blocked` with the reason in its log, and control
+returns to the Planner.
+
+Configure the adapter in `configs/worker.yaml`:
+
+| Adapter | Behaviour |
+| --- | --- |
+| `manual` (default) | Write the briefing to a file and stop, for a human to hand to a session. Works with no configuration and no API key. |
+| `cli` | Run a configured shell command — a coding agent in headless mode. The command is *your* configuration; the harness names no vendor. |
+
+The briefing is passed on stdin and contains the task's brief, contract,
+deliverables, constraints, and the exact acceptance commands that will judge
+the work.
+
+### On cost
+
+The harness does **not** estimate token spend. It records what it can observe —
+attempts, durations, exit codes, the configured adapter — and reports
+`cost: not measured` when the adapter provides none. Guessing a number here
+would be the same failure as an agent narrating an unmeasured result.
+
 ## The report
 
 The report has two layers, and the split is the point.

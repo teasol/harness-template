@@ -487,3 +487,121 @@ def write_experiment_report(
         saved.write_text(report_markdown(report), encoding="utf-8")
         written.append(saved)
     return written
+
+
+# ---------------------------------------------------------------------------
+# Planner registration
+
+
+def planner_brief(name: str, root: str | Path = ".") -> str:
+    """Everything a session needs to start acting as this experiment's Planner.
+
+    Deliberately a plain command producing plain text: any agent runtime can be
+    told to run it and follow the result. Tool-specific shims (a skill, a slash
+    command) are thin optional wrappers around this, never a prerequisite.
+    """
+    experiment = find_experiment(name, root)
+    exp_root = experiment.path
+    contract = exp_root / "agents" / "planner.md"
+
+    lines = [
+        f"# You are the Planner for experiment '{experiment.name}'",
+        "",
+        "Read agents/planner.md and follow it. You own this experiment end to end:",
+        "decompose the goal into modules, hand them to Workers, verify, and report",
+        "back. You never write module code, and you never merge — merging is the",
+        "researcher's decision.",
+        "",
+        "## Where you are",
+        f"- Worktree: {exp_root}",
+        f"- Branch:   {experiment.branch}",
+        f"- Plan:     {experiment.plan_path}",
+        f"- Contract: {contract}",
+        "",
+    ]
+
+    if not experiment.plan_path.is_file():
+        lines += [
+            "## State: no plan yet",
+            "",
+            "Write the plan first. It must declare, per module: depends_on, a typed",
+            "contract, a complete brief, constraints, deliverables (one owner each),",
+            "and machine-checkable acceptance. It must also declare `report:` — what",
+            "the researcher asked to see, as *where each number lives*. Never write a",
+            "value into the plan; the harness extracts it.",
+            "",
+        ]
+    else:
+        try:
+            plan = load_plan(experiment.plan_path)
+        except PlanError as exc:
+            lines += ["## State: plan is invalid", "", f"    {exc}", ""]
+        else:
+            board = {t.id: t for t in load_board(exp_root / "tasks")}
+            done = sum(1 for t in board.values() if t.is_done)
+            lines += [
+                "## State",
+                "",
+                f"- Goal: {plan.goal.strip()}",
+                f"- Modules: {done}/{len(plan.modules)} done",
+                f"- Integration spec: {plan.integration or '(none declared)'}",
+                "",
+                "| Module | Status | Worker | Depends on |",
+                "| --- | --- | --- | --- |",
+            ]
+            for module_id in plan.topological_order():
+                task = board.get(module_id)
+                status = task.status if task else "unmaterialized"
+                worker = (task.worker if task and task.worker else "-") or "-"
+                deps = ", ".join(plan.module(module_id).depends_on) or "-"
+                lines.append(f"| `{module_id}` | {status} | {worker} | {deps} |")
+            lines.append("")
+
+    lines += [
+        "## Your commands",
+        "",
+        "```bash",
+        f"cd {exp_root}",
+        f"python -m harness plan validate plans/{experiment.name}.yaml",
+        f"python -m harness plan materialize plans/{experiment.name}.yaml",
+        "python -m harness task list                 # what is ready",
+        "python -m harness task run --id <id>        # hand one module to a Worker",
+        f"python -m harness plan run plans/{experiment.name}.yaml   # drain the ready queue",
+        f"python -m harness exp report {experiment.name} --determinism --save",
+        "```",
+        "",
+        "`task run` invokes the configured Worker adapter, verifies acceptance and",
+        "deliverables, and retries with the real failure output until the attempt",
+        "cap. Configure the adapter in configs/worker.yaml; the default writes a",
+        "briefing for a human to hand to a Worker session.",
+        "",
+        "## When you are done",
+        "",
+        f"Run `harness exp report {experiment.name}`. It exits non-zero until the",
+        "experiment is genuinely merge-ready. Then stop and hand back to the",
+        "researcher — do not merge.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def register_planner(name: str, label: str, root: str | Path = ".") -> Path:
+    """Record who is driving an experiment, so idle ones are visible."""
+    experiment = find_experiment(name, root)
+    marker = experiment.path / "results" / "experiments" / experiment.name / "planner.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        json.dumps({"experiment": experiment.name, "planner": label}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return marker
+
+
+def planner_of(experiment: Experiment) -> str | None:
+    marker = experiment.path / "results" / "experiments" / experiment.name / "planner.json"
+    if not marker.is_file():
+        return None
+    try:
+        return json.loads(marker.read_text(encoding="utf-8")).get("planner")
+    except json.JSONDecodeError:
+        return None

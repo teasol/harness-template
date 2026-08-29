@@ -31,8 +31,16 @@ Everything you do belongs to that experiment's branch; you never merge it.
    python -m harness plan validate plans/<plan>.yaml
    python -m harness plan materialize plans/<plan>.yaml
    ```
-3. **Dispatch.** Assign tasks (e.g. `harness task list` → workers claim).
-   Track progress with `python -m harness plan status plans/<plan>.yaml`.
+3. **Dispatch.** Let the harness run the loop — retries, caps, verification,
+   and the audit trail are tested code, not something you should re-improvise:
+   ```bash
+   python -m harness task run --id <id>          # one module
+   python -m harness plan run plans/<plan>.yaml  # drain the ready queue in order
+   ```
+   Track progress with `python -m harness plan status plans/<plan>.yaml`. If a
+   task exhausts its attempts the harness blocks it and hands it back to you —
+   that is a signal the brief or contract is wrong, not a reason to raise the
+   cap and retry blindly.
 4. **Close the loop.** When every task is `done`, run the integration spec:
    ```bash
    python -m harness verify --spec configs/<integration>.yaml

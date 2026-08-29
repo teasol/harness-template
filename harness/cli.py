@@ -15,6 +15,7 @@ Usage::
     python -m harness task claim --id <id> --by <agent> [--force] [--tasks-dir tasks]
     python -m harness task block --id <id> --reason "..." [--tasks-dir tasks]
     python -m harness task verify (--id <id> | --all) [--status S] [--tasks-dir tasks]
+    python -m harness task run --id <id> [--attempts N]   # invoke a Worker + verify
     python -m harness task done --id <id> [--by <agent>] [--tasks-dir tasks]
 
     # Experiments (researcher <-> Planner): one hypothesis per branch+worktree
@@ -22,6 +23,7 @@ Usage::
     python -m harness exp list
     python -m harness exp report <name> [--no-run] [--determinism] [--save]
     python -m harness exp remove <name> [--force]
+    python -m harness planner brief <name> [--register <label>]
 
 """
 
@@ -46,6 +48,12 @@ from harness.reproducibility import file_sha256
 from harness.runner import Runner
 from harness.spec import SpecError, load_spec
 from harness.task import TaskError
+from harness.worker import (
+    WorkerError,
+    load_worker_config,
+    run_task,
+    write_worker_report,
+)
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -351,6 +359,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan_status.set_defaults(func=cmd_plan_status)
 
+    plan_run = plan_sub.add_parser("run", help="Run every ready task through a Worker")
+    plan_run.add_argument("plan", help="Path to the plan YAML file")
+    plan_run.add_argument("--tasks-dir", default="tasks")
+    plan_run.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    plan_run.add_argument("--results-dir", default="results")
+    plan_run.add_argument("--worker-config", default=None, help="Worker config YAML")
+    plan_run.add_argument("--attempts", type=int, default=None, help="Override the attempt cap")
+    plan_run.set_defaults(func=cmd_plan_run)
+
     task_cmd = sub.add_parser("task", help="Worker task commands")
     task_sub = task_cmd.add_subparsers(dest="task_command", required=True)
 
@@ -361,6 +378,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("block", "Mark a task blocked with a reason", cmd_task_block),
         ("verify", "Run a task's acceptance steps", cmd_task_verify),
         ("done", "Verify acceptance and mark done", cmd_task_done),
+        ("run", "Invoke a Worker on a task, verify, and retry", cmd_task_run),
     ]:
         parser_i = task_sub.add_parser(name, help=help_text)
         if name == "verify":
@@ -384,9 +402,18 @@ def build_parser() -> argparse.ArgumentParser:
             parser_i.add_argument("--reason", required=True, help="Why the task is blocked")
         if name == "done":
             parser_i.add_argument("--by", default=None, help="Worker/agent name")
-        if name in ("verify", "done"):
+        if name in ("verify", "done", "run"):
             parser_i.add_argument("--root", default=".", help="Repo root (default: cwd)")
             parser_i.add_argument("--results-dir", default="results")
+        if name == "run":
+            parser_i.add_argument("--by", default=None, help="Worker/agent label")
+            parser_i.add_argument("--worker-config", default=None, help="Worker config YAML")
+            parser_i.add_argument(
+                "--attempts", type=int, default=None, help="Override the attempt cap"
+            )
+            parser_i.add_argument(
+                "--adapter", choices=["manual", "cli"], default=None, help="Override the adapter"
+            )
         parser_i.set_defaults(func=func)
 
     exp_cmd = sub.add_parser("exp", help="Experiment commands (researcher <-> Planner)")
@@ -423,6 +450,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     for exp_parser in (exp_start, exp_list, exp_report, exp_remove):
         exp_parser.add_argument("--root", default=".", help="Repo root (default: cwd)")
+
+    planner_cmd = sub.add_parser("planner", help="Planner registration")
+    planner_sub = planner_cmd.add_subparsers(dest="planner_command", required=True)
+    planner_brief = planner_sub.add_parser(
+        "brief", help="Print everything a session needs to act as this experiment's Planner"
+    )
+    planner_brief.add_argument("name", help="Experiment name")
+    planner_brief.add_argument(
+        "--register", default=None, help="Record this label as the experiment's Planner"
+    )
+    planner_brief.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    planner_brief.set_defaults(func=cmd_planner_brief)
 
     return parser
 
@@ -507,4 +546,108 @@ def cmd_exp_remove(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     print(f"removed worktree {experiment.path} (branch {experiment.branch} kept)")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Worker invocation (Planner -> Worker)
+
+
+def _print_worker_outcome(outcome) -> None:
+    for attempt in outcome.attempts:
+        mark = "ok" if attempt.passed else "FAIL"
+        print(
+            f"  {mark:>4}  attempt {attempt.number} ({attempt.duration_s:.1f}s): {attempt.detail}"
+        )
+    print(f"  adapter: {outcome.adapter}")
+    print(f"  cost:    {outcome.cost}")
+    if outcome.brief_path:
+        print(f"  brief:   {outcome.brief_path}")
+    if outcome.message:
+        print(f"  {outcome.message}")
+
+
+def cmd_task_run(args: argparse.Namespace) -> int:
+    try:
+        config = load_worker_config(args.worker_config, root=args.root)
+        if args.attempts is not None:
+            config.attempts = args.attempts
+        if args.adapter:
+            config.adapter = args.adapter
+        outcome = run_task(
+            args.tasks_dir,
+            args.id,
+            config=config,
+            root=args.root,
+            results_dir=args.results_dir,
+            worker_name=args.by,
+        )
+    except (TaskError, WorkerError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    write_worker_report(outcome, args.results_dir, root=args.root)
+    print(f"[{outcome.task_id}] {outcome.status.upper()}")
+    _print_worker_outcome(outcome)
+    return 0 if outcome.succeeded else 1
+
+
+def cmd_plan_run(args: argparse.Namespace) -> int:
+    """Drain the ready queue: run each ready task in dependency order."""
+    try:
+        plan = load_plan(args.plan)
+        config = load_worker_config(args.worker_config, root=args.root)
+    except (PlanError, WorkerError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if args.attempts is not None:
+        config.attempts = args.attempts
+
+    completed = 0
+    while True:
+        board = task_mod.load_board(args.tasks_dir)
+        ready = task_mod.ready_task_ids(board)
+        if not ready:
+            break
+        task_id = ready[0]
+        print(f"--- running task '{task_id}' ---")
+        try:
+            outcome = run_task(
+                args.tasks_dir,
+                task_id,
+                config=config,
+                root=args.root,
+                results_dir=args.results_dir,
+            )
+        except (TaskError, WorkerError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        write_worker_report(outcome, args.results_dir, root=args.root)
+        print(f"[{task_id}] {outcome.status.upper()}")
+        _print_worker_outcome(outcome)
+        if not outcome.succeeded:
+            print(f"stopping: '{task_id}' did not finish", file=sys.stderr)
+            return 1
+        completed += 1
+
+    board = task_mod.load_board(args.tasks_dir)
+    done = sum(1 for t in board if t.is_done)
+    print(f"\n{completed} task(s) run this pass; {done}/{len(plan.modules)} module(s) done")
+    if done < len(plan.modules):
+        print("no ready tasks left — remaining modules are blocked or unmaterialized")
+        return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Planner registration
+
+
+def cmd_planner_brief(args: argparse.Namespace) -> int:
+    try:
+        if args.register:
+            exp_mod.register_planner(args.name, args.register, root=args.root)
+        print(exp_mod.planner_brief(args.name, root=args.root))
+    except ExperimentError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     return 0
