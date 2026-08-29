@@ -1,0 +1,105 @@
+# Agent platform presets — vendor knowledge as DATA, never in harness/ code.
+#
+# `harness setup` reads this to offer choices; you can edit it, add your lab's
+# own entry, or ignore it entirely and write configs/worker.yaml by hand. The
+# harness core knows nothing about any of these tools: it substitutes
+# placeholders into a string and runs it.
+#
+# Placeholders: {model} {effort} {root} {brief_file} {task_file} {task_id}
+
+platforms:
+  manual:
+    label: Manual (copy-paste briefing into an agent session yourself)
+    docs: ""
+    command: ""
+    resume_command: ""
+    efforts: []
+    default_effort: ""
+    model_hint: ""
+    default_model: ""
+    reads_brief_from: stdin
+
+  claude:
+    label: Claude Code
+    docs: claude --help
+    command: >-
+      claude -p --model {model} --effort {effort}
+      --permission-mode bypassPermissions --add-dir {root}
+    resume_command: >-
+      claude -p --continue --model {model} --effort {effort}
+      --permission-mode bypassPermissions --add-dir {root}
+    efforts: [low, medium, high, xhigh, max]
+    default_effort: low
+    model_hint: "an alias (fable, opus, sonnet, haiku) or a full model id"
+    default_model: haiku
+    planner_model: opus
+    planner_effort: high
+    session_command: >-
+      claude -p --resume {session} --model {model} --effort {effort}
+      --permission-mode bypassPermissions --add-dir {root}
+    reads_brief_from: stdin
+
+  codex:
+    label: Codex CLI
+    docs: codex exec --help
+    command: >-
+      codex exec --cd {root} -m {model}
+      -c model_reasoning_effort={effort} "$(cat {brief_file})"
+    resume_command: >-
+      codex exec resume --last --cd {root} -m {model}
+      -c model_reasoning_effort={effort} "$(cat {brief_file})"
+    efforts: [minimal, low, medium, high]
+    default_effort: low
+    model_hint: "a model id your Codex install accepts"
+    default_model: ""
+    planner_model: ""
+    planner_effort: high
+    session_command: >-
+      codex exec resume {session} --cd {root} -m {model}
+      -c model_reasoning_effort={effort} "$(cat {brief_file})"
+    reads_brief_from: argument
+
+  opencode:
+    label: opencode
+    docs: opencode run --help
+    command: 'opencode run -m {model} --variant {effort} "$(cat {brief_file})"'
+    resume_command: 'opencode run --continue -m {model} --variant {effort} "$(cat {brief_file})"'
+    efforts: [minimal, low, medium, high, max]
+    default_effort: low
+    model_hint: "provider/model, e.g. anthropic/claude-haiku-4-5-20251001"
+    default_model: ""
+    planner_model: ""
+    planner_effort: high
+    session_command: 'opencode run -s {session} -m {model} --variant {effort} "$(cat {brief_file})"'
+    reads_brief_from: argument
+
+  antigravity:
+    label: Google Antigravity (agy)
+    docs: agy --help
+    command: >-
+      agy -p --model {model} --effort {effort}
+      --dangerously-skip-permissions --add-dir {root}
+    resume_command: >-
+      agy -p --continue --model {model} --effort {effort}
+      --dangerously-skip-permissions --add-dir {root}
+    efforts: [low, medium, high]
+    default_effort: low
+    model_hint: "a model name or alias (e.g. gemini-3.7-flash, flash, flash_lite)"
+    default_model: gemini-3.7-flash
+    planner_model: gemini-3.7-flash
+    planner_effort: high
+    session_command: >-
+      agy -p --conversation {session} --model {model} --effort {effort}
+      --dangerously-skip-permissions --add-dir {root}
+    reads_brief_from: stdin
+
+  custom:
+    label: Anything else (write the command yourself)
+    docs: ""
+    command: ""
+    resume_command: ""
+    efforts: []
+    default_effort: ""
+    model_hint: "whatever your command expects"
+    default_model: ""
+    reads_brief_from: stdin

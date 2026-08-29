@@ -374,6 +374,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    init_cmd = sub.add_parser(
+        "init", help="Initialize a new Research Harness project in a directory"
+    )
+    init_cmd.add_argument(
+        "target_dir",
+        nargs="?",
+        default=".",
+        help="Directory to initialize (default: current directory)",
+    )
+    init_cmd.add_argument("--name", default=None, help="Project name (slugified if needed)")
+    init_cmd.add_argument(
+        "--force", action="store_true", help="Overwrite existing files if already initialized"
+    )
+    init_cmd.add_argument(
+        "--no-setup", action="store_true", help="Skip interactive agent tier setup"
+    )
+    init_cmd.set_defaults(func=cmd_init)
+
     verify = sub.add_parser("verify", help="Run a verification spec")
     verify.add_argument("--spec", required=True, help="Path to the spec YAML file")
     verify.add_argument(
@@ -1070,3 +1088,68 @@ def cmd_exp_question(args: argparse.Namespace) -> int:
         return 1
     print(experiment.question)
     return 0
+
+
+def find_project_root(start: str | Path = ".") -> Path:
+    """Locate the project root by searching upwards for configs/agents.yaml, plans/, or .git."""
+    current = Path(start).resolve()
+    for parent in [current, *current.parents]:
+        if (parent / "configs" / "agents.yaml").is_file() or (parent / "plans").is_dir():
+            return parent
+        if (parent / ".git").exists():
+            return parent
+    return current
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    from harness.init import InitError, init_project
+
+    target_dir = Path(args.target_dir)
+    try:
+        created = init_project(
+            target_dir=target_dir,
+            name=args.name,
+            force=args.force,
+        )
+    except InitError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    resolved_target = target_dir.resolve()
+    print(f"Initialized Research Harness in {resolved_target} ({len(created)} file(s) created/updated):")
+    for path in created:
+        try:
+            rel = path.relative_to(resolved_target)
+        except ValueError:
+            rel = path
+        print(f"  + {rel}")
+
+    # If interactive and not --no-setup, configure agents
+    if not args.no_setup and sys.stdin.isatty():
+        print("\nConfiguring agent tiers for your new project:")
+        setup_args = argparse.Namespace(
+            planner_platform=None,
+            planner_model=None,
+            planner_effort=None,
+            planner_command=None,
+            planner_session=None,
+            planner_attempts=3,
+            worker_platform=None,
+            worker_model=None,
+            worker_effort=None,
+            worker_command=None,
+            worker_session=None,
+            worker_attempts=6,
+            label="worker",
+            list=False,
+            platforms=None,
+            out=None,
+            root=str(target_dir),
+        )
+        cmd_setup(setup_args)
+
+    print("\nNext steps:")
+    print("  1. Verify starter spec:  harness verify --spec configs/demo.yaml")
+    print("  2. Start an experiment:  harness exp start <experiment-name>")
+    return 0
+

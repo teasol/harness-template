@@ -17,8 +17,19 @@ Lost at any point:
 python -m harness status     # reads the real state, names the next command
 ```
 
-### 0. Make it yours (or see the demo first)
+### 0. Quickstart (Package or Template)
 
+You can use Research Harness either by installing it as a package into any repository, or by instantiating this template:
+
+#### Option A: Use as an installable package (recommended for any new/existing repo)
+```bash
+pip install git+https://github.com/teasol/harness-template.git
+cd my-project
+harness init                                   # scaffolds AGENTS.md, agents/, configs/ and sets up agent tiers
+harness verify --spec configs/demo.yaml        # prove it works
+```
+
+#### Option B: Instantiate from this template
 ```bash
 # Instantiate your new project:
 python scripts/instantiate.py --name my-project
@@ -26,8 +37,6 @@ git add -A && git commit -m "chore: instantiate from harness-template"
 make setup                                     # install + choose how agents run (Manual or AI)
 make verify && make test                       # prove it works here
 ```
-
-`instantiate.py --name my-project` removes the demo example so your project starts with a clean slate.
 
 `make setup` performs the installation and prompts you to configure each agent tier — you can select **Manual** (copy-pasting briefings into an agent session yourself) or automated **AI platforms** (Antigravity, Claude Code, Codex, opencode, etc.). You can change this selection at any time later with `make agents-setup`.
 

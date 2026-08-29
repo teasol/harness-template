@@ -3,10 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# Rename for new projects: python scripts/instantiate.py --name <project-name>
-name = "harness-template"
+name = "research-harness"
 version = "0.1.0"
-description = "Agent-first harness template for reproducible research and automated verification"
+description = "Agent-first orchestration harness for reproducible research and automated verification"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -24,8 +23,13 @@ dev = [
 harness = "harness.cli:main"
 
 [tool.setuptools.packages.find]
-where = [".", "src"]
-exclude = ["tests*"]
+where = ["."]
+include = ["harness*"]
+exclude = ["tests*", "scripts*", "configs*", "plans*", "tasks*"]
+
+[tool.setuptools.package-data]
+harness = ["templates/**/*", "templates/**/.*", "templates/*"]
+
 
 [tool.ruff]
 line-length = 100

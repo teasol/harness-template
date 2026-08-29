@@ -97,7 +97,7 @@ def test_exam_demo_runs_the_example_without_instantiating(copy: Path) -> None:
         assert phrase in result.stdout, f"expected {phrase!r} in the walkthrough"
     # It demonstrates; it must not modify anything.
     assert (copy / "plans" / "demo-pipeline.yaml").is_file()
-    assert 'name = "harness-template"' in (copy / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'name = "research-harness"' in (copy / "pyproject.toml").read_text(encoding="utf-8")
 
 
 def test_exam_demo_explains_itself_when_the_demo_is_gone(copy: Path) -> None:

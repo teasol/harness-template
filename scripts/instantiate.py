@@ -83,11 +83,14 @@ def main() -> None:
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8")
-        if "harness-template" in text:
-            path.write_text(text.replace("harness-template", new_name), encoding="utf-8")
+        orig = text
+        for placeholder in ("harness-template", "research-harness"):
+            text = text.replace(placeholder, new_name)
+        if text != orig:
+            path.write_text(text, encoding="utf-8")
             changed.append(rel)
 
-    print(f"Renamed 'harness-template' -> '{new_name}' in {len(changed)} file(s):")
+    print(f"Renamed project -> '{new_name}' in {len(changed)} file(s):")
     for rel in changed:
         print(f"  - {rel}")
 

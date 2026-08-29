@@ -1,0 +1,21 @@
+# Written by `harness setup`. Edit freely — it is ordinary configuration.
+#
+# Two tiers, side by side so the split is visible:
+#
+#   planner — Tier 2. Decomposes the goal, judges the whole. The reasoning
+#             happens here: use your largest/smartest model, high effort.
+#
+#   worker  — Tier 3. Implements one fully-specified module against acceptance.
+#             Bounded, fast, cheap: small model, low effort.
+#
+# Run `harness setup` to fill this in from the presets in
+# configs/agent-platforms.yaml.
+planner:
+  adapter: manual
+  attempts: 3
+  label: planner
+
+worker:
+  adapter: manual
+  attempts: 6
+  label: worker
