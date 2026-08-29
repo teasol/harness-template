@@ -415,7 +415,6 @@ def test_setup_writes_manual_tiers(tmp_path: Path, capsys) -> None:
     assert load_agent_config("worker", root=tmp_path).adapter == "manual"
 
 
-
 def test_setup_can_attach_a_session(tmp_path: Path, capsys) -> None:
     shutil.copytree("configs", tmp_path / "configs")
     code = main(

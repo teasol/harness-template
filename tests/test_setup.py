@@ -45,7 +45,6 @@ def test_manual_platform_builds_manual_adapter() -> None:
     assert config_to_dict(worker) == {"adapter": "manual", "attempts": 6, "label": "worker"}
 
 
-
 def test_missing_presets_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(SetupError, match="not found"):
         load_platforms(root=tmp_path)
