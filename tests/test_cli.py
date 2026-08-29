@@ -447,3 +447,25 @@ def test_setup_rejects_an_unknown_reasoning_level(tmp_path: Path, capsys) -> Non
     )
     assert code == 2
     assert "not a reasoning level" in capsys.readouterr().err
+
+
+def test_exp_question_records_and_reads_back(tmp_path: Path, capsys) -> None:
+    """The conversational path: open first, agree on the question, record it."""
+    import subprocess
+
+    clone = tmp_path / "repo"
+    subprocess.run(["git", "clone", "--quiet", ".", str(clone)], check=True)
+    subprocess.run(["git", "-C", str(clone), "config", "user.email", "t@e.invalid"], check=True)
+    subprocess.run(["git", "-C", str(clone), "config", "user.name", "t"], check=True)
+
+    assert main(["exp", "start", "conv", "--root", str(clone)]) == 0
+    capsys.readouterr()
+
+    # Nothing recorded yet — and the command says so rather than printing blank.
+    assert main(["exp", "question", "conv", "--root", str(clone)]) == 1
+    assert "no question recorded yet" in capsys.readouterr().out
+
+    assert main(["exp", "question", "conv", "--set", "Is it faster?", "--root", str(clone)]) == 0
+    capsys.readouterr()
+    assert main(["exp", "question", "conv", "--root", str(clone)]) == 0
+    assert "Is it faster?" in capsys.readouterr().out

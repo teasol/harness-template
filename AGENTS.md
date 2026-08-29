@@ -97,7 +97,8 @@ python -m harness plan run plans/<plan>.yaml              # drain the ready queu
 Experiment commands (Tier 1 boundary):
 
 ```bash
-python -m harness exp start <name> [--base main]
+python -m harness exp start <name> [--question "..."] [--base main]
+python -m harness exp question <name> [--set "..."]       # record it later
 python -m harness exp list
 python -m harness exp report <name> [--determinism] [--save]
 python -m harness exp remove <name>

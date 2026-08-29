@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`harness exp question <name> [--set "..."]`** — the research question no
+  longer has to exist before the experiment does. A question usually gets
+  sharper by talking it through, so the normal path is now: open the
+  experiment, activate a Planner, agree on what is actually being asked, and
+  record it when it settles. With none recorded, the Planner's briefing says so
+  and instructs it to establish the question with the researcher before
+  planning or spawning any Worker. `planner run` still refuses without one,
+  since a spawned Planner has nobody to ask and would otherwise invent a goal.
+
 - **`harness exp start --question "..."`** — the research question, verbatim,
   stored with the experiment and placed at the top of the Planner's briefing.
   Without it a spawned Planner had no way to learn what was being asked: the

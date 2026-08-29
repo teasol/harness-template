@@ -23,6 +23,7 @@ Usage::
 
     # Experiments (researcher <-> Planner): one hypothesis per branch+worktree
     python -m harness exp start <name> [--question "..."] [--base main]
+    python -m harness exp question <name> [--set "..."]   # record it later
     python -m harness exp list
     python -m harness exp report <name> [--no-run] [--determinism] [--save]
     python -m harness exp remove <name> [--force]
@@ -517,12 +518,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     exp_report.set_defaults(func=cmd_exp_report)
 
+    exp_question = exp_sub.add_parser("question", help="Show or record the experiment's question")
+    exp_question.add_argument("name", help="Experiment name")
+    exp_question.add_argument("--set", default=None, help="Record this as the question (verbatim)")
+    exp_question.set_defaults(func=cmd_exp_question)
+
     exp_remove = exp_sub.add_parser("remove", help="Remove an experiment worktree (keeps branch)")
     exp_remove.add_argument("name", help="Experiment name")
     exp_remove.add_argument("--force", action="store_true", help="Remove even if dirty")
     exp_remove.set_defaults(func=cmd_exp_remove)
 
-    for exp_parser in (exp_start, exp_list, exp_report, exp_remove):
+    for exp_parser in (exp_start, exp_list, exp_report, exp_remove, exp_question):
         exp_parser.add_argument("--root", default=".", help="Repo root (default: cwd)")
 
     status_cmd = sub.add_parser("status", help="Where am I and what do I do next? (start here)")
@@ -613,6 +619,11 @@ def cmd_exp_start(args: argparse.Namespace) -> int:
     print(f"  plan:     {experiment.plan_path}")
     if experiment.question:
         print(f"  question: {experiment.question.splitlines()[0][:70]}")
+    if not experiment.question:
+        print(
+            "  question: (none yet — settle it with the Planner, then"
+            f' `harness exp question {experiment.name} --set "..."`)'
+        )
     print()
     print("Next (Planner, from inside the worktree):")
     print(f"  cd {experiment.path}")
@@ -1027,3 +1038,26 @@ def cmd_planner_run(args: argparse.Namespace) -> int:
     if outcome.succeeded:
         print(f"\n  harness exp report {outcome.experiment} --determinism --save")
     return 0 if outcome.succeeded else 1
+
+
+def cmd_exp_question(args: argparse.Namespace) -> int:
+    try:
+        if args.set:
+            experiment = exp_mod.set_question(args.name, args.set, root=args.root)
+            print(f"recorded for '{experiment.name}':\n")
+            print(experiment.question)
+            print(f"\n  {experiment.question_path}")
+            print("  Commit it — the question belongs with the experiment.")
+            return 0
+        experiment = exp_mod.find_experiment(args.name, args.root)
+    except ExperimentError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if not experiment.question:
+        print(
+            f"experiment '{experiment.name}' has no question recorded yet.\n"
+            f'  harness exp question {experiment.name} --set "..."'
+        )
+        return 1
+    print(experiment.question)
+    return 0

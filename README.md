@@ -37,16 +37,27 @@ you to hand to a session yourself. Run it and the harness spawns agents.
 
 ### 1. Start an experiment
 
-An experiment is **one question**:
+An experiment is **one question** — but you do not have to have it phrased yet:
 
 ```bash
-python -m harness exp start sparse-attention --question "
-Does keeping only the top 10% of attention weights preserve most of the
-attention mass? Report the retained mass and the fraction kept."
+python -m harness exp start sparse-attention
 ```
 
-The question is stored verbatim and put at the top of the Planner's briefing,
-so a Planner you spawn reads what you actually asked rather than a paraphrase.
+A question usually gets sharper by talking it through, so the normal path is to
+open the experiment, activate a Planner, work out together what is actually
+being asked, and record it when it settles:
+
+```bash
+python -m harness exp question sparse-attention --set "<what you agreed on>"
+```
+
+The Planner's briefing tells it to do exactly that, and not to plan or spawn a
+single Worker until you both agree. If you already know the question, pass it
+up front instead — `exp start <name> --question "..."` — which is also what an
+unattended `planner run` needs, since a spawned Planner has no one to ask.
+
+Either way the question is stored verbatim, put at the top of the Planner's
+briefing, and carried into the report.
 
 This creates the branch `exp/sparse-attention` and a separate working directory
 (a git *worktree*) under `.experiments/`. Several experiments coexist without
@@ -221,8 +232,9 @@ An experiment is one hypothesis, on its own branch in its own git worktree, so
 several run side by side without colliding.
 
 ```bash
-python -m harness exp start sparse-attn --question "does top-k keep the mass?"
-python -m harness planner run sparse-attn     # spawn a Planner, or open one yourself
+python -m harness exp start sparse-attn                      # question optional
+python -m harness exp question sparse-attn --set "..."      # once you have settled it
+python -m harness planner run sparse-attn                   # or open a session yourself
 python -m harness exp list                    # what is in flight
 python -m harness exp report sparse-attn --determinism --save
 git merge exp/sparse-attn                     # only you do this

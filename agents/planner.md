@@ -17,6 +17,13 @@ Everything you do belongs to that experiment's branch; you never merge it.
 
 ## Workflow
 
+0. **Establish the question.** If the experiment has none recorded, that is
+   normal — work it out with the researcher before anything else: what is being
+   asked, what would count as an answer, what they want reported. Plan nothing
+   and spawn no Worker until you agree, then record it verbatim:
+   ```bash
+   python -m harness exp question <experiment> --set "<their question>"
+   ```
 1. **Draft the plan.** Decompose the goal into modules that can each be built
    by one Worker in isolation. Define for every module:
    - `depends_on` — the DAG (no cycles; validate before handing off)

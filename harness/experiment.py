@@ -263,6 +263,22 @@ def start(
     return experiment
 
 
+def set_question(name: str, question: str, root: str | Path = ".") -> Experiment:
+    """Record the question after the fact.
+
+    An experiment often starts before its question is sharp: the researcher
+    opens a Planner and they work out what is actually being asked. That
+    conversation is the point, so the question is recorded when it settles
+    rather than demanded up front.
+    """
+    experiment = find_experiment(name, root)
+    if not question.strip():
+        raise ExperimentError("the question cannot be empty")
+    experiment.question_path.parent.mkdir(parents=True, exist_ok=True)
+    experiment.question_path.write_text(question.strip() + "\n", encoding="utf-8")
+    return experiment
+
+
 def remove(name: str, root: str | Path = ".", force: bool = False) -> Experiment:
     """Remove an experiment's worktree. The branch is kept — it is the record."""
     experiment = find_experiment(name, root)
@@ -612,6 +628,24 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
             "Everything below serves answering exactly this. Do not widen it, and",
             "do not narrow it; if it is genuinely ambiguous, pick the reading a",
             "careful colleague would and state the assumption in the plan's goal.",
+            "",
+        ]
+    else:
+        lines += [
+            "## No question recorded yet",
+            "",
+            "This experiment was opened without one, which is normal: a question",
+            "usually gets sharper by talking it through. Work it out with the",
+            "researcher first — what is being asked, what would count as an",
+            "answer, and what they want reported — and do not plan or spawn a",
+            "single Worker until you both agree on it.",
+            "",
+            "When it settles, record it verbatim so it survives this session and",
+            "reaches the report:",
+            "",
+            "```bash",
+            f'harness exp question {experiment.name} --set "<their question, verbatim>"',
+            "```",
             "",
         ]
     lines += [
@@ -1021,6 +1055,21 @@ def run_planner(
         outcome.message = (
             f"briefing written to {brief_path}. Open a session, tell it to run "
             f"`harness planner brief {name} --register <label>`, and follow it."
+        )
+        return outcome
+
+    if not experiment.question:
+        # A spawned Planner cannot ask what is wanted; it would invent a goal
+        # and build something nobody requested. Interactively that conversation
+        # is exactly the right move, so point there instead of guessing.
+        outcome.status = "needs_human"
+        outcome.message = (
+            f"experiment '{name}' has no recorded question, so there is nothing "
+            "to spawn a Planner for. Either record one:\n"
+            f'    harness exp question {name} --set "..."\n'
+            "or drive it interactively — open a session and tell it to run "
+            f"`harness planner brief {name} --register <label>`, agree on the "
+            "question together, and it will record it for you."
         )
         return outcome
 

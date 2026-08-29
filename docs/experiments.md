@@ -23,17 +23,32 @@ flowchart TD
     R -->|"researcher's call"| M["git merge exp/&lt;name&gt;"]
 ```
 
-## The question comes first
+## The question
+
+An experiment answers one question, and the question is stored with it
+(`experiments/<name>/question.md`, committed) and placed at the top of the
+Planner's briefing. It is the Planner's only route to knowing what is being
+asked: the question's permanent home is the plan's `report.question`, and the
+plan is the thing the Planner has not written yet.
+
+**It is not required up front.** A question usually gets sharper by talking it
+through, so an experiment can open without one:
 
 ```bash
-harness exp start <name> --question "what you actually want to know"
+harness exp start <name>                          # no question yet
+harness exp question <name>                       # show it (or say there is none)
+harness exp question <name> --set "..."           # record it when it settles
+harness exp start <name> --question "..."         # or state it up front
 ```
 
-An experiment starts from a question, so the question is stored with it
-(`experiments/<name>/question.md`, committed) and placed at the top of the
-Planner's briefing. A Planner spawned by `planner run` has no other way to
-learn what is being asked: the question's permanent home is the plan's
-`report.question`, and the plan is the thing the Planner has not written yet.
+With no question recorded, the Planner's briefing says so and instructs it to
+establish the question with the researcher **before planning or spawning any
+Worker**, then record it with `exp question --set`. That conversation is the
+point, not an obstacle to it.
+
+`planner run` is the exception: a spawned Planner has nobody to ask, so it
+refuses to start without a recorded question rather than inventing a goal and
+building something nobody requested. It points at both ways to proceed.
 
 ## Why worktrees
 
@@ -60,7 +75,8 @@ together; the door stays open.
 
 | Command | Purpose |
 | --- | --- |
-| `harness exp start <name> [--question "..."] [--base main]` | Create branch `exp/<name>` + worktree, store the question, scaffold `plans/<name>.yaml` and its integration spec |
+| `harness exp start <name> [--question "..."] [--base main]` | Create branch `exp/<name>` + worktree, scaffold `plans/<name>.yaml` and its integration spec. The question is optional |
+| `harness exp question <name> [--set "..."]` | Show the question, or record one agreed on in conversation |
 | `harness exp list` | Every experiment worktree git knows about |
 | `harness exp report <name> [--no-run] [--determinism] [--save]` | Build the researcher's decision aid; exits non-zero unless merge-ready |
 | `harness exp remove <name> [--force]` | Remove the worktree; **the branch is kept** — it is the record of the attempt |

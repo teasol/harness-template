@@ -422,7 +422,7 @@ def test_planner_is_driven_until_the_experiment_is_reportable(clone: Path) -> No
     """A Planner's definition of done is the experiment, not a single call."""
     from harness.worker import AgentConfig
 
-    experiment = exp_mod.start("driven", root=clone)
+    experiment = exp_mod.start("driven", root=clone, question="does it work?")
     wt = experiment.path
     shutil.copy("plans/demo-pipeline.yaml", wt / "plans/driven.yaml")
     text = (wt / "plans/driven.yaml").read_text(encoding="utf-8")
@@ -474,7 +474,7 @@ def test_planner_is_driven_until_the_experiment_is_reportable(clone: Path) -> No
 def test_planner_gives_up_and_says_so(clone: Path) -> None:
     from harness.worker import AgentConfig
 
-    exp_mod.start("stuck", root=clone)
+    exp_mod.start("stuck", root=clone, question="does it work?")
     config = AgentConfig(
         adapter="cli", command="true", attempts=2, label="planner", platform="stub"
     )
@@ -504,3 +504,57 @@ def test_an_experiment_without_a_question_still_works(clone: Path) -> None:
     experiment = exp_mod.start("unasked", root=clone)
     assert experiment.question == ""
     assert "## The researcher's question" not in exp_mod.planner_brief("unasked", root=clone)
+
+
+# ---------------------------------------------------------------------------
+# the question is optional: it usually gets sharper by talking it through
+
+
+@needs_git
+def test_an_experiment_can_start_before_its_question_is_settled(clone: Path) -> None:
+    """Opening an experiment, then working out the question, is the normal path."""
+    experiment = exp_mod.start("later", root=clone)
+    assert experiment.question == ""
+
+    brief = exp_mod.planner_brief("later", root=clone)
+    assert "## No question recorded yet" in brief
+    assert "do not plan or spawn a" in brief and "until you both agree on it" in brief
+    assert "harness exp question later --set" in brief
+
+
+@needs_git
+def test_the_question_can_be_recorded_afterwards(clone: Path) -> None:
+    exp_mod.start("later", root=clone)
+    settled = "Do sparse heads keep 90% of the attention mass?"
+
+    experiment = exp_mod.set_question("later", settled, root=clone)
+
+    assert experiment.question == settled
+    assert experiment.question_path.is_file()  # committed with the experiment
+    brief = exp_mod.planner_brief("later", root=clone)
+    assert "## The researcher's question" in brief
+    assert settled in brief
+    assert "No question recorded yet" not in brief
+
+
+@needs_git
+def test_an_empty_question_is_refused(clone: Path) -> None:
+    exp_mod.start("later", root=clone)
+    with pytest.raises(ExperimentError, match="cannot be empty"):
+        exp_mod.set_question("later", "   ", root=clone)
+
+
+@needs_git
+def test_spawning_a_planner_without_a_question_asks_for_one(clone: Path) -> None:
+    """An unattended Planner cannot ask what is wanted, so it must not guess."""
+    from harness.worker import AgentConfig
+
+    exp_mod.start("unasked-run", root=clone)
+    config = AgentConfig(adapter="cli", command="true", attempts=2, label="planner")
+
+    outcome = exp_mod.run_planner("unasked-run", config, root=clone)
+
+    assert outcome.status == "needs_human"
+    assert not outcome.attempts  # nothing was spawned
+    assert "no recorded question" in outcome.message
+    assert "drive it interactively" in outcome.message
