@@ -20,6 +20,17 @@
 # branch is disposable, which is the point.
 
 platforms:
+  manual:
+    label: Manual (copy-paste briefing into an agent session yourself)
+    docs: ""
+    command: ""
+    resume_command: ""
+    efforts: []
+    default_effort: ""
+    model_hint: ""
+    default_model: ""
+    reads_brief_from: stdin
+
   claude:
     label: Claude Code
     docs: claude --help

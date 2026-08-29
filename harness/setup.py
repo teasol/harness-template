@@ -48,8 +48,12 @@ class Platform:
     reads_brief_from: str = "stdin"
 
     @property
+    def is_manual(self) -> bool:
+        return self.name == "manual"
+
+    @property
     def is_custom(self) -> bool:
-        return not self.command.strip()
+        return self.name != "manual" and not self.command.strip()
 
 
 def load_platforms(path: str | Path | None = None, root: str | Path = ".") -> dict[str, Platform]:
@@ -91,14 +95,21 @@ def load_platforms(path: str | Path | None = None, root: str | Path = ".") -> di
 
 def build_config(
     platform: Platform,
-    model: str,
-    effort: str,
+    model: str = "",
+    effort: str = "",
     attempts: int = DEFAULT_ATTEMPTS,
     command: str | None = None,
     label: str = "worker",
     session: str = "",
 ) -> AgentConfig:
     """Turn a choice into a runnable agent configuration for one tier."""
+    if platform.is_manual:
+        return AgentConfig(
+            adapter="manual",
+            platform="manual",
+            attempts=attempts,
+            label=label,
+        )
     resolved = command if command is not None else platform.command
     if session and command is None and platform.session_command:
         # Attaching an existing session: the researcher already opened one and
@@ -135,6 +146,12 @@ def build_config(
 
 
 def config_to_dict(config: AgentConfig) -> dict[str, Any]:
+    if config.adapter == "manual":
+        return {
+            "adapter": "manual",
+            "attempts": config.attempts,
+            "label": config.label,
+        }
     data: dict[str, Any] = {
         "adapter": config.adapter,
         "platform": config.platform,

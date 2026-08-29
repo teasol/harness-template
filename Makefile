@@ -15,8 +15,9 @@ help: ## Show this help
 status: ## Where am I and what do I do next (start here)
 	@$(PYTHON) -m harness status
 
-setup: ## Editable install + dev tools
+setup: ## Editable install + dev tools + configure agent tiering
 	$(PYTHON) -m pip install -e ".[dev]"
+	$(PYTHON) -m harness setup
 
 agents-setup: ## Choose the platform / model / reasoning level for both tiers
 	$(PYTHON) -m harness setup

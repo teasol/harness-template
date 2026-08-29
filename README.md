@@ -23,19 +23,18 @@ python -m harness status     # reads the real state, names the next command
 # Instantiate your new project:
 python scripts/instantiate.py --name my-project
 git add -A && git commit -m "chore: instantiate from harness-template"
-make setup && make verify && make test         # install, then prove it works here
-make agents-setup                              # which model runs each tier
+make setup                                     # install + choose how agents run (Manual or AI)
+make verify && make test                       # prove it works here
 ```
 
 `instantiate.py --name my-project` removes the demo example so your project starts with a clean slate.
+
+`make setup` performs the installation and prompts you to configure each agent tier — you can select **Manual** (copy-pasting briefings into an agent session yourself) or automated **AI platforms** (Antigravity, Claude Code, Codex, opencode, etc.). You can change this selection at any time later with `make agents-setup`.
 
 *(Optional)* If you want to watch the shipped example run end-to-end first before instantiating — plan, board, acceptance, integration, determinism — you can run:
 ```bash
 python scripts/instantiate.py --exam-demo
 ```
-
-`make agents-setup` is optional: skip it and the harness writes briefings for
-you to hand to a session yourself. Run it and the harness spawns agents automatically.
 
 ### 1. Start an experiment — and its Planner
 
@@ -362,8 +361,7 @@ make drift         # validate every plan, fail on task/plan drift
 make experiments   # list experiment branches/worktrees
 ```
 
-`make setup` is the ordinary editable install; `make agents-setup` is the one
-that picks your models.
+`make setup` installs dependencies and configures agent tiers (Manual or AI); `make agents-setup` allows re-configuring or switching agents at any time.
 
 ## Project structure
 

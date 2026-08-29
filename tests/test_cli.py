@@ -391,6 +391,31 @@ def test_setup_writes_both_tiers(tmp_path: Path, capsys) -> None:
     assert load_agent_config("worker", root=tmp_path).model == "haiku"
 
 
+def test_setup_writes_manual_tiers(tmp_path: Path, capsys) -> None:
+    shutil.copytree("configs", tmp_path / "configs")
+    code = main(
+        [
+            "setup",
+            "--root",
+            str(tmp_path),
+            "--planner-platform",
+            "manual",
+            "--worker-platform",
+            "manual",
+        ]
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "planner  manual" in out
+    assert "worker   manual" in out
+
+    from harness.worker import load_agent_config
+
+    assert load_agent_config("planner", root=tmp_path).adapter == "manual"
+    assert load_agent_config("worker", root=tmp_path).adapter == "manual"
+
+
+
 def test_setup_can_attach_a_session(tmp_path: Path, capsys) -> None:
     shutil.copytree("configs", tmp_path / "configs")
     code = main(

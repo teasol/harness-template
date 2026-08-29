@@ -892,13 +892,16 @@ def _choose_tier(
         if interactive:
             print(f"\n--- {tier} ---")
             for platform in platforms.values():
-                print(f"  {platform.name:<10} {platform.label}")
+                print(f"  {platform.name:<12} {platform.label}")
             name = _prompt(f"{tier} platform", next(iter(platforms)))
         else:
             name = next(iter(platforms))
     platform = platforms.get(name)
     if platform is None:
         raise SetupError(f"unknown platform '{name}'. available: {', '.join(platforms)}")
+
+    if platform.is_manual:
+        return platform, "", "", None, ""
 
     is_planner = tier == "planner"
     default_model = (
@@ -1007,6 +1010,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     print(f"\nwrote {path}\n")
     for tier, config in (("planner", planner), ("worker", worker)):
+        if config.adapter == "manual":
+            print(f"  {tier:<8} manual (copy-paste briefings into your agent session)")
+            continue
         attached = f"  (attached to session {config.session})" if config.session else ""
         print(
             f"  {tier:<8} {config.platform} · {config.model or 'platform default'} · "

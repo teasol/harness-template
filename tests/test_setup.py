@@ -24,16 +24,26 @@ from harness.worker import AgentConfig, WorkerError, load_agent_config, load_wor
 
 def test_shipped_presets_load() -> None:
     platforms = load_platforms(root=".")
-    assert {"claude", "codex", "opencode", "antigravity", "custom"} <= set(platforms)
+    assert {"manual", "claude", "codex", "opencode", "antigravity", "custom"} <= set(platforms)
     for name, platform in platforms.items():
-        if name == "custom":
-            assert platform.is_custom
+        if name in ("custom", "manual"):
             continue
         # Every real preset must let the tier be chosen, or it defeats the point.
         assert "{model}" in platform.command, f"{name} cannot select a model"
         assert "{effort}" in platform.command, f"{name} cannot select a reasoning level"
         assert platform.efforts, f"{name} lists no reasoning levels"
         assert platform.docs, f"{name} should say how to check its flags"
+
+
+def test_manual_platform_builds_manual_adapter() -> None:
+    platform = load_platforms(root=".")["manual"]
+    planner = build_config(platform, attempts=3, label="planner")
+    worker = build_config(platform, attempts=6, label="worker")
+    assert planner.adapter == "manual"
+    assert worker.adapter == "manual"
+    assert config_to_dict(planner) == {"adapter": "manual", "attempts": 3, "label": "planner"}
+    assert config_to_dict(worker) == {"adapter": "manual", "attempts": 6, "label": "worker"}
+
 
 
 def test_missing_presets_is_an_error(tmp_path: Path) -> None:
