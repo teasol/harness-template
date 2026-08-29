@@ -120,7 +120,9 @@ def test_complete_marks_done(tmp_path: Path, demo_plan) -> None:
     tasks_dir = tmp_path / "tasks"
     task_mod.materialize(demo_plan, tasks_dir)
     task_mod.claim(tasks_dir, "data-gen", "agent-1")
-    task, result = task_mod.complete(tasks_dir, "data-gen", worker="agent-1")
+    task, result = task_mod.complete(
+        tasks_dir, "data-gen", worker="agent-1", results_dir=tmp_path / "results"
+    )
     assert result.success
     assert task.status == "done"
     assert task.log[-1].endswith("done")
@@ -137,7 +139,7 @@ def test_board_and_ready(tmp_path: Path, demo_plan) -> None:
     # data-gen has no deps → ready; stats waits on data-gen.
     assert task_mod.ready_task_ids(board) == ["data-gen"]
     task_mod.claim(tasks_dir, "data-gen", "w1")
-    task_mod.complete(tasks_dir, "data-gen", worker="w1")
+    task_mod.complete(tasks_dir, "data-gen", worker="w1", results_dir=tmp_path / "results")
     board = task_mod.load_board(tasks_dir)
     assert task_mod.ready_task_ids(board) == ["stats"]
     # With its dependency done, stats is now claimable without --force.

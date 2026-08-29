@@ -134,6 +134,8 @@ def _exam_demo(root: Path) -> int:
         ("The integration check of the assembled whole", ["verify", "--spec", str(spec)]),
         ("Determinism: same inputs, same artifacts", ["reproduce", "--spec", str(spec)]),
     ]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
     from harness.cli import main as harness_main
 
     for index, (title, argv) in enumerate(steps, start=1):
