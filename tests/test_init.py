@@ -34,7 +34,7 @@ def test_init_fresh_directory(tmp_path: Path) -> None:
 
 
 def test_init_preserves_existing_project_configs_and_tasks(tmp_path: Path) -> None:
-    """Initializing an existing project with its own configs/ and tasks/ must never collide or overwrite."""
+    """Initializing an existing project with configs/ and tasks/ must never collide."""
     project_dir = tmp_path / "existing_ml_project"
     project_dir.mkdir()
 
@@ -42,16 +42,19 @@ def test_init_preserves_existing_project_configs_and_tasks(tmp_path: Path) -> No
     (project_dir / "configs").mkdir()
     (project_dir / "configs" / "model.yaml").write_text("model: resnet50\n", encoding="utf-8")
     (project_dir / "tasks").mkdir()
-    (project_dir / "tasks" / "glue_benchmark.py").write_text("print('evaluating')\n", encoding="utf-8")
+    (project_dir / "tasks" / "bench.py").write_text("print('eval')\n", encoding="utf-8")
     (project_dir / "scripts").mkdir()
-    (project_dir / "scripts" / "train.sh").write_text("#!/bin/bash\npython train.py\n", encoding="utf-8")
+    (project_dir / "scripts" / "train.sh").write_text(
+        "#!/bin/bash\npython train.py\n", encoding="utf-8"
+    )
 
     # Run harness init
     init_project(project_dir)
 
     # Existing project files are 100% untouched
-    assert (project_dir / "configs" / "model.yaml").read_text(encoding="utf-8") == "model: resnet50\n"
-    assert (project_dir / "tasks" / "glue_benchmark.py").is_file()
+    cfg_text = (project_dir / "configs" / "model.yaml").read_text(encoding="utf-8")
+    assert cfg_text == "model: resnet50\n"
+    assert (project_dir / "tasks" / "bench.py").is_file()
     assert (project_dir / "scripts" / "train.sh").is_file()
     assert not (project_dir / "configs" / "agents.yaml").exists()  # Kept inside .harness!
 

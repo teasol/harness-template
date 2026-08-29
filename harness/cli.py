@@ -43,8 +43,6 @@ from harness import experiment as exp_mod
 from harness import task as task_mod
 from harness.experiment import ExperimentError
 from harness.paths import (
-    get_agents_config_path,
-    get_configs_dir,
     get_plans_dir,
     get_tasks_dir,
 )
@@ -1118,7 +1116,7 @@ def cmd_exp_question(args: argparse.Namespace) -> int:
 
 
 def find_project_root(start: str | Path = ".") -> Path:
-    """Locate the project root by searching upwards for .harness, configs/agents.yaml, plans/, or .git."""
+    """Locate the project root by searching upwards for .harness, configs, or .git."""
     current = Path(start).resolve()
     for parent in [current, *current.parents]:
         if (
