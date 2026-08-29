@@ -39,6 +39,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from harness import adoption as adoption_mod
 from harness import experiment as exp_mod
 from harness import heartbeat
 from harness import plan as plan_mod
@@ -1598,7 +1599,22 @@ def cmd_init(args: argparse.Namespace) -> int:
         )
         cmd_setup(setup_args)
 
+    # Landing on an existing codebase is a different situation from starting
+    # empty, and it used to print the identical next steps — so the one fact
+    # that matters on day one, that none of this code is verified yet, went
+    # unsaid.
+    adoption = adoption_mod.record(target_dir)
     print("\nNext steps:")
-    print("  1. Verify starter spec:  harness verify --spec configs/demo.yaml")
-    print("  2. Start an experiment:  harness exp start <experiment-name>")
+    if adoption is None:
+        print("  1. Verify starter spec:  harness verify --spec configs/demo.yaml")
+        print("  2. Start an experiment:  harness exp start <experiment-name>")
+        return 0
+
+    print(
+        f"  This repository already has {adoption.source_files} source file(s), and none of\n"
+        "  them is covered by a contract, an acceptance check, or a plan yet.\n"
+        "  Register a Planner and let it plan how to change that:\n"
+    )
+    for index, step in enumerate(adoption_mod.next_steps(target_dir), 1):
+        print(f"  {index}. {step}")
     return 0

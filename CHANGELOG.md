@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`harness init` notices when it lands on an existing codebase.** Most
+  projects do not start empty, and until now that looked identical to one that
+  did — the same two next steps either way, so the fact that mattered on day
+  one, that none of this code is covered by a contract or an acceptance check,
+  went unsaid. Adoption is now recorded (the commit the harness arrived at and
+  how many source files predate it, so "unverified" has a boundary rather than
+  being a feeling), and `init` prints the order that actually works:
+  `project init` → `planner create` → `exp start --planner`.
+
+  Every Planner briefing then opens with that situation until some experiment
+  here reaches a report. **No modularization procedure is prescribed, by
+  design.** Deciding the decomposition is Tier 2's job, and a pipeline baked
+  into the tool would both take that away and be wrong for the next project.
+  What the briefing supplies is what generalizes: the five conditions a module
+  boundary must satisfy — each one a consequence of something the harness can
+  or cannot enforce — and the ordering principle that in research code the
+  artifact of record is a *measurement*, so the numbers get pinned before
+  anything moves.
+
 ### Fixed
 
 - **`exp report --no-run` reused nothing.** It skipped the integration run and

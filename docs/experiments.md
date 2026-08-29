@@ -86,6 +86,32 @@ Worktrees default to `.experiments/<name>` inside the repo and are gitignored.
 Removing a worktree never deletes the branch, so a rejected experiment remains
 inspectable.
 
+## Adopting an existing project
+
+Most projects do not start empty. The order that works:
+
+```bash
+pip install research-harness
+harness init .                                  # notices the code already here
+harness project init                            # what a Planner must know
+harness planner create <name> --model <model>   # it outlives this experiment
+harness exp start <name> --planner <name>       # the Planner plans the rest
+```
+
+`harness init` records how the harness arrived — the commit and how many source
+files predate it — so "unverified" has a boundary instead of being a feeling.
+Every Planner briefing then opens with that, until some experiment here reaches
+a report.
+
+**The harness does not prescribe how to modularize an existing codebase, and
+should not.** Deciding the decomposition is exactly the Planner's job; a fixed
+pipeline in the tool would take Tier 2's work away and would be wrong for the
+next project anyway. What the briefing supplies instead is what generalizes: the
+conditions a module boundary has to satisfy — each one a consequence of
+something the harness can or cannot enforce — and the ordering principle that in
+research code the artifact of record is a *measurement*, so the numbers must be
+pinned before anything moves. The Planner may disagree with any of it.
+
 ## Project context: what every Planner is told
 
 A harness dropped into an existing project inherits a world it did not build.

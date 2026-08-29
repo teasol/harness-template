@@ -58,6 +58,21 @@ Everything you do belongs to that experiment's branch; you never merge it.
    ```
    It exits non-zero until the experiment is genuinely merge-ready.
 
+## Adopting an existing codebase
+
+If the project predates the harness, your briefing says so and names the commit
+the harness arrived at. Nothing before it is covered by a contract, an
+acceptance check, or a plan, and making it verifiable is your first experiment.
+
+It is an experiment like any other: settle the question, decompose it, give each
+module a contract and machine-checkable acceptance, prove it, report. **There is
+no prescribed decomposition and the harness will not supply one** — you have read
+the codebase and a generic pipeline has not. The briefing lists the conditions a
+boundary has to satisfy, because those follow from what the harness can actually
+enforce, and one ordering principle, because it is expensive to learn late: in
+research code the artifact of record is a measurement, so pin the numbers you
+must not change before you change anything.
+
 ## Rules
 
 1. **Never implement modules yourself.** If code is missing, that's a Worker

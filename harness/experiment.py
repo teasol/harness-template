@@ -26,6 +26,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from harness import adoption as adoption_mod
 from harness import planners as planners_mod
 from harness import project as project_mod
 from harness.checks import CheckError, lookup_metric
@@ -734,6 +735,21 @@ def write_experiment_report(
 # Planner registration
 
 
+def _anything_reported(root: str | Path = ".") -> bool:
+    """True once any experiment here has reached a reportable state.
+
+    The adoption framing is for a project where nothing has been proven yet. Once
+    one experiment has, repeating it in every briefing is noise.
+    """
+    try:
+        return any(
+            e.state == "ready to report"
+            for e in (experiment_state(x) for x in list_experiments(root))
+        )
+    except ExperimentError:
+        return False
+
+
 def _planner_model(experiment: Experiment, root: str | Path = ".") -> str:
     """The model driving this experiment, from the marker or the registry.
 
@@ -790,6 +806,13 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
             "verbatim so it survives this session and reaches the report.",
         ]
     lines += [""]
+    # A project that predates the harness needs saying so, once, to the Planner
+    # that will do something about it. Dropped as soon as any experiment has
+    # reached a report: by then the situation speaks for itself.
+    adoption = adoption_mod.read(root)
+    if adoption is not None and adoption.is_adoption and not _anything_reported(root):
+        lines += adoption_mod.brief_lines(adoption, root)
+
     # A Planner with a memory opens with it: everything it learned in earlier
     # experiments, so the hour spent learning this project is paid once.
     registered = planner_of(experiment) or {}
