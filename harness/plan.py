@@ -278,6 +278,8 @@ def load_plan(path: str | Path) -> Plan:
             integration_path,
             source_dir / integration_path,
             source_dir.parent / integration_path,
+            source_dir.parent / ".harness" / integration_path,
+            source_dir.parent / ".harness" / "configs" / integration_path.name,
         ]
         if not any(c.is_file() for c in candidates):
             raise PlanError(f"integration spec not found: {integration}")

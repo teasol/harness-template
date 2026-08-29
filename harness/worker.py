@@ -130,7 +130,8 @@ def load_agent_config(
         if not candidate.is_file():
             raise WorkerError(f"{section} config not found: {candidate}")
     else:
-        candidate = root / DEFAULT_CONFIG_PATH
+        from harness.paths import get_agents_config_path
+        candidate = get_agents_config_path(root)
         if not candidate.is_file():
             legacy = root / LEGACY_CONFIG_PATH
             candidate = legacy if legacy.is_file() and section == "worker" else candidate

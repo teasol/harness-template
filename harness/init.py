@@ -1,7 +1,8 @@
 """Project initialization and scaffolding for Research Harness.
 
 Initializes a research repository with standard two-tier agent orchestration
-contracts, platform configurations, and smoke-test verification specs.
+contracts, platform configurations, and smoke-test verification specs,
+neatly encapsulated under `.harness/` to avoid collisions with existing project files.
 """
 
 from __future__ import annotations
@@ -9,6 +10,11 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
+
+from harness.paths import (
+    get_agents_config_path,
+    get_harness_dir,
+)
 
 TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates"
 
@@ -30,7 +36,7 @@ def init_project(
     name: str | None = None,
     force: bool = False,
 ) -> list[Path]:
-    """Scaffold a directory with harness templates and structure."""
+    """Scaffold a directory with harness templates and structure under .harness/."""
     target = Path(target_dir).resolve()
     target.mkdir(parents=True, exist_ok=True)
 
@@ -38,20 +44,20 @@ def init_project(
         raise InitError(f"Harness template directory not found at: {TEMPLATE_ROOT}")
 
     # Safety check: avoid accidentally overwriting unless --force is given
-    agents_yaml = target / "configs" / "agents.yaml"
+    agents_yaml = get_agents_config_path(target)
     if agents_yaml.is_file() and not force:
         raise InitError(
-            f"Project already initialized at {target} ('configs/agents.yaml' exists). "
+            f"Project already initialized at {target} ('{agents_yaml.name}' exists). "
             "Use --force to overwrite existing files."
         )
 
-    # Standard directory skeleton
+    # Standard encapsulated directory skeleton
+    harness_dir = get_harness_dir(target)
     dirs = [
-        target / "plans",
-        target / "tasks",
-        target / "configs",
-        target / "scripts",
-        target / "agents",
+        harness_dir / "plans",
+        harness_dir / "tasks",
+        harness_dir / "configs",
+        harness_dir / "agents",
         target / ".experiments",
         target / "results",
     ]
@@ -60,15 +66,14 @@ def init_project(
 
     created_files: list[Path] = []
 
-    # Copy files from templates
+    # Copy files from templates into .harness/ namespace
     files_to_copy = [
         ("AGENTS.md", target / "AGENTS.md"),
-        ("agents/planner.md", target / "agents" / "planner.md"),
-        ("agents/worker.md", target / "agents" / "worker.md"),
-        ("configs/agent-platforms.yaml", target / "configs" / "agent-platforms.yaml"),
-        ("configs/agents.yaml", target / "configs" / "agents.yaml"),
-        ("configs/demo.yaml", target / "configs" / "demo.yaml"),
-        ("scripts/demo_step.py", target / "scripts" / "demo_step.py"),
+        ("agents/planner.md", harness_dir / "agents" / "planner.md"),
+        ("agents/worker.md", harness_dir / "agents" / "worker.md"),
+        ("configs/agent-platforms.yaml", harness_dir / "configs" / "agent-platforms.yaml"),
+        ("configs/agents.yaml", harness_dir / "configs" / "agents.yaml"),
+        ("configs/demo.yaml", harness_dir / "configs" / "demo.yaml"),
     ]
 
     for src_rel, dst_path in files_to_copy:

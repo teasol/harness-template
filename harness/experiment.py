@@ -25,6 +25,12 @@ from pathlib import Path
 from typing import Any
 
 from harness.checks import CheckError, lookup_metric
+from harness.paths import (
+    get_agents_config_path,
+    get_configs_dir,
+    get_plans_dir,
+    get_tasks_dir,
+)
 from harness.plan import Plan, PlanError, load_plan
 from harness.report import write_reports
 from harness.reproduce import ReproduceError, reproduce
@@ -53,7 +59,7 @@ class Experiment:
 
     @property
     def plan_path(self) -> Path:
-        return self.path / "plans" / f"{self.name}.yaml"
+        return get_plans_dir(self.path) / f"{self.name}.yaml"
 
     @property
     def question_path(self) -> Path:
@@ -256,7 +262,7 @@ def start(
         # Scaffold the integration spec the plan points at, so the Planner's
         # first validation error is about the TODOs it must fill in, not about
         # a file the scaffold neglected to create.
-        spec_path = path / "configs" / f"{name}.yaml"
+        spec_path = get_configs_dir(path) / f"{name}.yaml"
         if not spec_path.exists():
             spec_path.parent.mkdir(parents=True, exist_ok=True)
             spec_path.write_text(INTEGRATION_TEMPLATE.format(name=name), encoding="utf-8")
@@ -837,7 +843,7 @@ def experiment_state(experiment: Experiment) -> ExperimentState:
         hint = "after replacing every TODO in it" if kind == "scaffold" else "after fixing it"
         return state(kind, detail, f"harness plan validate plans/{name}.yaml   # {hint}")
 
-    board = {t.id: t for t in load_board(experiment.path / "tasks")}
+    board = {t.id: t for t in load_board(get_tasks_dir(experiment.path))}
     module_ids = [m.id for m in plan.modules]
     present = [i for i in module_ids if i in board]
     if len(present) < len(module_ids):
@@ -879,8 +885,8 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
             if line.startswith("name ="):
                 project_name = line.split("=", 1)[1].strip().strip('"').strip("'")
                 break
-    instantiated = (root / "configs" / "agents.yaml").is_file()
-    demo_present = (root / "plans" / "demo-pipeline.yaml").is_file()
+    instantiated = get_agents_config_path(root).is_file()
+    demo_present = (get_plans_dir(root) / "demo-pipeline.yaml").is_file()
 
     try:
         experiments = [experiment_state(e) for e in list_experiments(root)]

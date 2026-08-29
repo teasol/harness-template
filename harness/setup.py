@@ -19,6 +19,10 @@ from typing import Any
 
 import yaml
 
+from harness.paths import (
+    get_agents_config_path,
+    get_platforms_config_path,
+)
 from harness.worker import DEFAULT_ATTEMPTS, AgentConfig
 
 DEFAULT_PLATFORMS_PATH = "configs/agent-platforms.yaml"
@@ -58,9 +62,12 @@ class Platform:
 
 def load_platforms(path: str | Path | None = None, root: str | Path = ".") -> dict[str, Platform]:
     """Read the platform presets. Absent file is an error, not a silent default."""
-    candidate = Path(path) if path else Path(root) / DEFAULT_PLATFORMS_PATH
-    if not candidate.is_absolute():
-        candidate = Path(root) / candidate
+    if path:
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            candidate = Path(root) / candidate
+    else:
+        candidate = get_platforms_config_path(root)
     if not candidate.is_file():
         raise SetupError(f"platform presets not found: {candidate}")
     try:
@@ -196,9 +203,12 @@ def write_agent_config(
     root: str | Path = ".",
 ) -> Path:
     """Write both tiers into one file."""
-    target = Path(path) if path else Path(root) / DEFAULT_AGENTS_PATH
-    if not target.is_absolute():
-        target = Path(root) / target
+    if path:
+        target = Path(path)
+        if not target.is_absolute():
+            target = Path(root) / target
+    else:
+        target = get_agents_config_path(root)
     target.parent.mkdir(parents=True, exist_ok=True)
     body = yaml.safe_dump(
         {"planner": config_to_dict(planner), "worker": config_to_dict(worker)},

@@ -42,6 +42,12 @@ from pathlib import Path
 from harness import experiment as exp_mod
 from harness import task as task_mod
 from harness.experiment import ExperimentError
+from harness.paths import (
+    get_agents_config_path,
+    get_configs_dir,
+    get_plans_dir,
+    get_tasks_dir,
+)
 from harness.plan import PlanError, load_plan
 from harness.report import write_reports
 from harness.reproduce import (
@@ -66,6 +72,18 @@ from harness.worker import (
     run_task,
     write_worker_report,
 )
+
+
+def _resolve_tasks_dir(tasks_dir: str, root: str | Path = ".") -> str:
+    if tasks_dir == "tasks" and not (Path(root) / "tasks").is_dir():
+        return str(get_tasks_dir(root))
+    return tasks_dir
+
+
+def _resolve_plans_dir(plans_dir: str, root: str | Path = ".") -> str:
+    if plans_dir == "plans" and not (Path(root) / "plans").is_dir():
+        return str(get_plans_dir(root))
+    return plans_dir
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -162,9 +180,10 @@ def cmd_plan_validate(args: argparse.Namespace) -> int:
 
 
 def cmd_plan_materialize(args: argparse.Namespace) -> int:
+    tasks_dir = _resolve_tasks_dir(args.tasks_dir)
     try:
         plan = load_plan(args.plan)
-        written = task_mod.materialize(plan, args.tasks_dir, force=args.force)
+        written = task_mod.materialize(plan, tasks_dir, force=args.force)
     except (PlanError, TaskError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -183,9 +202,11 @@ def cmd_plan_check(args: argparse.Namespace) -> int:
     naming one, so removing the shipped demo (or adding a plan) needs no
     edits to any of them.
     """
-    plans = sorted(Path(args.plans_dir).glob("*.yaml"))
+    plans_dir = _resolve_plans_dir(args.plans_dir)
+    tasks_dir = _resolve_tasks_dir(args.tasks_dir)
+    plans = sorted(Path(plans_dir).glob("*.yaml"))
     if not plans:
-        print(f"(no plans in {args.plans_dir})")
+        print(f"(no plans in {plans_dir})")
         return 0
     problems = 0
     for path in plans:
@@ -195,7 +216,7 @@ def cmd_plan_check(args: argparse.Namespace) -> int:
             print(f"  INVALID {path}: {exc}", file=sys.stderr)
             problems += 1
             continue
-        drift = task_mod.spec_drift(plan, args.tasks_dir)
+        drift = task_mod.spec_drift(plan, tasks_dir)
         # A plan whose tasks were never materialized is a normal early state,
         # not drift; only a materialized task that disagrees is a problem.
         stale = {k: v for k, v in drift.items() if v != ["(not materialized)"]}
@@ -213,12 +234,13 @@ def cmd_plan_check(args: argparse.Namespace) -> int:
 
 
 def cmd_plan_status(args: argparse.Namespace) -> int:
+    tasks_dir = _resolve_tasks_dir(args.tasks_dir)
     try:
         plan = load_plan(args.plan)
     except PlanError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    board = {t.id: t for t in task_mod.load_board(args.tasks_dir)}
+    board = {t.id: t for t in task_mod.load_board(tasks_dir)}
     module_ids = [m.id for m in plan.modules]
     print(f"Plan: {plan.name}")
     print(f"Goal: {plan.goal.strip()}")
@@ -244,7 +266,7 @@ def cmd_plan_status(args: argparse.Namespace) -> int:
         print()
         print(f"Task file(s) not in this plan (ignored here): {', '.join(orphans)}")
 
-    drift = task_mod.spec_drift(plan, args.tasks_dir)
+    drift = task_mod.spec_drift(plan, tasks_dir)
     if drift:
         print()
         print("Drift — task files no longer match the plan:")
@@ -261,7 +283,8 @@ def cmd_plan_status(args: argparse.Namespace) -> int:
 
 
 def cmd_task_list(args: argparse.Namespace) -> int:
-    board = task_mod.load_board(args.tasks_dir)
+    tasks_dir = _resolve_tasks_dir(args.tasks_dir)
+    board = task_mod.load_board(tasks_dir)
     if args.status:
         board = [t for t in board if t.status == args.status]
     if not board:
@@ -272,7 +295,7 @@ def cmd_task_list(args: argparse.Namespace) -> int:
         if not board:
             print(f"(no tasks for plan '{args.plan}')")
             return 0
-    ready = set(task_mod.ready_task_ids(task_mod.load_board(args.tasks_dir)))
+    ready = set(task_mod.ready_task_ids(task_mod.load_board(tasks_dir)))
     print("  ID           PLAN            STATUS        WORKER           DEPENDS ON     READY")
     for task in board:
         deps = ", ".join(task.depends_on) or "-"
@@ -285,8 +308,9 @@ def cmd_task_list(args: argparse.Namespace) -> int:
 
 
 def cmd_task_show(args: argparse.Namespace) -> int:
+    tasks_dir = _resolve_tasks_dir(args.tasks_dir)
     try:
-        task = task_mod.load_task(args.tasks_dir, args.id)
+        task = task_mod.load_task(tasks_dir, args.id)
     except TaskError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -295,8 +319,9 @@ def cmd_task_show(args: argparse.Namespace) -> int:
 
 
 def cmd_task_claim(args: argparse.Namespace) -> int:
+    tasks_dir = _resolve_tasks_dir(args.tasks_dir)
     try:
-        task = task_mod.claim(args.tasks_dir, args.id, args.by, force=args.force)
+        task = task_mod.claim(tasks_dir, args.id, args.by, force=args.force)
     except TaskError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -305,8 +330,9 @@ def cmd_task_claim(args: argparse.Namespace) -> int:
 
 
 def cmd_task_block(args: argparse.Namespace) -> int:
+    tasks_dir = _resolve_tasks_dir(args.tasks_dir)
     try:
-        task = task_mod.block(args.tasks_dir, args.id, args.reason)
+        task = task_mod.block(tasks_dir, args.id, args.reason)
     except TaskError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -315,16 +341,17 @@ def cmd_task_block(args: argparse.Namespace) -> int:
 
 
 def cmd_task_verify(args: argparse.Namespace) -> int:
+    tasks_dir = _resolve_tasks_dir(args.tasks_dir, args.root)
     if not args.all and not args.id:
         print("error: task verify requires --id <id> or --all", file=sys.stderr)
         return 2
     try:
         if args.all:
-            tasks = task_mod.load_board(args.tasks_dir)
+            tasks = task_mod.load_board(tasks_dir)
             if args.status:
                 tasks = [t for t in tasks if t.status == args.status]
         else:
-            tasks = [task_mod.load_task(args.tasks_dir, args.id)]
+            tasks = [task_mod.load_task(tasks_dir, args.id)]
     except TaskError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -348,9 +375,10 @@ def cmd_task_verify(args: argparse.Namespace) -> int:
 
 
 def cmd_task_done(args: argparse.Namespace) -> int:
+    tasks_dir = _resolve_tasks_dir(args.tasks_dir, args.root)
     try:
         task, result = task_mod.complete(
-            args.tasks_dir,
+            tasks_dir,
             args.id,
             worker=args.by,
             root=args.root,
@@ -725,6 +753,7 @@ def _print_worker_outcome(outcome) -> None:
 
 
 def cmd_task_run(args: argparse.Namespace) -> int:
+    tasks_dir = _resolve_tasks_dir(args.tasks_dir, args.root)
     try:
         config = load_worker_config(args.worker_config, root=args.root)
         if args.attempts is not None:
@@ -732,7 +761,7 @@ def cmd_task_run(args: argparse.Namespace) -> int:
         if args.adapter:
             config.adapter = args.adapter
         outcome = run_task(
-            args.tasks_dir,
+            tasks_dir,
             args.id,
             config=config,
             root=args.root,
@@ -750,6 +779,7 @@ def cmd_task_run(args: argparse.Namespace) -> int:
 
 def cmd_plan_run(args: argparse.Namespace) -> int:
     """Drain the ready queue: run each ready task in dependency order."""
+    tasks_dir = _resolve_tasks_dir(args.tasks_dir, args.root)
     try:
         plan = load_plan(args.plan)
         config = load_worker_config(args.worker_config, root=args.root)
@@ -767,7 +797,7 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
 
     completed = 0
     while True:
-        board = task_mod.load_board(args.tasks_dir)
+        board = task_mod.load_board(tasks_dir)
         ready = task_mod.ready_task_ids(board)
         if not ready:
             break
@@ -775,7 +805,7 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
         print(f"--- running task '{task_id}' ---")
         try:
             outcome = run_task(
-                args.tasks_dir,
+                tasks_dir,
                 task_id,
                 config=config,
                 root=args.root,
@@ -1088,10 +1118,14 @@ def cmd_exp_question(args: argparse.Namespace) -> int:
 
 
 def find_project_root(start: str | Path = ".") -> Path:
-    """Locate the project root by searching upwards for configs/agents.yaml, plans/, or .git."""
+    """Locate the project root by searching upwards for .harness, configs/agents.yaml, plans/, or .git."""
     current = Path(start).resolve()
     for parent in [current, *current.parents]:
-        if (parent / "configs" / "agents.yaml").is_file() or (parent / "plans").is_dir():
+        if (
+            (parent / ".harness").is_dir()
+            or (parent / "configs" / "agents.yaml").is_file()
+            or (parent / "plans").is_dir()
+        ):
             return parent
         if (parent / ".git").exists():
             return parent
