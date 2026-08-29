@@ -25,24 +25,13 @@
 # Run `harness setup` to fill this in from the presets in
 # configs/agent-platforms.yaml.
 planner:
-  adapter: cli
-  platform: antigravity
-  model: gemini-3.7-flash
-  effort: high
-  command: agy -p --model {model} --effort {effort} --dangerously-skip-permissions --add-dir {root}
-  resume_command: agy -p --continue --model {model} --effort {effort} --dangerously-skip-permissions --add-dir {root}
+  adapter: manual
   attempts: 3
-  timeout: 1800
   label: planner
 
 worker:
-  adapter: cli
-  platform: antigravity
-  model: gemini-3.7-flash
-  effort: low
-  command: agy -p --model {model} --effort {effort} --dangerously-skip-permissions --add-dir {root}
-  resume_command: agy -p --continue --model {model} --effort {effort} --dangerously-skip-permissions --add-dir {root}
+  adapter: manual
   attempts: 6
-  timeout: 1800
   label: worker
+
 

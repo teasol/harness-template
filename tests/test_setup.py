@@ -24,7 +24,7 @@ from harness.worker import AgentConfig, WorkerError, load_agent_config, load_wor
 
 def test_shipped_presets_load() -> None:
     platforms = load_platforms(root=".")
-    assert {"claude", "codex", "opencode", "custom"} <= set(platforms)
+    assert {"claude", "codex", "opencode", "antigravity", "custom"} <= set(platforms)
     for name, platform in platforms.items():
         if name == "custom":
             assert platform.is_custom
@@ -136,3 +136,5 @@ def test_presets_let_an_agent_actually_run_things() -> None:
     assert "acceptEdits" not in platforms["claude"].command
     assert "bypassPermissions" in platforms["claude"].command
     assert "bypassPermissions" in platforms["claude"].resume_command
+    assert "dangerously-skip-permissions" in platforms["antigravity"].command
+    assert "dangerously-skip-permissions" in platforms["antigravity"].resume_command
