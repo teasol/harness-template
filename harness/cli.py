@@ -22,12 +22,12 @@ Usage::
     python -m harness task done --id <id> [--by <agent>] [--tasks-dir tasks]
 
     # Experiments (researcher <-> Planner): one hypothesis per branch+worktree
-    python -m harness exp start <name> [--question "..."] [--base main]
+    python -m harness exp start <name> [--question "..."]   # creates + briefs the Planner
     python -m harness exp question <name> [--set "..."]   # record it later
     python -m harness exp list
     python -m harness exp report <name> [--no-run] [--determinism] [--save]
     python -m harness exp remove <name> [--force]
-    python -m harness planner brief <name> [--register <label>] [--session ID]
+    python -m harness planner brief <name>            # current state, re-run anytime
     python -m harness planner run <name>               # spawn a Planner (Tier 1 -> 2)
 
 """
@@ -495,8 +495,13 @@ def build_parser() -> argparse.ArgumentParser:
     exp_start.add_argument(
         "--question",
         default=None,
-        help="The research question, verbatim — carried to the Planner and the report",
+        help="The research question, verbatim. Optional — settle it with the Planner instead",
     )
+    exp_start.add_argument(
+        "--planner", default="planner", help="Label recorded for this experiment's Planner"
+    )
+    exp_start.add_argument("--model", default=None, help="Model this Planner runs on (recorded)")
+    exp_start.add_argument("--effort", default=None, help="Reasoning level of the Planner")
     exp_start.add_argument(
         "--path",
         default=exp_mod.DEFAULT_WORKTREE_ROOT,
@@ -602,6 +607,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def cmd_exp_start(args: argparse.Namespace) -> int:
+    """Create an experiment and brief its Planner — one experiment, one Planner."""
     try:
         experiment = exp_mod.start(
             args.name,
@@ -610,26 +616,23 @@ def cmd_exp_start(args: argparse.Namespace) -> int:
             base=args.base,
             question=args.question or "",
         )
+        exp_mod.register_planner(
+            args.name,
+            args.planner,
+            root=args.root,
+            model=args.model or "",
+            effort=args.effort or "",
+        )
+        brief = exp_mod.planner_brief(args.name, root=args.root)
     except ExperimentError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(f"experiment '{experiment.name}' created")
-    print(f"  branch:   {experiment.branch}")
-    print(f"  worktree: {experiment.path}")
-    print(f"  plan:     {experiment.plan_path}")
-    if experiment.question:
-        print(f"  question: {experiment.question.splitlines()[0][:70]}")
-    if not experiment.question:
-        print(
-            "  question: (none yet — settle it with the Planner, then"
-            f' `harness exp question {experiment.name} --set "..."`)'
-        )
-    print()
-    print("Next (Planner, from inside the worktree):")
-    print(f"  cd {experiment.path}")
-    print(f"  # fill in plans/{experiment.name}.yaml, then:")
-    print(f"  python -m harness plan validate plans/{experiment.name}.yaml")
-    print(f"  python -m harness plan materialize plans/{experiment.name}.yaml")
+
+    print(f"Experiment '{experiment.name}' created on {experiment.branch}.")
+    print(f"Its Planner is '{args.planner}'. Everything below is that Planner's briefing —")
+    print("follow it, or hand this session to whoever will.\n")
+    print("=" * 70)
+    print(brief)
     return 0
 
 

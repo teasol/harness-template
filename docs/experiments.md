@@ -100,21 +100,30 @@ definition of done is its acceptance, a Planner's is the experiment. Useful
 when a researcher (or a Tier 1 agent acting for them) is driving several
 experiments and does not want to sit inside each one.
 
-Otherwise, a session becomes an experiment's Planner by running one command and
-following its output:
+One experiment has exactly one Planner, so `exp start` creates both: it prints
+the Planner's briefing directly, and registers it. There is no separate
+activation step.
+
+`planner brief` is then the *working* briefing — re-read current state at any
+time:
 
 ```bash
-python -m harness planner brief <name> --register <label>
+python -m harness planner brief <name>
 ```
+
+It always has the same sections — **Question**, **State**, **Next**, **Your
+role**, **The whole sequence** — whatever the experiment's state; only their
+contents change. `Next` always names one real command, never the briefing
+itself. A document that changes shape is one you have to re-read; this one you
+re-run and skim.
 
 **Tell the agent to run it; do not run it and paste the output.** Any coding
 agent with shell access can execute it, and re-run it whenever it needs current
 state. A pasted briefing is a snapshot that goes stale as soon as a Worker
 finishes; the command always returns the board as it is now.
 
-It prints the role contract to read, the worktree and branch owned, the plan's
-state, the module board, the commands to run, and how to hand back. `--register`
-records the label so `exp list` shows who is driving which experiment.
+`--register` re-records the label (and `--model`/`--effort`) if the Planner
+changes; `exp start` does it once for you.
 
 This is a plain command producing plain text on purpose. Tool-specific shims
 (a slash command, a skill, a saved prompt) are thin optional wrappers around it

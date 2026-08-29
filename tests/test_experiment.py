@@ -334,12 +334,18 @@ def test_status_walks_the_whole_flow(clone: Path) -> None:
     assert status.instantiated and not status.experiments
     assert "exp start" in " ".join(status.next_steps)
 
-    # Started: the plan is still the scaffold.
+    # Opened, but the question is not agreed yet — the first state of all.
     experiment = exp_mod.start("flow", root=clone)
     wt = experiment.path
     states = {e.name: e for e in exp_mod.project_status(clone, cwd=clone).experiments}
+    assert states["flow"].state == "question unsettled"
+    assert "exp question flow --set" in states["flow"].next_command
+
+    # Question settled: now the scaffold is what stands in the way.
+    exp_mod.set_question("flow", "does it hold?", root=clone)
+    states = {e.name: e for e in exp_mod.project_status(clone, cwd=clone).experiments}
     assert states["flow"].state == "scaffold"
-    assert "planner brief" in states["flow"].next_command
+    assert "plan validate" in states["flow"].next_command
 
     # A real plan, but no task files yet.
     shutil.copy("plans/demo-pipeline.yaml", wt / "plans/flow.yaml")
@@ -493,7 +499,7 @@ def test_the_question_reaches_the_planner(clone: Path) -> None:
     assert experiment.question == question
     assert experiment.question_path.is_file()  # committed with the experiment
     brief = exp_mod.planner_brief("asked", root=clone)
-    assert "## The researcher's question" in brief
+    assert "## Question" in brief
     assert question in brief
     # It is also seeded into the scaffold, where it becomes report.question.
     assert question in experiment.plan_path.read_text(encoding="utf-8")
@@ -503,7 +509,7 @@ def test_the_question_reaches_the_planner(clone: Path) -> None:
 def test_an_experiment_without_a_question_still_works(clone: Path) -> None:
     experiment = exp_mod.start("unasked", root=clone)
     assert experiment.question == ""
-    assert "## The researcher's question" not in exp_mod.planner_brief("unasked", root=clone)
+    assert "**Not settled yet.**" in exp_mod.planner_brief("unasked", root=clone)
 
 
 # ---------------------------------------------------------------------------
@@ -517,8 +523,11 @@ def test_an_experiment_can_start_before_its_question_is_settled(clone: Path) -> 
     assert experiment.question == ""
 
     brief = exp_mod.planner_brief("later", root=clone)
-    assert "## No question recorded yet" in brief
-    assert "do not plan or spawn a" in brief and "until you both agree on it" in brief
+    # The skeleton is the same whatever the state; only the contents differ.
+    for section in ("## Question", "## State", "## Next", "## Your role"):
+        assert section in brief
+    assert "**Not settled yet.**" in brief
+    assert "Plan nothing and spawn no Worker until you agree" in brief
     assert "harness exp question later --set" in brief
 
 
@@ -532,9 +541,10 @@ def test_the_question_can_be_recorded_afterwards(clone: Path) -> None:
     assert experiment.question == settled
     assert experiment.question_path.is_file()  # committed with the experiment
     brief = exp_mod.planner_brief("later", root=clone)
-    assert "## The researcher's question" in brief
+    for section in ("## Question", "## State", "## Next", "## Your role"):
+        assert section in brief  # same sections, different contents
     assert settled in brief
-    assert "No question recorded yet" not in brief
+    assert "Not settled yet" not in brief
 
 
 @needs_git
@@ -558,3 +568,37 @@ def test_spawning_a_planner_without_a_question_asks_for_one(clone: Path) -> None
     assert not outcome.attempts  # nothing was spawned
     assert "no recorded question" in outcome.message
     assert "drive it interactively" in outcome.message
+
+
+@needs_git
+def test_the_briefing_keeps_one_shape(clone: Path) -> None:
+    """Same sections in the same order, whatever state the experiment is in.
+
+    A document that changes shape is one you must re-read; this one you
+    re-run and skim.
+    """
+    sections = ["# Planner briefing:", "## Question", "## State", "## Next", "## Your role"]
+
+    exp_mod.start("shape", root=clone)
+    unsettled = exp_mod.planner_brief("shape", root=clone)
+
+    exp_mod.set_question("shape", "does it hold?", root=clone)
+    settled = exp_mod.planner_brief("shape", root=clone)
+
+    for brief in (unsettled, settled):
+        positions = [brief.index(s) for s in sections]
+        assert positions == sorted(positions), "sections must keep their order"
+    # The Next command always names a real action, never the briefing itself.
+    for brief in (unsettled, settled):
+        nxt = brief.split("## Next")[1]
+        assert "planner brief" not in nxt.split("## Your role")[0]
+
+
+@needs_git
+def test_exp_start_registers_the_planner(clone: Path) -> None:
+    """One experiment, one Planner — so starting one is registering one."""
+    exp_mod.start("owned", root=clone)
+    # cmd_exp_start does the registering; do the same here.
+    exp_mod.register_planner("owned", "planner", root=clone, model="m", effort="high")
+    registered = exp_mod.planner_of(exp_mod.find_experiment("owned", clone))
+    assert registered["planner"] == "planner" and registered["model"] == "m"

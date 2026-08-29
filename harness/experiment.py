@@ -605,7 +605,11 @@ def write_experiment_report(
 
 
 def planner_brief(name: str, root: str | Path = ".") -> str:
-    """Everything a session needs to start acting as this experiment's Planner.
+    """The Planner's working briefing: question, state, and the next command.
+
+    Always the same sections in the same order, whatever the experiment's
+    state — only their contents differ. A document that changes shape is a
+    document you have to re-read; this one you can re-run and skim.
 
     Deliberately a plain command producing plain text: any agent runtime can be
     told to run it and follow the result. Tool-specific shims (a skill, a slash
@@ -613,92 +617,42 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
     """
     experiment = find_experiment(name, root)
     exp_root = experiment.path
-    contract = exp_root / "agents" / "planner.md"
+    state = experiment_state(experiment)
 
     lines = [
-        f"# You are the Planner for experiment '{experiment.name}'",
+        f"# Planner briefing: {experiment.name}",
+        "",
+        "## Question",
         "",
     ]
     if experiment.question:
         lines += [
-            "## The researcher's question",
-            "",
             experiment.question,
             "",
-            "Everything below serves answering exactly this. Do not widen it, and",
+            "Everything you do serves answering exactly this. Do not widen it, and",
             "do not narrow it; if it is genuinely ambiguous, pick the reading a",
             "careful colleague would and state the assumption in the plan's goal.",
-            "",
         ]
     else:
         lines += [
-            "## No question recorded yet",
-            "",
-            "This experiment was opened without one, which is normal: a question",
-            "usually gets sharper by talking it through. Work it out with the",
-            "researcher first — what is being asked, what would count as an",
-            "answer, and what they want reported — and do not plan or spawn a",
-            "single Worker until you both agree on it.",
-            "",
-            "When it settles, record it verbatim so it survives this session and",
-            "reaches the report:",
-            "",
-            "```bash",
-            f'harness exp question {experiment.name} --set "<their question, verbatim>"',
-            "```",
-            "",
+            "**Not settled yet.** That is normal — a question gets sharper by",
+            "talking it through. Work it out with the researcher first: what is",
+            "being asked, what would count as an answer, what they want reported.",
+            "Plan nothing and spawn no Worker until you agree, then record it",
+            "verbatim so it survives this session and reaches the report.",
         ]
-    lines += [
-        "Read agents/planner.md and follow it. You own this experiment end to end:",
-        "decompose the goal into modules, hand them to Workers, verify, and report",
-        "back. You never write module code, and you never merge — merging is the",
-        "researcher's decision.",
-        "",
-        "## Where you are",
-        f"- Worktree: {exp_root}",
-        f"- Branch:   {experiment.branch}",
-        f"- Plan:     {experiment.plan_path}",
-        f"- Contract: {contract}",
-        "",
-    ]
+    lines += ["", "## State", "", f"**{state.state}** — {state.detail}", ""]
 
-    plan_text = (
-        experiment.plan_path.read_text(encoding="utf-8") if experiment.plan_path.is_file() else ""
-    )
-    if plan_text and "TODO(Planner)" in plan_text:
-        lines += [
-            "## State: the plan is still a scaffold",
-            "",
-            "Every TODO in the plan is yours to replace — the goal, the report",
-            "metrics, and each module's brief, deliverables, and acceptance. Until",
-            "then `plan validate` refuses it: a scaffold is not a plan.",
-            "",
-        ]
-    elif not experiment.plan_path.is_file():
-        lines += [
-            "## State: no plan yet",
-            "",
-            "Write the plan first. It must declare, per module: depends_on, a typed",
-            "contract, a complete brief, constraints, deliverables (one owner each),",
-            "and machine-checkable acceptance. It must also declare `report:` — what",
-            "the researcher asked to see, as *where each number lives*. Never write a",
-            "value into the plan; the harness extracts it.",
-            "",
-        ]
-    else:
+    if experiment.plan_path.is_file() and experiment.question:
         try:
             plan = load_plan(experiment.plan_path)
-        except PlanError as exc:
-            lines += ["## State: plan is invalid", "", f"    {exc}", ""]
+        except PlanError:
+            pass
         else:
             board = {t.id: t for t in load_board(exp_root / "tasks")}
-            done = sum(1 for t in board.values() if t.is_done)
             lines += [
-                "## State",
-                "",
-                f"- Goal: {plan.goal.strip()}",
-                f"- Modules: {done}/{len(plan.modules)} done",
-                f"- Integration spec: {plan.integration or '(none declared)'}",
+                f"Goal: {plan.goal.strip()}",
+                f"Integration spec: {plan.integration or '(none declared)'}",
                 "",
                 "| Module | Status | Worker | Depends on |",
                 "| --- | --- | --- | --- |",
@@ -712,27 +666,43 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
             lines.append("")
 
     lines += [
-        "## Your commands",
+        "## Next",
         "",
         "```bash",
         f"cd {exp_root}",
+        state.next_command,
+        "```",
+        "",
+        "## Your role",
+        "",
+        "Read agents/planner.md and follow it. You own this experiment end to end:",
+        "settle the question, decompose it into modules, hand each to a Worker,",
+        "verify, and report back. You never write module code, and you never",
+        "merge — merging is the researcher's decision.",
+        "",
+        f"- Worktree: {exp_root}",
+        f"- Branch:   {experiment.branch}",
+        f"- Plan:     {experiment.plan_path}",
+        f"- Contract: {exp_root / 'agents' / 'planner.md'}",
+        "",
+        "## The whole sequence",
+        "",
+        "```bash",
+        f'python -m harness exp question {experiment.name} --set "..."  # once agreed',
         f"python -m harness plan validate plans/{experiment.name}.yaml",
         f"python -m harness plan materialize plans/{experiment.name}.yaml",
         "python -m harness task list                 # what is ready",
-        "python -m harness task run --id <id>        # hand one module to a Worker",
-        f"python -m harness plan run plans/{experiment.name}.yaml   # drain the ready queue",
+        f"python -m harness plan run plans/{experiment.name}.yaml       # Workers build it",
         f"python -m harness exp report {experiment.name} --determinism --save",
         "```",
         "",
-        "`task run` invokes the configured Worker adapter, verifies acceptance and",
-        "deliverables, and retries with the real failure output until the attempt",
-        "cap. Configure the adapter in configs/worker.yaml; the default writes a",
-        "briefing for a human to hand to a Worker session.",
+        "`plan run` invokes the configured Worker per module, verifies acceptance",
+        "and declared deliverables, and retries with the real failure output up to",
+        "the cap. A module that stays blocked is usually a brief that is wrong,",
+        "not a Worker that is bad.",
         "",
-        "## Staying oriented",
-        "",
-        "Re-run this command at any time for the current board — it reads real",
-        "state, so it never goes stale. `harness status` gives the short version.",
+        "Re-run this briefing at any time for current state — it reads real state,",
+        "so it never goes stale. `harness status` gives the short version.",
         "",
         "## When you are done",
         "",
@@ -845,11 +815,17 @@ def experiment_state(experiment: Experiment) -> ExperimentState:
     def state(kind: str, detail: str, command: str) -> ExperimentState:
         return ExperimentState(name, branch, kind, detail, command)
 
+    if not experiment.question:
+        return state(
+            "question unsettled",
+            "the question has not been agreed with the researcher yet",
+            f'harness exp question {name} --set "<their question, verbatim>"',
+        )
     if not experiment.plan_path.is_file():
         return state(
             "no plan",
             "the Planner has not written a plan yet",
-            f"harness planner brief {name} --register <label>",
+            f"harness plan validate plans/{name}.yaml   # after writing it",
         )
     try:
         plan = load_plan(experiment.plan_path)
@@ -858,7 +834,8 @@ def experiment_state(experiment: Experiment) -> ExperimentState:
         detail = (
             "the plan is still all TODOs" if kind == "scaffold" else f"the plan is invalid: {exc}"
         )
-        return state(kind, detail, f"harness planner brief {name} --register <label>")
+        hint = "after replacing every TODO in it" if kind == "scaffold" else "after fixing it"
+        return state(kind, detail, f"harness plan validate plans/{name}.yaml   # {hint}")
 
     board = {t.id: t for t in load_board(experiment.path / "tasks")}
     module_ids = [m.id for m in plan.modules]

@@ -23,6 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `plan validate` accepted an untouched scaffold as a valid plan. A plan still
   carrying the scaffold marker is refused with an explanation.
 
+### Changed
+
+- **`exp start` now creates and briefs the Planner in one step.** One
+  experiment has exactly one Planner, so activating it separately was a step
+  that existed for no reason. Starting an experiment registers its Planner and
+  prints the briefing.
+- **The briefing has one fixed shape.** It previously took five forms depending
+  on whether a question existed and what state the plan was in — one command
+  meaning several different things. Now it is always Question / State / Next /
+  Your role / The whole sequence, with only the contents varying, and its state
+  logic is the same `experiment_state` that `harness status` uses rather than a
+  second copy of it.
+- `Next` in the briefing and in `status` always names a real action. For an
+  unwritten or scaffold plan it used to point back at the briefing itself.
+- "question unsettled" is now the first experiment state, so `harness status`
+  shows it too.
+
 ### Added
 
 - **`harness exp question <name> [--set "..."]`** — the research question no
