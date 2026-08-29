@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 import pytest
 
 from harness.cli import find_project_root, main

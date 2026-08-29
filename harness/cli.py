@@ -1116,7 +1116,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 2
 
     resolved_target = target_dir.resolve()
-    print(f"Initialized Research Harness in {resolved_target} ({len(created)} file(s) created/updated):")
+    count = len(created)
+    print(f"Initialized Research Harness in {resolved_target} ({count} file(s) created/updated):")
     for path in created:
         try:
             rel = path.relative_to(resolved_target)
