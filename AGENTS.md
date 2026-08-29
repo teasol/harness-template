@@ -3,6 +3,10 @@
 Ground rules for AI coding agents (and humans) working in repositories created
 from this template. Read this before making any change.
 
+Lost? `python -m harness status` reads the repository's real state and names
+the next action. [docs/getting-started.md](docs/getting-started.md) is the
+human walkthrough.
+
 ## Repository purpose
 
 This is a harness-engineering template with **two-tier agent orchestration**:
@@ -65,6 +69,7 @@ without erasing its status, worker, or log.
 
 | Command | Purpose |
 | --- | --- |
+| `make status` | Where am I, what next |
 | `make setup` | Editable install + dev tools |
 | `make lint` | `ruff check` + format check |
 | `make format` | Auto-format with ruff |

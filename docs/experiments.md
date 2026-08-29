@@ -1,5 +1,7 @@
 # Experiments reference (Tier 1 ↔ Tier 2)
 
+> New here? Start with [getting-started.md](getting-started.md).
+
 An **experiment** is one research hypothesis, developed on its own branch in
 its own git worktree. The Planner works there from start to finish; the
 researcher reads the resulting report and decides whether to merge.

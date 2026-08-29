@@ -1,5 +1,7 @@
 # Orchestration reference
 
+> New here? Start with [getting-started.md](getting-started.md).
+
 This document covers Tier 2 ↔ Tier 3. The tier above — experiments, worktrees,
 and the report a researcher reads to decide a merge — is in
 [experiments.md](experiments.md).

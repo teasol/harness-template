@@ -2,6 +2,7 @@
 
 Usage::
 
+    python -m harness status                          # where am I, what next
     python -m harness verify --spec configs/demo.yaml [--results-dir DIR]
     python -m harness reproduce --spec configs/demo.yaml [--times 2]
     python -m harness hash <file> [<file> ...]
@@ -510,6 +511,10 @@ def build_parser() -> argparse.ArgumentParser:
     for exp_parser in (exp_start, exp_list, exp_report, exp_remove):
         exp_parser.add_argument("--root", default=".", help="Repo root (default: cwd)")
 
+    status_cmd = sub.add_parser("status", help="Where am I and what do I do next? (start here)")
+    status_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    status_cmd.set_defaults(func=cmd_status)
+
     planner_cmd = sub.add_parser("planner", help="Planner registration")
     planner_sub = planner_cmd.add_subparsers(dest="planner_command", required=True)
     planner_brief = planner_sub.add_parser(
@@ -709,4 +714,32 @@ def cmd_planner_brief(args: argparse.Namespace) -> int:
     except ExperimentError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Orientation
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    status = exp_mod.project_status(args.root)
+    print(f"Project: {status.project_name}")
+    if status.demo_present:
+        print("  (the shipped demo is still here — see scripts/instantiate.py --drop-demo)")
+    print()
+    print(status.headline)
+
+    if status.experiments:
+        print()
+        print("  EXPERIMENT        STATE              DETAIL")
+        for exp in status.experiments:
+            marker = "*" if exp.name == status.here else " "
+            print(f" {marker}{exp.name:<17} {exp.state:<18} {exp.detail}")
+
+    print()
+    print("Next:")
+    for step in status.next_steps:
+        print(f"  {step}")
+    print()
+    print("New here? docs/getting-started.md walks through a whole experiment.")
     return 0

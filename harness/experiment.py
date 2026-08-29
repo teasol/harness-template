@@ -677,3 +677,152 @@ steps:
     timeout: 60
     checks: []
 """
+
+
+# ---------------------------------------------------------------------------
+# Orientation: where am I, and what do I do next?
+
+
+@dataclasses.dataclass
+class ExperimentState:
+    """One experiment's position in the flow, derived from files alone."""
+
+    name: str
+    branch: str
+    state: str
+    detail: str
+    next_command: str
+
+
+@dataclasses.dataclass
+class ProjectStatus:
+    """What a newcomer needs to know on arrival, read from real state."""
+
+    instantiated: bool
+    project_name: str
+    demo_present: bool
+    experiments: list[ExperimentState] = dataclasses.field(default_factory=list)
+    here: str | None = None
+    headline: str = ""
+    next_steps: list[str] = dataclasses.field(default_factory=list)
+
+
+def experiment_state(experiment: Experiment) -> ExperimentState:
+    """Classify an experiment without running anything.
+
+    Cheap on purpose: orientation must be instant, so this reads the plan and
+    the board and never executes a spec.
+    """
+    name, branch = experiment.name, experiment.branch
+
+    def state(kind: str, detail: str, command: str) -> ExperimentState:
+        return ExperimentState(name, branch, kind, detail, command)
+
+    if not experiment.plan_path.is_file():
+        return state(
+            "no plan",
+            "the Planner has not written a plan yet",
+            f"harness planner brief {name} --register <label>",
+        )
+    try:
+        plan = load_plan(experiment.plan_path)
+    except PlanError as exc:
+        kind = "scaffold" if "still the scaffold" in str(exc) else "invalid plan"
+        detail = (
+            "the plan is still all TODOs" if kind == "scaffold" else f"the plan is invalid: {exc}"
+        )
+        return state(kind, detail, f"harness planner brief {name} --register <label>")
+
+    board = {t.id: t for t in load_board(experiment.path / "tasks")}
+    module_ids = [m.id for m in plan.modules]
+    present = [i for i in module_ids if i in board]
+    if len(present) < len(module_ids):
+        return state(
+            "not materialized",
+            f"{len(module_ids) - len(present)} module(s) have no task file",
+            f"harness plan materialize plans/{name}.yaml",
+        )
+
+    blocked = [i for i in module_ids if board[i].status == "blocked"]
+    if blocked:
+        return state(
+            "blocked",
+            f"worker gave up on {blocked} — the brief or contract needs the Planner",
+            f"harness task show --id {blocked[0]}",
+        )
+
+    done = [i for i in module_ids if board[i].is_done]
+    if len(done) < len(module_ids):
+        return state(
+            "building",
+            f"{len(done)}/{len(module_ids)} module(s) done",
+            f"harness plan run plans/{name}.yaml",
+        )
+    return state(
+        "ready to report",
+        "every module is done",
+        f"harness exp report {name} --determinism --save",
+    )
+
+
+def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> ProjectStatus:
+    """Answer 'where am I and what now?' from the repository's actual state."""
+    root = Path(root).resolve()
+    pyproject = root / "pyproject.toml"
+    project_name = "unknown"
+    if pyproject.is_file():
+        for line in pyproject.read_text(encoding="utf-8").splitlines():
+            if line.startswith("name ="):
+                project_name = line.split("=", 1)[1].strip().strip('"').strip("'")
+                break
+    instantiated = project_name != "harness-template"
+    demo_present = (root / "plans" / "demo-pipeline.yaml").is_file()
+
+    try:
+        experiments = [experiment_state(e) for e in list_experiments(root)]
+    except ExperimentError:
+        experiments = []
+
+    here = None
+    current = Path(cwd or Path.cwd()).resolve()
+    for candidate in list_experiments(root) if experiments else []:
+        if current == candidate.path or candidate.path in current.parents:
+            here = candidate.name
+            break
+
+    status = ProjectStatus(
+        instantiated=instantiated,
+        project_name=project_name,
+        demo_present=demo_present,
+        experiments=experiments,
+        here=here,
+    )
+
+    if not instantiated:
+        status.headline = "This is still the template — make it your project first."
+        status.next_steps = [
+            "python3 scripts/instantiate.py --name <your-project> --drop-demo",
+            'git add -A && git commit -m "chore: instantiate from harness-template"',
+            "make setup && make verify && make test",
+        ]
+        return status
+
+    if not experiments:
+        status.headline = f"'{project_name}' is set up, with no experiments yet."
+        status.next_steps = [
+            "harness exp start <hypothesis>            # a branch + worktree for one question",
+            "harness planner brief <hypothesis> --register <label>"
+            "   # give this to an agent session",
+        ]
+        return status
+
+    unfinished = [e for e in experiments if e.state != "ready to report"]
+    focus = next((e for e in experiments if e.name == status.here), None) or (
+        unfinished[0] if unfinished else experiments[0]
+    )
+    where = f"in experiment '{status.here}'" if status.here else "at the project root"
+    status.headline = f"You are {where}; {len(experiments)} experiment(s) in flight."
+    status.next_steps = [focus.next_command]
+    if focus.state == "ready to report":
+        status.next_steps.append(f"git merge {focus.branch}    # only after you read the report")
+    return status

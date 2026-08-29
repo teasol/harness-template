@@ -7,10 +7,13 @@ SPEC ?= configs/demo.yaml
 PLAN ?= plans/demo-pipeline.yaml
 
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format test verify plan tasks run reproduce drift audit experiments clean
+.PHONY: help status setup lint format test verify plan tasks run reproduce drift audit experiments clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+
+status: ## Where am I and what do I do next (start here)
+	@$(PYTHON) -m harness status
 
 setup: ## Editable install + dev tools
 	$(PYTHON) -m pip install -e ".[dev]"

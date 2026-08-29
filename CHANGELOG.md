@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`harness status`** — reads the repository's real state (template or
+  project, experiments in flight, each one's stage) and names the next command.
+  It covers every stage: not yet instantiated, no experiments, plan still a
+  scaffold, tasks not materialized, modules building, a worker blocked, ready
+  to report. A newcomer never has to know where they are. Also `make status`.
+- **`docs/getting-started.md`** — a walkthrough for a researcher who has never
+  seen this repository: question in, merge decision out.
+
 - **Worker adapters (Tier 2 → Tier 3).** `harness task run --id <id>` invokes a
   Worker, verifies acceptance *and* deliverables, and retries with the real
   failure output — failing checks plus step logs — until an attempt cap

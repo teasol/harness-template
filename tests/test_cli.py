@@ -337,3 +337,12 @@ def test_task_list_can_filter_by_plan(tasks_dir: str, capsys) -> None:
     assert "data-gen" in capsys.readouterr().out
     assert main(["task", "list", "--tasks-dir", tasks_dir, "--plan", "nope"]) == 0
     assert "no tasks for plan" in capsys.readouterr().out
+
+
+def test_status_command_runs_and_points_somewhere(capsys) -> None:
+    """`harness status` is the documented entry point; it must always advise."""
+    assert main(["status"]) == 0
+    out = capsys.readouterr().out
+    assert "Project:" in out
+    assert "Next:" in out
+    assert "getting-started" in out

@@ -3,6 +3,20 @@
 Standard agent-first harness engineering template for **reproducible research**
 and **automated verification workflows**.
 
+## Start here
+
+New to this repository? Two things:
+
+```bash
+python -m harness status     # reads the actual state, tells you what to do next
+```
+
+and [**docs/getting-started.md**](docs/getting-started.md), which walks a
+researcher through one complete experiment — question in, merge decision out.
+
+`harness status` works at every stage, so you never have to remember where you
+are in the flow.
+
 Every lab project should be created from this repository as a template. It ships
 with a small, dependency-light verification harness that turns declarative YAML
 specs into executable, checkable, report-producing pipelines — runnable locally

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from harness import experiment as exp_mod
+from harness import task as task_mod
 from harness.experiment import ExperimentError
 from harness.plan import PlanError, load_plan
 
@@ -308,3 +309,78 @@ def test_a_scaffold_is_not_a_plan(clone: Path) -> None:
         load_plan(experiment.plan_path)
     with pytest.raises(ExperimentError, match="still the scaffold"):
         exp_mod.build_report("stub", root=clone, run_integration=False)
+
+
+# ---------------------------------------------------------------------------
+# orientation: `harness status` must name the right next step at every stage
+
+
+def test_status_on_the_uninstantiated_template(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('name = "harness-template"\n', encoding="utf-8")
+    status = exp_mod.project_status(tmp_path, cwd=tmp_path)
+    assert not status.instantiated
+    assert "instantiate" in " ".join(status.next_steps)
+
+
+@needs_git
+def test_status_walks_the_whole_flow(clone: Path) -> None:
+    """One assertion per stage a newcomer can be standing in."""
+    import yaml
+
+    # Instantiated, nothing started yet.
+    (clone / "pyproject.toml").write_text('name = "myproj"\n', encoding="utf-8")
+    status = exp_mod.project_status(clone, cwd=clone)
+    assert status.instantiated and not status.experiments
+    assert "exp start" in " ".join(status.next_steps)
+
+    # Started: the plan is still the scaffold.
+    experiment = exp_mod.start("flow", root=clone)
+    wt = experiment.path
+    states = {e.name: e for e in exp_mod.project_status(clone, cwd=clone).experiments}
+    assert states["flow"].state == "scaffold"
+    assert "planner brief" in states["flow"].next_command
+
+    # A real plan, but no task files yet.
+    shutil.copy("plans/demo-pipeline.yaml", wt / "plans/flow.yaml")
+    text = (wt / "plans/flow.yaml").read_text(encoding="utf-8")
+    text = text.replace("name: demo-pipeline", "name: flow", 1)
+    text = text.replace("spec: configs/demo-pipeline.yaml", "spec: configs/flow.yaml", 1)
+    (wt / "plans/flow.yaml").write_text(text, encoding="utf-8")
+    shutil.copy("configs/demo-pipeline.yaml", wt / "configs/flow.yaml")
+    for stale in (wt / "tasks").glob("*.task.yaml"):
+        stale.unlink()
+    states = {e.name: e for e in exp_mod.project_status(clone, cwd=clone).experiments}
+    assert states["flow"].state == "not materialized"
+    assert "materialize" in states["flow"].next_command
+
+    # Materialized, nothing built.
+    plan = load_plan(wt / "plans/flow.yaml")
+    task_mod.materialize(plan, wt / "tasks")
+    states = {e.name: e for e in exp_mod.project_status(clone, cwd=clone).experiments}
+    assert states["flow"].state == "building"
+    assert "plan run" in states["flow"].next_command
+
+    # A worker gave up.
+    blocked = wt / "tasks" / "data-gen.task.yaml"
+    data = yaml.safe_load(blocked.read_text(encoding="utf-8"))
+    data["task"]["status"] = "blocked"
+    blocked.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    states = {e.name: e for e in exp_mod.project_status(clone, cwd=clone).experiments}
+    assert states["flow"].state == "blocked"
+
+    # Everything done: time to report, and only then to merge.
+    for path in (wt / "tasks").glob("*.task.yaml"):
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data["task"]["status"] = "done"
+        path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    status = exp_mod.project_status(clone, cwd=clone)
+    assert status.experiments[0].state == "ready to report"
+    assert "exp report" in " ".join(status.next_steps)
+    assert any("git merge" in step for step in status.next_steps)
+
+
+@needs_git
+def test_status_knows_which_worktree_you_are_in(clone: Path) -> None:
+    experiment = exp_mod.start("here", root=clone)
+    assert exp_mod.project_status(clone, cwd=clone).here is None
+    assert exp_mod.project_status(clone, cwd=experiment.path).here == "here"
