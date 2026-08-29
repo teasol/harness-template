@@ -358,34 +358,75 @@ def test_setup_lists_platforms(capsys) -> None:
     assert "claude" in out and "reasoning levels" in out
 
 
-def test_setup_writes_a_runnable_config(tmp_path: Path, capsys) -> None:
+def test_setup_writes_both_tiers(tmp_path: Path, capsys) -> None:
+    """Planner and Worker are configured together, so the split is deliberate."""
     shutil.copytree("configs", tmp_path / "configs")
     code = main(
         [
             "setup",
-            "--platform",
-            "claude",
-            "--model",
-            "haiku",
-            "--effort",
-            "low",
             "--root",
             str(tmp_path),
+            "--planner-platform",
+            "claude",
+            "--planner-model",
+            "opus",
+            "--planner-effort",
+            "high",
+            "--worker-platform",
+            "claude",
+            "--worker-model",
+            "haiku",
+            "--worker-effort",
+            "low",
         ]
     )
     assert code == 0
     out = capsys.readouterr().out
-    assert "model:    haiku" in out and "effort:   low" in out
+    assert "planner  claude · opus · high" in out
+    assert "worker   claude · haiku · low" in out
 
-    from harness.worker import load_worker_config
+    from harness.worker import load_agent_config
 
-    config = load_worker_config(root=tmp_path)
-    assert config.adapter == "cli" and config.model == "haiku"
+    assert load_agent_config("planner", root=tmp_path).model == "opus"
+    assert load_agent_config("worker", root=tmp_path).model == "haiku"
+
+
+def test_setup_can_attach_a_session(tmp_path: Path, capsys) -> None:
+    shutil.copytree("configs", tmp_path / "configs")
+    code = main(
+        [
+            "setup",
+            "--root",
+            str(tmp_path),
+            "--planner-platform",
+            "claude",
+            "--planner-model",
+            "opus",
+            "--planner-effort",
+            "high",
+            "--planner-session",
+            "sess-42",
+            "--worker-platform",
+            "claude",
+            "--worker-model",
+            "haiku",
+            "--worker-effort",
+            "low",
+        ]
+    )
+    assert code == 0
+    assert "attached to session sess-42" in capsys.readouterr().out
+
+    from harness.worker import load_agent_config
+
+    planner = load_agent_config("planner", root=tmp_path)
+    assert planner.session == "sess-42" and "{session}" in planner.command
 
 
 def test_setup_rejects_an_unknown_platform(tmp_path: Path, capsys) -> None:
     shutil.copytree("configs", tmp_path / "configs")
-    assert main(["setup", "--platform", "nope", "--root", str(tmp_path)]) == 2
+    code = main(["setup", "--root", str(tmp_path), "--worker-platform", "nope"])
+    assert code == 2
     assert "unknown platform" in capsys.readouterr().err
 
 
@@ -394,14 +435,14 @@ def test_setup_rejects_an_unknown_reasoning_level(tmp_path: Path, capsys) -> Non
     code = main(
         [
             "setup",
-            "--platform",
-            "claude",
-            "--model",
-            "haiku",
-            "--effort",
-            "turbo",
             "--root",
             str(tmp_path),
+            "--worker-platform",
+            "claude",
+            "--worker-model",
+            "haiku",
+            "--worker-effort",
+            "turbo",
         ]
     )
     assert code == 2

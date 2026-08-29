@@ -44,7 +44,9 @@ from harness.task import Task, _now, block, load_task, save_task, verify_task
 
 DEFAULT_ATTEMPTS = 6
 DEFAULT_TIMEOUT = 1800
-DEFAULT_CONFIG_PATH = "configs/worker.yaml"
+DEFAULT_CONFIG_PATH = "configs/agents.yaml"
+LEGACY_CONFIG_PATH = "configs/worker.yaml"
+DEFAULT_PLANNER_ATTEMPTS = 3
 
 
 class WorkerError(RuntimeError):
@@ -52,8 +54,8 @@ class WorkerError(RuntimeError):
 
 
 @dataclasses.dataclass
-class WorkerConfig:
-    """How to invoke a Worker. Every field is the lab's choice, not ours."""
+class AgentConfig:
+    """How to invoke one tier's agent. Every field is the lab's choice, not ours."""
 
     adapter: str = "manual"
     platform: str = ""
@@ -64,9 +66,11 @@ class WorkerConfig:
     attempts: int = DEFAULT_ATTEMPTS
     timeout: int | float = DEFAULT_TIMEOUT
     label: str = "worker"
+    #: An existing session to attach to instead of starting a fresh one.
+    session: str = ""
 
     @classmethod
-    def from_dict(cls, data: Any) -> WorkerConfig:
+    def from_dict(cls, data: Any, default_attempts: int = DEFAULT_ATTEMPTS) -> AgentConfig:
         if data is None:
             return cls()
         if not isinstance(data, dict):
@@ -74,7 +78,7 @@ class WorkerConfig:
         adapter = str(data.get("adapter", "manual"))
         if adapter not in ("manual", "cli"):
             raise WorkerError(f"unknown worker adapter '{adapter}'. available: manual, cli")
-        attempts = data.get("attempts", DEFAULT_ATTEMPTS)
+        attempts = data.get("attempts", default_attempts)
         if not isinstance(attempts, int) or attempts < 1:
             raise WorkerError(f"'worker.attempts' must be a positive integer, got: {attempts!r}")
         config = cls(
@@ -87,13 +91,14 @@ class WorkerConfig:
             attempts=attempts,
             timeout=data.get("timeout", DEFAULT_TIMEOUT),
             label=str(data.get("label", "worker")),
+            session=str(data.get("session", "")),
         )
         if config.adapter == "cli" and not config.command.strip():
             raise WorkerError("worker adapter 'cli' requires a 'command'")
         # A command asking for a model or an effort it was never given would
         # silently run at the platform default — which defeats the point of
         # choosing a tier at all.
-        for field in ("model", "effort"):
+        for field in ("model", "effort", "session"):
             if "{" + field + "}" in config.command and not getattr(config, field):
                 raise WorkerError(
                     f"the worker command uses {{{field}}} but no '{field}' is set. "
@@ -102,23 +107,53 @@ class WorkerConfig:
         return config
 
 
-def load_worker_config(path: str | Path | None = None, root: str | Path = ".") -> WorkerConfig:
-    """Load worker configuration, falling back to the manual adapter."""
+#: Older name, kept so existing configs and callers keep working.
+WorkerConfig = AgentConfig
+
+
+def load_agent_config(
+    section: str = "worker",
+    path: str | Path | None = None,
+    root: str | Path = ".",
+) -> AgentConfig:
+    """Load one tier's configuration, defaulting to the manual adapter.
+
+    Both tiers live in one file so their models sit side by side: seeing
+    `planner: opus` above `worker: haiku` is the tier split made visible.
+    """
     root = Path(root)
-    candidate = Path(path) if path else root / DEFAULT_CONFIG_PATH
-    if not candidate.is_absolute():
-        candidate = root / candidate
-    if not candidate.is_file():
-        if path:
-            raise WorkerError(f"worker config not found: {candidate}")
-        return WorkerConfig()
+    default_attempts = DEFAULT_PLANNER_ATTEMPTS if section == "planner" else DEFAULT_ATTEMPTS
+    if path:
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        if not candidate.is_file():
+            raise WorkerError(f"{section} config not found: {candidate}")
+    else:
+        candidate = root / DEFAULT_CONFIG_PATH
+        if not candidate.is_file():
+            legacy = root / LEGACY_CONFIG_PATH
+            candidate = legacy if legacy.is_file() and section == "worker" else candidate
+        if not candidate.is_file():
+            return AgentConfig(label=section, attempts=default_attempts)
     try:
         raw = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         raise WorkerError(f"invalid YAML in {candidate}: {exc}") from exc
     if not isinstance(raw, dict):
-        raise WorkerError(f"worker config root must be a mapping: {candidate}")
-    return WorkerConfig.from_dict(raw.get("worker", raw))
+        raise WorkerError(f"agent config root must be a mapping: {candidate}")
+    entry = raw.get(section)
+    if entry is None:
+        return AgentConfig(label=section, attempts=default_attempts)
+    config = AgentConfig.from_dict(entry, default_attempts=default_attempts)
+    if config.label == "worker" and section != "worker":
+        config.label = section
+    return config
+
+
+def load_worker_config(path: str | Path | None = None, root: str | Path = ".") -> AgentConfig:
+    """Backwards-friendly alias for the worker tier."""
+    return load_agent_config("worker", path=path, root=root)
 
 
 # ---------------------------------------------------------------------------
@@ -240,16 +275,30 @@ class WorkerOutcome:
         return self.status == "done"
 
 
-def _invoke_cli(config: WorkerConfig, task: Task, root: Path, prompt: str, brief_path: Path):
-    """Run the configured coding-agent command with the briefing on stdin."""
-    template = config.resume_command or config.command
+def invoke_agent(
+    config: AgentConfig,
+    root: Path,
+    prompt: str,
+    brief_path: Path,
+    first_attempt: bool = True,
+    **extra: str,
+):
+    """Run the configured agent command with the briefing on stdin.
+
+    The first attempt uses ``command``; later ones use ``resume_command`` when
+    set, so a tool that can continue a session keeps its context rather than
+    starting from nothing.
+    """
+    template = config.command
+    if not first_attempt and config.resume_command:
+        template = config.resume_command
     command = template.format(
-        task_id=task.id,
-        task_file=str(task.path),
         brief_file=str(brief_path),
         root=str(root),
         model=config.model,
         effort=config.effort,
+        session=config.session,
+        **extra,
     )
     return subprocess.run(  # noqa: S602 - the command is the lab's configuration
         command,
@@ -266,7 +315,7 @@ def _invoke_cli(config: WorkerConfig, task: Task, root: Path, prompt: str, brief
 def run_task(
     tasks_dir: str | Path,
     task_id: str,
-    config: WorkerConfig | None = None,
+    config: AgentConfig | None = None,
     root: str | Path = ".",
     results_dir: str | Path = "results",
     worker_name: str | None = None,
@@ -276,7 +325,7 @@ def run_task(
     Returns rather than raises for ordinary outcomes: a task that cannot be
     finished is blocked for the Planner, which is a result, not a crash.
     """
-    config = config or WorkerConfig()
+    config = config or AgentConfig()
     root = Path(root).resolve()
     task = load_task(tasks_dir, task_id)
     label = worker_name or config.label
@@ -310,7 +359,15 @@ def run_task(
         attempt = Attempt(number=number)
         started = time.monotonic()
         try:
-            proc = _invoke_cli(config, task, root, prompt, brief_path)
+            proc = invoke_agent(
+                config,
+                root,
+                prompt,
+                brief_path,
+                first_attempt=number == 1,
+                task_id=task.id,
+                task_file=str(task.path),
+            )
             attempt.exit_code = proc.returncode
             (brief_dir / f"attempt-{number:02d}.log").write_text(
                 f"$ {config.resume_command or config.command}\n"

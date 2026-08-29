@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -397,3 +398,84 @@ def test_status_reports_the_worker_adapter(clone: Path) -> None:
         "worker:\n  adapter: cli\n  command: 'true'\n", encoding="utf-8"
     )
     assert exp_mod.project_status(clone, cwd=clone).worker_adapter == "cli"
+
+
+# ---------------------------------------------------------------------------
+# spawning a Planner (Tier 1 -> Tier 2)
+
+
+@needs_git
+def test_manual_planner_stops_for_a_human(clone: Path) -> None:
+    from harness.worker import AgentConfig
+
+    exp_mod.start("manual-p", root=clone)
+    outcome = exp_mod.run_planner("manual-p", AgentConfig(label="planner"), root=clone)
+    assert outcome.status == "needs_human"
+    assert Path(outcome.brief_path).is_file()
+
+
+@needs_git
+def test_planner_is_driven_until_the_experiment_is_reportable(clone: Path) -> None:
+    """A Planner's definition of done is the experiment, not a single call."""
+    from harness.worker import AgentConfig
+
+    experiment = exp_mod.start("driven", root=clone)
+    wt = experiment.path
+    shutil.copy("plans/demo-pipeline.yaml", wt / "plans/driven.yaml")
+    text = (wt / "plans/driven.yaml").read_text(encoding="utf-8")
+    text = text.replace("name: demo-pipeline", "name: driven", 1)
+    text = text.replace("spec: configs/demo-pipeline.yaml", "spec: configs/driven.yaml", 1)
+    (wt / "plans/driven.yaml").write_text(text, encoding="utf-8")
+    shutil.copy("configs/demo-pipeline.yaml", wt / "configs/driven.yaml")
+    for stale in (wt / "tasks").glob("*.task.yaml"):
+        stale.unlink()
+
+    # A stub Planner: materializes on the first call, finishes on the second.
+    script = wt / "stub-planner.sh"
+    script.write_text(
+        "#!/usr/bin/env bash\n"
+        "cat > /dev/null\n"
+        f"cd {wt}\n"
+        "if [ ! -f .planned ]; then\n"
+        f"  {sys.executable} -m harness plan materialize plans/driven.yaml >/dev/null\n"
+        "  touch .planned\n"
+        "else\n"
+        "  for f in tasks/*.task.yaml; do\n"
+        "    sed -i 's/^  status: todo/  status: done/' \"$f\"\n"
+        "  done\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+    config = AgentConfig(
+        adapter="cli",
+        platform="stub",
+        model="big",
+        effort="high",
+        command=f"bash {script}",
+        attempts=3,
+        label="planner",
+    )
+    outcome = exp_mod.run_planner("driven", config, root=clone)
+
+    assert outcome.succeeded, [a.state for a in outcome.attempts]
+    assert [a.state for a in outcome.attempts][-1] == "ready to report"
+    assert len(outcome.attempts) >= 2  # it took more than one call
+    # Registration happened automatically, with the tier recorded.
+    registered = exp_mod.planner_of(exp_mod.find_experiment("driven", clone))
+    assert registered["model"] == "big" and registered["effort"] == "high"
+
+
+@needs_git
+def test_planner_gives_up_and_says_so(clone: Path) -> None:
+    from harness.worker import AgentConfig
+
+    exp_mod.start("stuck", root=clone)
+    config = AgentConfig(
+        adapter="cli", command="true", attempts=2, label="planner", platform="stub"
+    )
+    outcome = exp_mod.run_planner("stuck", config, root=clone)
+    assert outcome.status == "incomplete"
+    assert len(outcome.attempts) == 2
+    assert "researcher should look at it" in outcome.message

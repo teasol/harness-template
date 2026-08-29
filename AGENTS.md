@@ -104,7 +104,7 @@ python -m harness exp remove <name>
 python -m harness planner brief <name> --register <label> # become a Planner
 ```
 
-Workers are invoked through `configs/worker.yaml`. The default adapter writes a
+Workers are invoked through `configs/agents.yaml`. The default adapter writes a
 briefing for a human; set `adapter: cli` to point at a headless coding agent.
 The harness names no vendor — the command is configuration.
 

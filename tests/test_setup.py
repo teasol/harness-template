@@ -17,9 +17,9 @@ from harness.setup import (
     build_config,
     config_to_dict,
     load_platforms,
-    write_worker_config,
+    write_agent_config,
 )
-from harness.worker import WorkerConfig, WorkerError, load_worker_config
+from harness.worker import AgentConfig, WorkerError, load_agent_config, load_worker_config
 
 
 def test_shipped_presets_load() -> None:
@@ -69,27 +69,57 @@ def test_custom_platform_needs_its_own_command() -> None:
     assert config.command == "run-my-agent {root}"
 
 
-def test_written_config_round_trips(tmp_path: Path) -> None:
+def test_both_tiers_round_trip(tmp_path: Path) -> None:
+    """Both tiers are written to one file, and each loads back independently."""
     platform = load_platforms(root=".")["claude"]
-    config = build_config(platform, model="haiku", effort="low", attempts=3)
-    path = write_worker_config(config, root=tmp_path)
+    planner = build_config(platform, model="opus", effort="high", attempts=3, label="planner")
+    worker = build_config(platform, model="haiku", effort="low", attempts=6)
+    path = write_agent_config(planner, worker, root=tmp_path)
 
-    assert path == tmp_path / "configs" / "worker.yaml"
-    reloaded = load_worker_config(root=tmp_path)
-    assert reloaded.adapter == "cli"
-    assert reloaded.platform == "claude"
-    assert reloaded.model == "haiku"
-    assert reloaded.effort == "low"
-    assert reloaded.attempts == 3
+    assert path == tmp_path / "configs" / "agents.yaml"
+    loaded_planner = load_agent_config("planner", root=tmp_path)
+    loaded_worker = load_agent_config("worker", root=tmp_path)
+    assert (loaded_planner.model, loaded_planner.effort) == ("opus", "high")
+    assert (loaded_worker.model, loaded_worker.effort) == ("haiku", "low")
+    assert loaded_planner.attempts == 3 and loaded_worker.attempts == 6
+    assert load_worker_config(root=tmp_path).model == "haiku"
     # Readable as plain YAML, since it is ordinary configuration.
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert raw["worker"]["model"] == "haiku"
-    assert config_to_dict(config)["worker"]["effort"] == "low"
+    assert raw["planner"]["model"] == "opus" and raw["worker"]["model"] == "haiku"
+    assert config_to_dict(worker)["effort"] == "low"
+
+
+def test_planner_defaults_to_the_reasoning_tier() -> None:
+    """The preset's planner defaults should not be the worker's small model."""
+    platform = load_platforms(root=".")["claude"]
+    assert platform.planner_model and platform.planner_model != platform.default_model
+    assert platform.planner_effort != platform.default_effort
+
+
+def test_attaching_a_session_switches_the_command(tmp_path: Path) -> None:
+    """A researcher with a session already open can hand it to a tier."""
+    platform = load_platforms(root=".")["claude"]
+    config = build_config(platform, model="opus", effort="high", label="planner", session="abc-123")
+    assert config.session == "abc-123"
+    assert "{session}" in config.command
+    assert "--resume" in config.command
+
+
+def test_a_session_command_without_a_session_is_refused() -> None:
+    platform = load_platforms(root=".")["claude"]
+    with pytest.raises(SetupError, match="none was given"):
+        build_config(
+            platform,
+            model="opus",
+            effort="high",
+            command=platform.session_command,
+            session="",
+        )
 
 
 def test_a_command_wanting_a_model_without_one_is_refused() -> None:
     """Otherwise the Worker quietly runs at the platform default."""
     with pytest.raises(WorkerError, match="no 'model' is set"):
-        WorkerConfig.from_dict({"adapter": "cli", "command": "agent --model {model}"})
+        AgentConfig.from_dict({"adapter": "cli", "command": "agent --model {model}"})
     with pytest.raises(WorkerError, match="no 'effort' is set"):
-        WorkerConfig.from_dict({"adapter": "cli", "command": "agent --effort {effort}"})
+        AgentConfig.from_dict({"adapter": "cli", "command": "agent --effort {effort}"})

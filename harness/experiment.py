@@ -316,8 +316,8 @@ def build_report(
     report.commit = report.provenance.get("git_commit")
     report.dirty = report.provenance.get("git_dirty")
     report.tiers = {
-        "planner": planner_of(experiment),
-        "worker": _worker_tier(exp_root),
+        "planner": planner_of(experiment) or _agent_tier(exp_root, "planner"),
+        "worker": _agent_tier(exp_root, "worker"),
     }
 
     # --- task board: is every module actually finished, and still passing? ---
@@ -754,6 +754,7 @@ class ProjectStatus:
     demo_present: bool
     worker_adapter: str = "manual"
     worker_tier: dict[str, Any] = dataclasses.field(default_factory=dict)
+    planner_tier: dict[str, Any] = dataclasses.field(default_factory=dict)
     experiments: list[ExperimentState] = dataclasses.field(default_factory=list)
     here: str | None = None
     headline: str = ""
@@ -850,7 +851,8 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         experiments=experiments,
         here=here,
         worker_adapter=_worker_adapter(root),
-        worker_tier=_worker_tier(root),
+        worker_tier=_agent_tier(root, "worker"),
+        planner_tier=_agent_tier(root, "planner"),
     )
 
     if not instantiated:
@@ -884,12 +886,12 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
     return status
 
 
-def _worker_tier(root: Path) -> dict[str, Any]:
-    """The Worker tier this experiment is configured to use."""
-    from harness.worker import WorkerError, load_worker_config
+def _agent_tier(root: Path, section: str = "worker") -> dict[str, Any]:
+    """How one tier is configured to run, for display and for the report."""
+    from harness.worker import WorkerError, load_agent_config
 
     try:
-        config = load_worker_config(root=root)
+        config = load_agent_config(section, root=root)
     except WorkerError as exc:
         return {"adapter": "misconfigured", "detail": str(exc)}
     return {
@@ -897,6 +899,7 @@ def _worker_tier(root: Path) -> dict[str, Any]:
         "platform": config.platform,
         "model": config.model,
         "effort": config.effort,
+        "session": config.session,
     }
 
 
@@ -908,3 +911,125 @@ def _worker_adapter(root: Path) -> str:
         return load_worker_config(root=root).adapter
     except WorkerError:
         return "misconfigured"
+
+
+# ---------------------------------------------------------------------------
+# Spawning a Planner (Tier 1 -> Tier 2)
+
+
+@dataclasses.dataclass
+class PlannerAttempt:
+    number: int
+    exit_code: int | None = None
+    duration_s: float = 0.0
+    state: str = ""
+    detail: str = ""
+
+
+@dataclasses.dataclass
+class PlannerOutcome:
+    """The result of driving one experiment's Planner to a reportable state."""
+
+    experiment: str
+    adapter: str
+    status: str = "pending"  # ready | incomplete | needs_human | error
+    platform: str = ""
+    model: str = ""
+    effort: str = ""
+    attempts: list[PlannerAttempt] = dataclasses.field(default_factory=list)
+    brief_path: str | None = None
+    message: str = ""
+
+    @property
+    def succeeded(self) -> bool:
+        return self.status == "ready"
+
+
+def run_planner(
+    name: str,
+    config: Any | None = None,
+    root: str | Path = ".",
+) -> PlannerOutcome:
+    """Invoke a Planner on an experiment until it is reportable, or give up.
+
+    A Worker's definition of done is its acceptance; a Planner's is the
+    experiment reaching "ready to report" — every module built and passing.
+    Same loop, one altitude up, and the same reason for it: the loop belongs in
+    tested code, not in whatever agent happens to be driving.
+    """
+    import time
+
+    from harness.worker import AgentConfig, invoke_agent
+
+    config = config or AgentConfig(label="planner")
+    experiment = find_experiment(name, root)
+    outcome = PlannerOutcome(
+        experiment=experiment.name,
+        adapter=config.adapter,
+        platform=config.platform,
+        model=config.model,
+        effort=config.effort,
+    )
+
+    brief_dir = experiment.path / "results" / "experiments" / experiment.name
+    brief_dir.mkdir(parents=True, exist_ok=True)
+    brief_path = brief_dir / "planner-brief.md"
+    brief_path.write_text(planner_brief(name, root), encoding="utf-8")
+    outcome.brief_path = str(brief_path)
+
+    if config.adapter == "manual":
+        outcome.status = "needs_human"
+        outcome.message = (
+            f"briefing written to {brief_path}. Open a session, tell it to run "
+            f"`harness planner brief {name} --register <label>`, and follow it."
+        )
+        return outcome
+
+    register_planner(name, config.label, root, model=config.model, effort=config.effort)
+
+    for number in range(1, config.attempts + 1):
+        attempt = PlannerAttempt(number=number)
+        started = time.monotonic()
+        prompt = planner_brief(name, root)
+        brief_path.write_text(prompt, encoding="utf-8")
+        try:
+            proc = invoke_agent(
+                config,
+                experiment.path,
+                prompt,
+                brief_path,
+                first_attempt=number == 1,
+                experiment=experiment.name,
+            )
+            attempt.exit_code = proc.returncode
+            (brief_dir / f"planner-attempt-{number:02d}.log").write_text(
+                f"exit={proc.returncode}\n\n## stdout\n{proc.stdout}\n\n## stderr\n{proc.stderr}\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            attempt.duration_s = time.monotonic() - started
+            attempt.detail = f"could not invoke planner: {exc}"
+            outcome.attempts.append(attempt)
+            outcome.status = "error"
+            outcome.message = attempt.detail
+            return outcome
+        except Exception as exc:  # timeout and friends
+            attempt.detail = f"planner invocation failed: {exc}"
+        attempt.duration_s = time.monotonic() - started
+
+        state = experiment_state(find_experiment(name, root))
+        attempt.state = state.state
+        attempt.detail = attempt.detail or state.detail
+        outcome.attempts.append(attempt)
+        if state.state == "ready to report":
+            outcome.status = "ready"
+            outcome.message = f"experiment '{name}' is ready to report"
+            return outcome
+
+    outcome.status = "incomplete"
+    last = outcome.attempts[-1].state if outcome.attempts else "unknown"
+    outcome.message = (
+        f"experiment '{name}' is still '{last}' after {config.attempts} attempt(s) — "
+        "a researcher should look at it"
+    )
+    return outcome

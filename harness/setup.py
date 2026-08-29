@@ -7,7 +7,7 @@ platform, the model, and the reasoning level are explicit settings, and a
 command exists to set them — nothing is inherited from a tool's default, where
 it would be invisible.
 
-Platform knowledge lives in ``configs/worker-platforms.yaml`` as data. This
+Platform knowledge lives in ``configs/agent-platforms.yaml`` as data. This
 module reads that file; it hardcodes no vendor, no flag, and no model name.
 """
 
@@ -19,10 +19,10 @@ from typing import Any
 
 import yaml
 
-from harness.worker import DEFAULT_ATTEMPTS, WorkerConfig
+from harness.worker import DEFAULT_ATTEMPTS, AgentConfig
 
-DEFAULT_PLATFORMS_PATH = "configs/worker-platforms.yaml"
-DEFAULT_WORKER_PATH = "configs/worker.yaml"
+DEFAULT_PLATFORMS_PATH = "configs/agent-platforms.yaml"
+DEFAULT_AGENTS_PATH = "configs/agents.yaml"
 
 
 class SetupError(ValueError):
@@ -41,6 +41,9 @@ class Platform:
     default_effort: str = ""
     model_hint: str = ""
     default_model: str = ""
+    planner_model: str = ""
+    planner_effort: str = ""
+    session_command: str = ""
     docs: str = ""
     reads_brief_from: str = "stdin"
 
@@ -77,6 +80,9 @@ def load_platforms(path: str | Path | None = None, root: str | Path = ".") -> di
             default_effort=str(data.get("default_effort", "")),
             model_hint=str(data.get("model_hint", "")),
             default_model=str(data.get("default_model", "")),
+            planner_model=str(data.get("planner_model", "")),
+            planner_effort=str(data.get("planner_effort", "")),
+            session_command=str(data.get("session_command", "")).strip(),
             docs=str(data.get("docs", "")),
             reads_brief_from=str(data.get("reads_brief_from", "stdin")),
         )
@@ -90,9 +96,14 @@ def build_config(
     attempts: int = DEFAULT_ATTEMPTS,
     command: str | None = None,
     label: str = "worker",
-) -> WorkerConfig:
-    """Turn a choice into a runnable worker configuration."""
+    session: str = "",
+) -> AgentConfig:
+    """Turn a choice into a runnable agent configuration for one tier."""
     resolved = command if command is not None else platform.command
+    if session and command is None and platform.session_command:
+        # Attaching an existing session: the researcher already opened one and
+        # wants this tier to continue in it rather than start fresh.
+        resolved = platform.session_command
     if not resolved.strip():
         raise SetupError(
             f"platform '{platform.name}' has no command preset — pass one explicitly "
@@ -105,19 +116,25 @@ def build_config(
         )
     if "{model}" in resolved and not model:
         raise SetupError(f"{platform.label} needs a model ({platform.model_hint})")
-    return WorkerConfig(
+    if "{session}" in resolved and not session:
+        raise SetupError(
+            f"{platform.label} was asked to attach a session but none was given "
+            "(pass --planner-session / --worker-session)"
+        )
+    return AgentConfig(
         adapter="cli",
         platform=platform.name,
         model=model,
         effort=effort,
         command=resolved,
-        resume_command=platform.resume_command if command is None else "",
+        resume_command=platform.resume_command if command is None and not session else "",
         attempts=attempts,
         label=label,
+        session=session,
     )
 
 
-def config_to_dict(config: WorkerConfig) -> dict[str, Any]:
+def config_to_dict(config: AgentConfig) -> dict[str, Any]:
     data: dict[str, Any] = {
         "adapter": config.adapter,
         "platform": config.platform,
@@ -127,32 +144,50 @@ def config_to_dict(config: WorkerConfig) -> dict[str, Any]:
     }
     if config.resume_command:
         data["resume_command"] = config.resume_command
+    if config.session:
+        data["session"] = config.session
     data["attempts"] = config.attempts
     data["timeout"] = config.timeout
     data["label"] = config.label
-    return {"worker": data}
+    return data
 
 
 HEADER = """\
 # Written by `harness setup`. Edit freely — it is ordinary configuration.
 #
-# Tier 3 (Workers) runs here. Their work is bounded and specified, so a small
-# fast model is usually the right call; the expensive one belongs in planning.
-# Re-run `harness setup` to change platform, model, or reasoning level.
+# Two tiers, side by side so the split is visible:
 #
-# Placeholders: {model} {effort} {root} {brief_file} {task_file} {task_id}
+#   planner — Tier 2. Decomposes the goal, judges the whole. The reasoning
+#             happens here, so this is where an expensive model earns its cost.
+#   worker  — Tier 3. Builds one fully-specified module against machine-checked
+#             acceptance. Bounded work; a small fast model usually suffices.
+#
+# `adapter: manual` means you open that session yourself; `cli` means the
+# harness spawns it. Set `session:` to attach an already-open session instead
+# of starting a fresh one.
+#
+# Re-run `harness setup` to change any of it.
+# Placeholders: {model} {effort} {session} {root} {brief_file}
+#               {task_file} {task_id} {experiment}
 """
 
 
-def write_worker_config(
-    config: WorkerConfig, path: str | Path | None = None, root: str | Path = "."
+def write_agent_config(
+    planner: AgentConfig,
+    worker: AgentConfig,
+    path: str | Path | None = None,
+    root: str | Path = ".",
 ) -> Path:
-    target = Path(path) if path else Path(root) / DEFAULT_WORKER_PATH
+    """Write both tiers into one file."""
+    target = Path(path) if path else Path(root) / DEFAULT_AGENTS_PATH
     if not target.is_absolute():
         target = Path(root) / target
     target.parent.mkdir(parents=True, exist_ok=True)
     body = yaml.safe_dump(
-        config_to_dict(config), sort_keys=False, allow_unicode=True, default_flow_style=False
+        {"planner": config_to_dict(planner), "worker": config_to_dict(worker)},
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
     )
     target.write_text(HEADER + body, encoding="utf-8")
     return target

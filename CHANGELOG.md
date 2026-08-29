@@ -25,6 +25,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Both tiers are configured, and both can be spawned.** `harness setup` now
+  sets up the Planner *and* the Worker — platform, model, reasoning level, and
+  retry cap each — writing `configs/agents.yaml` with the two side by side.
+  Flags are `--planner-*` and `--worker-*`; with none given it is interactive.
+- **`harness planner run <experiment>`** spawns a Planner and drives the
+  experiment until it is *ready to report* or the cap is reached. A Worker's
+  definition of done is its acceptance; a Planner's is the experiment. Lets a
+  Tier 1 agent create Planners instead of a person opening each session.
+- `--planner-session` / `--worker-session` attach a tier to an already-open
+  session instead of starting a fresh one; presets carry the resume command for
+  each platform. `planner brief --session <id>` records it.
+- `configs/worker.yaml` is replaced by `configs/agents.yaml` (both tiers), and
+  `configs/worker-platforms.yaml` by `configs/agent-platforms.yaml`. The old
+  worker file is still read if present.
+- `harness status` shows how both tiers are configured, including an attached
+  session.
+
 - **`harness setup`** — chooses the platform, **model, and reasoning level**
   Workers run on, and writes `configs/worker.yaml`. Interactive, or fully
   non-interactive via `--platform/--model/--effort`; `--list` shows what is

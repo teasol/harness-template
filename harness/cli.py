@@ -26,7 +26,8 @@ Usage::
     python -m harness exp list
     python -m harness exp report <name> [--no-run] [--determinism] [--save]
     python -m harness exp remove <name> [--force]
-    python -m harness planner brief <name> [--register <label>]
+    python -m harness planner brief <name> [--register <label>] [--session ID]
+    python -m harness planner run <name>               # spawn a Planner (Tier 1 -> 2)
 
 """
 
@@ -53,12 +54,13 @@ from harness.setup import (
     SetupError,
     build_config,
     load_platforms,
-    write_worker_config,
+    write_agent_config,
 )
 from harness.spec import SpecError, load_spec
 from harness.task import TaskError
 from harness.worker import (
     WorkerError,
+    load_agent_config,
     load_worker_config,
     run_task,
     write_worker_report,
@@ -525,15 +527,23 @@ def build_parser() -> argparse.ArgumentParser:
     setup_cmd = sub.add_parser(
         "setup", help="Choose the Worker platform, model, and reasoning level"
     )
-    setup_cmd.add_argument("--platform", default=None, help="Platform name (see --list)")
-    setup_cmd.add_argument("--model", default=None, help="Model to run Workers on")
-    setup_cmd.add_argument("--effort", default=None, help="Reasoning level")
-    setup_cmd.add_argument("--command", default=None, help="Override the platform's command")
-    setup_cmd.add_argument("--attempts", type=int, default=6, help="Retry cap per task")
+    for tier, default_attempts in (("planner", 3), ("worker", 6)):
+        setup_cmd.add_argument(f"--{tier}-platform", default=None, help=f"{tier} platform")
+        setup_cmd.add_argument(f"--{tier}-model", default=None, help=f"{tier} model")
+        setup_cmd.add_argument(f"--{tier}-effort", default=None, help=f"{tier} reasoning level")
+        setup_cmd.add_argument(
+            f"--{tier}-command", default=None, help=f"override the {tier} command"
+        )
+        setup_cmd.add_argument(
+            f"--{tier}-session", default=None, help=f"attach {tier} to an existing session id"
+        )
+        setup_cmd.add_argument(
+            f"--{tier}-attempts", type=int, default=default_attempts, help=f"{tier} retry cap"
+        )
     setup_cmd.add_argument("--label", default="worker", help="Name recorded on the board")
     setup_cmd.add_argument("--list", action="store_true", help="List platforms and exit")
     setup_cmd.add_argument("--platforms", default=None, help="Platform presets YAML")
-    setup_cmd.add_argument("--out", default=None, help="Where to write the worker config")
+    setup_cmd.add_argument("--out", default=None, help="Where to write the agent config")
     setup_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
     setup_cmd.set_defaults(func=cmd_setup)
 
@@ -552,8 +562,20 @@ def build_parser() -> argparse.ArgumentParser:
     planner_brief.add_argument(
         "--effort", default=None, help="Reasoning level of this Planner session (recorded)"
     )
+    planner_brief.add_argument(
+        "--session", default=None, help="Session id this Planner is running in (recorded)"
+    )
     planner_brief.add_argument("--root", default=".", help="Repo root (default: cwd)")
     planner_brief.set_defaults(func=cmd_planner_brief)
+
+    planner_run = planner_sub.add_parser(
+        "run", help="Spawn a Planner and drive the experiment to a reportable state"
+    )
+    planner_run.add_argument("name", help="Experiment name")
+    planner_run.add_argument("--attempts", type=int, default=None, help="Override the attempt cap")
+    planner_run.add_argument("--config", default=None, help="Agent config YAML")
+    planner_run.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    planner_run.set_defaults(func=cmd_planner_run)
 
     return parser
 
@@ -776,19 +798,33 @@ def cmd_status(args: argparse.Namespace) -> int:
             marker = "*" if exp.name == status.here else " "
             print(f" {marker}{exp.name:<17} {exp.state:<18} {exp.detail}")
 
-    if status.worker_tier.get("adapter") == "cli":
-        print()
-        tier = status.worker_tier
+    def _tier_line(name: str, tier: dict) -> str | None:
+        if tier.get("adapter") != "cli":
+            return None
         shown = " · ".join(
             x for x in (tier.get("platform"), tier.get("model"), tier.get("effort")) if x
         )
-        print(f"  Workers run on: {shown or 'cli'}")
+        attached = f"  (session {tier['session']})" if tier.get("session") else ""
+        return f"  {name}: {shown or 'cli'}{attached}"
+
+    tier_lines = [
+        line
+        for line in (
+            _tier_line("Planner runs on", status.planner_tier),
+            _tier_line("Workers run on", status.worker_tier),
+        )
+        if line
+    ]
+    if tier_lines:
+        print()
+        for line in tier_lines:
+            print(line)
     if status.worker_adapter == "manual" and status.experiments:
         print()
         print(
-            "  Workers are MANUAL: `plan run` writes a briefing and stops rather\n"
-            "  than building anything. Run `harness setup` to pick a platform,\n"
-            "  model, and reasoning level, and Workers will be spawned for you."
+            "  Agents are MANUAL: the harness writes a briefing and stops rather\n"
+            "  than spawning anything. Run `harness setup` to pick the platform,\n"
+            "  model, and reasoning level for each tier."
         )
 
     print()
@@ -816,6 +852,58 @@ def _prompt(question: str, default: str, choices: list[str] | None = None) -> st
     return answer or default
 
 
+def _choose_tier(
+    tier: str,
+    platforms: dict,
+    name: str | None,
+    model: str | None,
+    effort: str | None,
+    command: str | None,
+    session: str | None,
+    interactive: bool,
+):
+    """Resolve one tier's platform/model/effort, asking only what is missing."""
+    if not name:
+        if interactive:
+            print(f"\n--- {tier} ---")
+            for platform in platforms.values():
+                print(f"  {platform.name:<10} {platform.label}")
+            name = _prompt(f"{tier} platform", next(iter(platforms)))
+        else:
+            name = next(iter(platforms))
+    platform = platforms.get(name)
+    if platform is None:
+        raise SetupError(f"unknown platform '{name}'. available: {', '.join(platforms)}")
+
+    is_planner = tier == "planner"
+    default_model = (
+        (platform.planner_model or platform.default_model) if is_planner else platform.default_model
+    )
+    default_effort = (
+        (platform.planner_effort or platform.default_effort)
+        if is_planner
+        else platform.default_effort
+    )
+
+    if model is None:
+        model = (
+            _prompt(f"{tier} model ({platform.model_hint})", default_model)
+            if interactive
+            else default_model
+        )
+    if effort is None:
+        effort = (
+            _prompt(f"{tier} reasoning level", default_effort, platform.efforts or None)
+            if interactive
+            else default_effort
+        )
+    if session is None and interactive and platform.session_command:
+        session = _prompt(f"{tier} session id to attach (blank = start fresh)", "")
+    if command is None and platform.is_custom and interactive:
+        command = _prompt(f"{tier} command", "")
+    return platform, model, effort, command, session or ""
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     try:
         platforms = load_platforms(args.platforms, root=args.root)
@@ -824,67 +912,107 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return 2
 
     if args.list:
-        print("Worker platforms (from the presets file — edit it to add your own):\n")
+        print("Agent platforms (from the presets file — edit it to add your own):\n")
         for platform in platforms.values():
             print(f"  {platform.name:<10} {platform.label}")
             if platform.efforts:
                 print(f"  {'':<10} reasoning levels: {', '.join(platform.efforts)}")
             if platform.model_hint:
                 print(f"  {'':<10} model: {platform.model_hint}")
+            if platform.session_command:
+                print(f"  {'':<10} can attach an existing session id")
             if platform.docs:
                 print(f"  {'':<10} check flags with: {platform.docs}")
             print()
         return 0
 
-    name = args.platform
-    if not name:
-        print("Tier 3 — the Workers that write module code.\n")
-        print("Their work is bounded and specified, so a small fast model is usually")
-        print("right; keep the expensive one for planning. Available platforms:\n")
-        for platform in platforms.values():
-            print(f"  {platform.name:<10} {platform.label}")
-        print()
-        name = _prompt("Platform", next(iter(platforms)))
-
-    platform = platforms.get(name)
-    if platform is None:
-        print(
-            f"error: unknown platform '{name}'. available: {', '.join(platforms)}",
-            file=sys.stderr,
-        )
-        return 2
-
-    model = args.model
-    if model is None:
-        model = _prompt(f"Model ({platform.model_hint})", platform.default_model)
-    effort = args.effort
-    if effort is None:
-        effort = _prompt("Reasoning level", platform.default_effort, platform.efforts or None)
-    command = args.command
-    if command is None and platform.is_custom:
-        command = _prompt("Command (takes the briefing, edits {root}, exits)", "")
+    interactive = not any(
+        [args.planner_platform, args.worker_platform, args.planner_model, args.worker_model]
+    )
+    if interactive:
+        print("Two tiers to configure.\n")
+        print("  planner  decomposes the goal and judges the whole — the reasoning is here")
+        print("  worker   builds one fully-specified module against machine-checked acceptance")
+        print("\nA Worker's task is bounded, so a small fast model usually suffices; the")
+        print("expensive one belongs in planning. That difference is the point of tiering.")
 
     try:
-        config = build_config(
-            platform,
-            model=model,
-            effort=effort,
-            attempts=args.attempts,
-            command=command,
-            label=args.label,
+        p_platform, p_model, p_effort, p_command, p_session = _choose_tier(
+            "planner",
+            platforms,
+            args.planner_platform,
+            args.planner_model,
+            args.planner_effort,
+            args.planner_command,
+            args.planner_session,
+            interactive,
         )
-        path = write_worker_config(config, args.out, root=args.root)
+        w_platform, w_model, w_effort, w_command, w_session = _choose_tier(
+            "worker",
+            platforms,
+            args.worker_platform,
+            args.worker_model,
+            args.worker_effort,
+            args.worker_command,
+            args.worker_session,
+            interactive,
+        )
+        planner = build_config(
+            p_platform,
+            model=p_model,
+            effort=p_effort,
+            attempts=args.planner_attempts,
+            command=p_command,
+            label="planner",
+            session=p_session,
+        )
+        worker = build_config(
+            w_platform,
+            model=w_model,
+            effort=w_effort,
+            attempts=args.worker_attempts,
+            command=w_command,
+            label=args.label,
+            session=w_session,
+        )
+        path = write_agent_config(planner, worker, args.out, root=args.root)
     except SetupError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    print(f"\nwrote {path}")
-    print(f"  platform: {config.platform}")
-    print(f"  model:    {config.model or '(platform default)'}")
-    print(f"  effort:   {config.effort or '(platform default)'}")
-    print(f"  attempts: {config.attempts}")
-    print(f"  command:  {config.command}")
-    if platform.docs:
-        print(f"\nFlags change between releases — verify with: {platform.docs}")
-    print("\nWorkers will now be spawned by `harness plan run`.")
+    print(f"\nwrote {path}\n")
+    for tier, config in (("planner", planner), ("worker", worker)):
+        attached = f"  (attached to session {config.session})" if config.session else ""
+        print(
+            f"  {tier:<8} {config.platform} · {config.model or 'platform default'} · "
+            f"{config.effort or 'platform default'}{attached}"
+        )
+    docs = {p_platform.docs, w_platform.docs} - {""}
+    if docs:
+        print("\nFlags change between releases — verify with: " + "; ".join(sorted(docs)))
+    print("\n  harness planner run <experiment>    spawns the Planner")
+    print("  harness plan run <plan>            Workers build each module")
     return 0
+
+
+def cmd_planner_run(args: argparse.Namespace) -> int:
+    try:
+        config = load_agent_config("planner", args.config, root=args.root)
+        if args.attempts is not None:
+            config.attempts = args.attempts
+        outcome = exp_mod.run_planner(args.name, config=config, root=args.root)
+    except (ExperimentError, WorkerError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"[{outcome.experiment}] {outcome.status.upper()}")
+    for attempt in outcome.attempts:
+        print(f"  attempt {attempt.number} ({attempt.duration_s:.1f}s): {attempt.state}")
+    tier = " · ".join(x for x in (outcome.platform, outcome.model, outcome.effort) if x)
+    print(f"  planner: {tier or outcome.adapter}")
+    if outcome.brief_path:
+        print(f"  brief:   {outcome.brief_path}")
+    if outcome.message:
+        print(f"  {outcome.message}")
+    if outcome.succeeded:
+        print(f"\n  harness exp report {outcome.experiment} --determinism --save")
+    return 0 if outcome.succeeded else 1

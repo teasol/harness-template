@@ -44,9 +44,20 @@ This creates the branch `exp/sparse-attention` and a separate working directory
 disturbing each other or your main checkout. It also writes a plan skeleton
 full of `TODO`s — which is not yet a plan, and `plan validate` says so.
 
-### 2. Hand it to a Planner
+### 2. Get a Planner going
 
-Open an agent session and tell it, in your own words:
+If the planner tier is configured (`harness setup`), spawn one:
+
+```bash
+python -m harness planner run sparse-attention
+```
+
+It invokes the Planner with its briefing and keeps going until the experiment
+is reportable or the attempt cap is reached — the same verify-and-retry shape
+as Workers, one altitude up. Use this when you are driving several experiments
+and do not want to sit in each one.
+
+Or open a session yourself and tell it, in your own words:
 
 > You are the Planner for the `sparse-attention` experiment in `<path>`.
 > Run `python -m harness planner brief sparse-attention --register session-01`
@@ -82,24 +93,30 @@ the actual failure output — up to 6 attempts. A module that still fails is
 marked `blocked` and handed back to the Planner; that usually means the brief
 or the contract is wrong, not that the Worker is bad.
 
-**Workers are manual until you configure them.** Out of the box `plan run`
-writes a briefing and stops. One command turns them on:
+**Agents are manual until you configure them.** Out of the box the harness
+writes a briefing and stops. One command sets up both tiers:
 
 ```bash
-python -m harness setup --list                                    # what's available
-python -m harness setup --platform claude --model haiku --effort low
+python -m harness setup --list      # what's available
+python -m harness setup             # interactive, or pass flags:
+python -m harness setup \
+  --planner-platform claude --planner-model opus  --planner-effort high \
+  --worker-platform  claude --worker-model  haiku --worker-effort  low
 ```
 
-That picks the platform, **the model, and the reasoning level** Workers run on,
-and writes `configs/worker.yaml`. After it, `plan run` builds each module with
-no human in between.
+It writes `configs/agents.yaml` with both tiers side by side, so the split is
+visible. After it, `harness planner run <experiment>` spawns the Planner and
+`plan run` builds each module — no human in between.
+
+Already have a session open? `--planner-session <id>` attaches that tier to it
+instead of starting a fresh one.
 
 Choosing the tier is the point: a Worker's job is bounded and fully specified,
 so a small fast model usually suffices — and reserving the expensive one for
 planning is the whole economic argument for splitting the tiers. If you cannot
 choose, the split buys you nothing.
 
-Platform knowledge lives in `configs/worker-platforms.yaml` as **data**, so
+Platform knowledge lives in `configs/agent-platforms.yaml` as **data**, so
 adding your lab's tool (or a local model) is an entry there, not a change to
 the harness. Both tiers are recorded in the report, so which model built what
 is auditable rather than merely intended.

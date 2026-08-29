@@ -1,4 +1,4 @@
-# Worker platform presets — vendor knowledge as DATA, never in harness/ code.
+# Agent platform presets — vendor knowledge as DATA, never in harness/ code.
 #
 # `harness setup` reads this to offer choices; you can edit it, add your lab's
 # own entry, or ignore it entirely and write configs/worker.yaml by hand. The
@@ -24,7 +24,15 @@ platforms:
     efforts: [low, medium, high, xhigh, max]
     default_effort: low
     model_hint: "an alias (fable, opus, sonnet, haiku) or a full model id"
+    # Worker default: small and fast, because a Worker's task is fully specified.
     default_model: haiku
+    # Planner default: the reasoning happens here.
+    planner_model: opus
+    planner_effort: high
+    # Attaching an already-open session instead of starting a fresh one.
+    session_command: >-
+      claude -p --resume {session} --model {model} --effort {effort}
+      --permission-mode acceptEdits --add-dir {root}
     reads_brief_from: stdin
 
   codex:
@@ -42,6 +50,11 @@ platforms:
     default_effort: low
     model_hint: "a model id your Codex install accepts"
     default_model: ""
+    planner_model: ""
+    planner_effort: high
+    session_command: >-
+      codex exec resume {session} --cd {root} -m {model}
+      -c model_reasoning_effort={effort} "$(cat {brief_file})"
     reads_brief_from: argument
 
   opencode:
@@ -54,6 +67,9 @@ platforms:
     default_effort: low
     model_hint: "provider/model, e.g. anthropic/claude-haiku-4-5-20251001"
     default_model: ""
+    planner_model: ""
+    planner_effort: high
+    session_command: 'opencode run -s {session} -m {model} --variant {effort} "$(cat {brief_file})"'
     reads_brief_from: argument
 
   custom:

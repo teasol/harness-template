@@ -52,6 +52,7 @@ together; the door stays open.
 | `harness exp list` | Every experiment worktree git knows about |
 | `harness exp report <name> [--no-run] [--determinism] [--save]` | Build the researcher's decision aid; exits non-zero unless merge-ready |
 | `harness exp remove <name> [--force]` | Remove the worktree; **the branch is kept** — it is the record of the attempt |
+| `harness planner run <name>` | Spawn a Planner and drive the experiment until it is reportable |
 
 Worktrees default to `.experiments/<name>` inside the repo and are gitignored.
 Removing a worktree never deletes the branch, so a rejected experiment remains
@@ -59,8 +60,20 @@ inspectable.
 
 ## Registering a Planner
 
-A session becomes an experiment's Planner by running one command and following
-its output:
+A Planner can be spawned rather than opened by hand:
+
+```bash
+harness planner run <name>
+```
+
+That invokes the configured planner tier with its briefing and repeats until
+the experiment reaches *ready to report* or the attempt cap is hit — a Worker's
+definition of done is its acceptance, a Planner's is the experiment. Useful
+when a researcher (or a Tier 1 agent acting for them) is driving several
+experiments and does not want to sit inside each one.
+
+Otherwise, a session becomes an experiment's Planner by running one command and
+following its output:
 
 ```bash
 python -m harness planner brief <name> --register <label>
@@ -110,8 +123,16 @@ Configure the adapter in `configs/worker.yaml`:
 
 ```bash
 harness setup --list
-harness setup --platform <p> --model <m> --effort <level>
+harness setup                       # interactive: both tiers
+harness setup \
+  --planner-platform <p> --planner-model <m> --planner-effort <level> \
+  --worker-platform  <p> --worker-model  <m> --worker-effort  <level>
 ```
+
+Both tiers are configured together, in `configs/agents.yaml`, so the split sits
+in one file where you can see it. `--planner-session <id>` / `--worker-session
+<id>` attach a tier to a session you already have open instead of starting a
+fresh one.
 
 A Worker's task is bounded and fully specified, so it can usually run on a
 small fast model; keeping the expensive one for planning is the reason to
@@ -121,7 +142,7 @@ whatever a tool happens to default to. A command that references `{model}` or
 `{effort}` without a value configured is refused, so a Worker never silently
 runs at the platform default.
 
-Presets live in `configs/worker-platforms.yaml` as **data** — adding a tool, or
+Presets live in `configs/agent-platforms.yaml` as **data** — adding a tool, or
 a local model, is an entry there rather than a change to `harness/`. Nothing in
 the harness core names a vendor.
 
