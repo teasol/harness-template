@@ -71,6 +71,7 @@ from harness.worker import (
     WorkerError,
     load_agent_config,
     load_worker_config,
+    reconcile_worker_record,
     run_task,
     write_worker_report,
 )
@@ -393,7 +394,19 @@ def cmd_task_done(args: argparse.Namespace) -> int:
         print(f"task '{args.id}' acceptance FAILED — status not changed", file=sys.stderr)
         _print_step_failures(result)
         return 1
+    # A task finished by hand after a Worker gave up would otherwise leave
+    # worker.json permanently claiming 'failed' for a task the board calls
+    # 'done'. Two records disagreeing about one event is worse than one record.
+    record = reconcile_worker_record(
+        task.id,
+        task.status,
+        results_dir=args.results_dir,
+        root=args.root,
+        note=f"marked done by {args.by or 'a human'} after verification",
+    )
     print(f"task '{task.id}' → done")
+    if record is not None:
+        print(f"  worker record reconciled: {record}")
     return 0
 
 

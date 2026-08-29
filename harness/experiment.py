@@ -99,6 +99,13 @@ class ExperimentReport:
     commit: str | None = None
     dirty: bool | None = None
     integration: str = "not run"
+    #: Whether the integration evidence — fresh or reused — actually passed.
+    #: Kept separate from the human string above so merge-readiness never
+    #: depends on matching prose.
+    integration_ok: bool = False
+    #: True when the evidence is a reused run from a different commit, so it
+    #: passed for code that is not the code being reported on.
+    integration_stale: bool = False
     tasks_total: int = 0
     tasks_done: int = 0
     task_results: list[dict[str, Any]] = dataclasses.field(default_factory=list)
@@ -468,9 +475,35 @@ def build_report(
             run_dir = Path(result.run_dir)
             report.run_dir = result.run_dir
             report.integration = "PASSED" if result.success else "FAILED"
+            report.integration_ok = result.success
     else:
-        report.integration = "skipped (--no-run)"
-        report.caveats.append("integration spec was not run for this report")
+        # --no-run used to throw away a run that had just passed, so every
+        # metric came back "no integration run to read from" and producing a
+        # report meant paying for the whole integration again — hours of GPU in
+        # the case that motivated this. Attach the last one instead, and say
+        # exactly which run it is so nobody mistakes it for a fresh result.
+        previous = _last_run(exp_root, plan.integration)
+        if previous is None:
+            report.integration = "skipped (--no-run), and no previous run to attach"
+            report.caveats.append(
+                "integration spec was not run, and no earlier run was found to read from"
+            )
+        else:
+            run_dir = previous.path
+            report.run_dir = str(previous.path)
+            verdict = "PASSED" if previous.success else "FAILED"
+            report.integration = f"reused {verdict} run from {previous.finished_at}"
+            report.integration_ok = previous.success
+            report.caveats.append(
+                f"integration was not re-run: these numbers come from {previous.path.name}, "
+                f"which {verdict.lower()} at {previous.finished_at}"
+            )
+            if previous.commit and report.commit and previous.commit != report.commit:
+                report.integration_stale = True
+                report.caveats.append(
+                    f"the reused run was made at commit {previous.commit[:12]}, not the "
+                    f"current {report.commit[:12]} — it does not describe this code"
+                )
 
     # --- determinism (opt-in: a full re-run can be expensive) ---
     if check_determinism and plan.integration is not None:
@@ -511,8 +544,11 @@ def build_report(
     # Every blocker becomes a stated reason: a verdict the researcher cannot
     # explain is not a decision aid.
     blockers: list[str] = []
-    if report.integration != "PASSED":
+    if not report.integration_ok:
         blockers.append(f"integration did not pass ({report.integration})")
+    elif report.integration_stale:
+        # It passed — for other code. That is not evidence about this commit.
+        blockers.append("the reused integration run was made at a different commit")
     if report.tasks_total == 0:
         blockers.append("the plan declares no modules")
     if report.tasks_done != report.tasks_total:
@@ -527,6 +563,50 @@ def build_report(
     report.merge_ready = not blockers
     report.blockers = blockers
     return report
+
+
+@dataclasses.dataclass
+class PreviousRun:
+    """A finished integration run that a report can attach to instead of re-running."""
+
+    path: Path
+    success: bool
+    finished_at: str
+    commit: str | None
+
+
+def _last_run(exp_root: Path, integration: str | None) -> PreviousRun | None:
+    """The most recent completed run of this experiment's integration spec.
+
+    Matched on the spec's name, so an unrelated spec's run in the same results
+    directory is never mistaken for this experiment's evidence.
+    """
+    if integration is None:
+        return None
+    try:
+        spec_name = load_spec(_integration_path(exp_root, integration)).name
+    except (SpecError, ExperimentError, OSError):
+        return None
+    runs_dir = exp_root / "results" / "runs"
+    if not runs_dir.is_dir():
+        return None
+    candidates = sorted(
+        (d for d in runs_dir.glob(f"{spec_name}-*") if (d / "report.json").is_file()),
+        key=lambda d: d.name,
+        reverse=True,
+    )
+    for directory in candidates:
+        try:
+            data = json.loads((directory / "report.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        return PreviousRun(
+            path=directory,
+            success=bool(data.get("success")),
+            finished_at=str(data.get("finished_at", "unknown")),
+            commit=(data.get("provenance") or {}).get("git_commit"),
+        )
+    return None
 
 
 def _integration_path(exp_root: Path, integration: str) -> Path:

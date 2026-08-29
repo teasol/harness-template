@@ -29,6 +29,7 @@ adapter reports no cost of its own.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import subprocess
@@ -697,4 +698,58 @@ def write_worker_report(
     path = base / "workers" / outcome.task_id / "worker.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(dataclasses.asdict(outcome), indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def reconcile_worker_record(
+    task_id: str,
+    task_status: str,
+    results_dir: str | Path = "results",
+    root: str | Path = ".",
+    note: str = "",
+) -> Path | None:
+    """Bring a Worker's record back in line with what happened to its task.
+
+    ``worker.json`` records how the Worker loop ended. The task can end
+    differently afterwards: a Planner that verifies a blocked task by hand and
+    marks it done leaves the record permanently claiming ``failed`` for a task
+    the board calls ``done``. Two files disagreeing about the same event make
+    the audit trail worth less than no audit trail, because a reader has no way
+    to tell which one is lying.
+
+    The Worker's own history is preserved — attempts are not rewritten. Only
+    the final status is corrected, and the correction says who made it.
+    """
+    base = Path(results_dir)
+    if not base.is_absolute():
+        base = Path(root) / base
+    path = base / "workers" / task_id / "worker.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    worker_status = str(data.get("status", ""))
+    resolved = "done" if task_status == "done" else worker_status
+    if worker_status == resolved and not note:
+        return path
+
+    data["status"] = resolved
+    data["task_status"] = task_status
+    history = data.setdefault("reconciled", [])
+    if isinstance(history, list):
+        history.append(
+            {
+                "at": _now(),
+                "was": worker_status,
+                "now": resolved,
+                "note": note or f"task marked '{task_status}' outside the Worker loop",
+            }
+        )
+    with contextlib.suppress(OSError):
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`exp report --no-run` reused nothing.** It skipped the integration run and
+  then reported every metric as "no integration run to read from", so producing
+  a report meant paying for the whole integration again — hours of GPU in the
+  case that found this. It now attaches the most recent run of the plan's own
+  integration spec and names it, with the caveat that the numbers are not
+  fresh. Merge-readiness no longer depends on string-matching the human status
+  line: a reused run that passed counts as evidence, a reused run **from a
+  different commit** is a blocker, because it passed for code that is not the
+  code being reported on.
+- **`worker.json` could contradict the board forever.** A task a Planner
+  verified and finished by hand left the Worker record permanently claiming
+  `failed` for a task the board called `done`, with nothing saying which to
+  believe. `task done` now reconciles the record, preserving the Worker's
+  attempt history and recording who corrected it and why.
+- **`json_metric` rejected booleans with an unhelpful message.** It now names
+  the problem and the fix ("emit 1 instead of true"), and points at
+  `text_contains` for strings. `true` is still rejected rather than coerced:
+  `equals: 1` and `equals: true` would otherwise be the same assertion, and a
+  pass/fail flag that compares equal to a measurement is a bug waiting for a
+  bad day.
+
 ### Added
 
 - **A progress heartbeat, and `harness progress` to read it.** Long operations

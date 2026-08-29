@@ -91,3 +91,25 @@ def test_env_var_expansion(check_root: Path, monkeypatch: pytest.MonkeyPatch) ->
     target = check_root / "out.txt"
     target.write_text("hi", encoding="utf-8")
     run_check("file_exists", {"path": "${MY_TEST_DIR}/out.txt"}, check_root)
+
+
+def test_boolean_metric_is_rejected_with_the_fix(tmp_path: Path) -> None:
+    """A JSON boolean is not a number, and the message must say what to emit."""
+    path = tmp_path / "metrics.json"
+    path.write_text('{"within_tolerance": true}', encoding="utf-8")
+    with pytest.raises(CheckError) as excinfo:
+        run_check(
+            "json_metric",
+            {"path": str(path), "metric": "within_tolerance", "equals": 1},
+            tmp_path,
+        )
+    message = str(excinfo.value)
+    assert "boolean" in message
+    assert "Emit 1 instead of true" in message
+
+
+def test_string_metric_points_at_the_right_check(tmp_path: Path) -> None:
+    path = tmp_path / "metrics.json"
+    path.write_text('{"arm": "v120"}', encoding="utf-8")
+    with pytest.raises(CheckError, match="text_contains"):
+        run_check("json_metric", {"path": str(path), "metric": "arm"}, tmp_path)

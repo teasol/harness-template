@@ -85,6 +85,17 @@ Checks raise `CheckError` on failure; the runner records the message in the
 report. If a step's command fails (non-zero exit or timeout), its checks are
 skipped and the step is marked failed.
 
+**`json_metric` compares numbers, and a JSON boolean is not one.** Emit a
+pass/fail flag as `1` / `0`, not `true` / `false`:
+
+```json
+{ "within_tolerance": 1 }
+```
+
+`true` is rejected rather than coerced, because `equals: 1` and `equals: true`
+would otherwise be the same assertion — and a flag that compares equal to a
+measurement is a bug waiting for a bad day.
+
 ## Run outputs
 
 Each run writes to `<results-dir>/runs/<name>-<timestamp>/`:

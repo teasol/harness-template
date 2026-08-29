@@ -289,3 +289,42 @@ def test_model_and_effort_reach_the_command(project: Path) -> None:
     # The tier is on the audit trail, so a report can say what built what.
     log = "\n".join(load_task(project / "tasks", "widget").log)
     assert "[fake tiny-7b low]" in log
+
+
+# ---------------------------------------------------------------------------
+# the worker record must not outlive the truth
+
+
+def test_worker_record_is_reconciled_when_a_human_finishes_the_task(project: Path) -> None:
+    """A blocked task later verified by hand left two files disagreeing forever.
+
+    worker.json said 'failed', the board said 'done', and nothing said which to
+    believe — an audit trail that contradicts itself is worth less than none.
+    """
+    from harness.worker import reconcile_worker_record, write_worker_report
+
+    outcome = run_task(
+        project / "tasks", "widget", _config(project, "true", attempts=1), root=project
+    )
+    assert outcome.status == "failed"
+    record = write_worker_report(outcome, "results", root=project)
+    assert json.loads(record.read_text(encoding="utf-8"))["status"] == "failed"
+
+    # The Planner fixes it by hand and the task really does pass.
+    (project / "src" / "widget.py").write_text("ok\n", encoding="utf-8")
+    reconcile_worker_record("widget", "done", results_dir="results", root=project, note="by hand")
+
+    data = json.loads(record.read_text(encoding="utf-8"))
+    assert data["status"] == "done"
+    assert data["task_status"] == "done"
+    # The Worker's own history survives the correction.
+    assert len(data["attempts"]) == 1
+    assert data["attempts"][0]["passed"] is False
+    assert data["reconciled"][0]["was"] == "failed"
+    assert data["reconciled"][0]["note"] == "by hand"
+
+
+def test_reconciling_without_a_record_is_harmless(tmp_path: Path) -> None:
+    from harness.worker import reconcile_worker_record
+
+    assert reconcile_worker_record("nope", "done", results_dir="results", root=tmp_path) is None

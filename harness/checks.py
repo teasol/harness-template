@@ -77,8 +77,21 @@ def check_json_metric(root: Path, params: dict[str, Any]) -> str:
         raise CheckError(f"invalid JSON in {resolved}: {exc}") from exc
 
     value = lookup_metric(data, metric)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise CheckError(f"metric '{metric}' is not numeric: {value!r}")
+    # `true` is rejected rather than coerced: `equals: 1` and `equals: true`
+    # would otherwise mean the same thing, and a pass/fail flag that compares
+    # equal to a measurement is a bug waiting for a bad day.
+    if isinstance(value, bool):
+        raise CheckError(
+            f"metric '{metric}' is a boolean ({str(value).lower()}), and json_metric "
+            f"compares numbers. Emit {1 if value else 0} instead of "
+            f"{str(value).lower()} — an integer flag stays comparable with "
+            "min/max/equals."
+        )
+    if not isinstance(value, (int, float)):
+        raise CheckError(
+            f"metric '{metric}' is not numeric: {value!r}. json_metric reads a single "
+            "number; use text_contains for strings."
+        )
 
     if "equals" in params and value != params["equals"]:
         raise CheckError(f"{metric}={value}, expected equals {params['equals']}")

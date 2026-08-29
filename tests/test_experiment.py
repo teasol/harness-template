@@ -613,3 +613,145 @@ def test_exp_start_registers_the_planner(clone: Path) -> None:
     exp_mod.register_planner("owned", "planner", root=clone, model="m", effort="high")
     registered = exp_mod.planner_of(exp_mod.find_experiment("owned", clone))
     assert registered["planner"] == "planner" and registered["model"] == "m"
+
+
+# ---------------------------------------------------------------------------
+# --no-run must reuse evidence, not discard it
+
+
+def _finished_experiment(clone: Path, name: str = "reuse") -> object:
+    """An experiment whose single module is done and whose integration passes."""
+    experiment = exp_mod.start(name, root=clone, question="does it hold?")
+    exp_root = experiment.path
+    (exp_root / "configs").mkdir(exist_ok=True)
+    (exp_root / "src").mkdir(exist_ok=True)
+    (exp_root / "src" / "widget.py").write_text("x = 1\n", encoding="utf-8")
+    (exp_root / "configs" / f"{name}.yaml").write_text(
+        f"""
+name: {name}
+steps:
+  - id: emit
+    run: >-
+      mkdir -p "${{HARNESS_RESULTS_DIR}}" &&
+      echo {{\\"score\\": 0.5}} > "${{HARNESS_RESULTS_DIR}}/metrics.json"
+    checks:
+      - type: json_metric
+        path: ${{HARNESS_RESULTS_DIR}}/metrics.json
+        metric: score
+        min: 0.0
+""",
+        encoding="utf-8",
+    )
+    (exp_root / "plans").mkdir(exist_ok=True)
+    experiment.plan_path.write_text(
+        f"""
+plan:
+  name: {name}
+  goal: prove the reuse path works
+  report:
+    question: does it hold?
+    metrics:
+      - name: score
+        source: ${{HARNESS_RESULTS_DIR}}/metrics.json
+        metric: score
+  integration:
+    spec: configs/{name}.yaml
+  modules:
+    - id: widget
+      title: widget
+      deliverables: [src/widget.py]
+      brief: make src/widget.py
+      acceptance:
+        steps:
+          - id: check
+            run: test -f src/widget.py
+            checks:
+              - type: file_exists
+                path: src/widget.py
+""",
+        encoding="utf-8",
+    )
+    from harness.plan import load_plan as _load_plan
+    from harness.task import complete, materialize
+
+    materialize(_load_plan(experiment.plan_path), exp_root / "tasks")
+    complete(exp_root / "tasks", "widget", worker="w", root=exp_root)
+    return experiment
+
+
+@needs_git
+def test_no_run_reuses_the_last_integration_run(clone: Path) -> None:
+    """Producing a report must not mean paying for the whole integration again."""
+    _finished_experiment(clone)
+
+    fresh = exp_mod.build_report("reuse", root=clone)
+    assert fresh.integration == "PASSED"
+    assert fresh.integration_ok
+    assert [m.value for m in fresh.metrics] == [0.5]
+
+    reused = exp_mod.build_report("reuse", root=clone, run_integration=False)
+    assert reused.integration.startswith("reused PASSED")
+    assert reused.integration_ok
+    # The numbers are really there, not "no integration run to read from".
+    assert [m.value for m in reused.metrics] == [0.5]
+    assert any("was not re-run" in c for c in reused.caveats)
+
+
+@needs_git
+def test_no_run_with_nothing_to_reuse_says_so(clone: Path) -> None:
+    exp_mod.start("empty", root=clone, question="q?")
+    experiment = exp_mod.find_experiment("empty", clone)
+    (experiment.path / "plans").mkdir(exist_ok=True)
+    experiment.plan_path.write_text(
+        """
+plan:
+  name: empty
+  goal: nothing has run yet
+  integration:
+    spec: configs/empty.yaml
+  modules:
+    - id: m
+      title: m
+      brief: b
+      acceptance:
+        steps:
+          - id: s
+            run: "true"
+            checks: []
+""",
+        encoding="utf-8",
+    )
+    (experiment.path / "configs").mkdir(exist_ok=True)
+    (experiment.path / "configs" / "empty.yaml").write_text(
+        "name: empty\nsteps:\n  - id: s\n    run: 'true'\n    checks: []\n", encoding="utf-8"
+    )
+    report = exp_mod.build_report("empty", root=clone, run_integration=False)
+    assert "no previous run" in report.integration
+    assert not report.integration_ok
+    assert not report.merge_ready
+
+
+@needs_git
+def test_reused_evidence_from_another_commit_blocks_the_merge(clone: Path) -> None:
+    """It passed — for other code. That is not evidence about this commit.
+
+    Silently accepting it would let a report certify a commit the integration
+    never ran against, which is the exact failure the reuse shortcut invites.
+    """
+    experiment = _finished_experiment(clone, "stale")
+    exp_mod.build_report("stale", root=clone)  # produces the run to reuse
+
+    # The code moves on after that run.
+    exp_root = experiment.path
+    (exp_root / "src" / "widget.py").write_text("x = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=exp_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "move on"], cwd=exp_root, check=True, capture_output=True
+    )
+
+    report = exp_mod.build_report("stale", root=clone, run_integration=False)
+    assert report.integration_ok, "the reused run itself did pass"
+    assert report.integration_stale
+    assert not report.merge_ready
+    assert any("different commit" in b for b in report.blockers)
+    assert any("does not describe this code" in c for c in report.caveats)
