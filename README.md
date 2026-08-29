@@ -74,7 +74,7 @@ question, validate the plan, run the Workers, or write the report.
 
 ### 3. Let the Planner work
 
-It writes the plan, then:
+Once you agree on the question, the Planner writes the plan and drives it:
 
 ```bash
 python -m harness plan validate plans/sparse-attention.yaml
@@ -82,38 +82,24 @@ python -m harness plan materialize plans/sparse-attention.yaml   # one task per 
 python -m harness plan run plans/sparse-attention.yaml           # Workers build them
 ```
 
-`plan run` hands each module to a Worker, checks the result, and retries with
-the actual failure output — up to 6 attempts. A module that still fails is
-marked `blocked` and handed back to the Planner; that usually means the brief
-or the contract is wrong, not that the Worker is bad.
+`plan run` hands each module to a Worker in dependency order, checks acceptance
+**and** declared deliverables, and retries with the actual failure output — up
+to 6 attempts. A module that still fails is marked `blocked` and handed back to
+the Planner; that usually means the brief or the contract is wrong, not that
+the Worker is bad.
 
-**Agents are manual until you configure them.** Out of the box the harness
-writes a briefing and stops. One command sets up both tiers:
+**Agents are manual until you configure them** — out of the box the harness
+writes a briefing and stops. `make agents-setup` (or `harness setup`) picks the
+platform, model, and reasoning level for each tier; see
+[Choosing the tiers](#choosing-the-tiers) for why that choice is the point.
+With both tiers configured you can also skip sitting in the experiment
+altogether:
 
 ```bash
-python -m harness setup --list      # what's available
-python -m harness setup             # interactive, or pass flags:
-python -m harness setup \
-  --planner-platform claude --planner-model opus  --planner-effort high \
-  --worker-platform  claude --worker-model  haiku --worker-effort  low
+python -m harness planner run sparse-attention   # spawns the Planner, drives it to a report
 ```
 
-It writes `configs/agents.yaml` with both tiers side by side, so the split is
-visible. After it, `harness planner run <experiment>` spawns the Planner and
-`plan run` builds each module — no human in between.
-
-Already have a session open? `--planner-session <id>` attaches that tier to it
-instead of starting a fresh one.
-
-Choosing the tier is the point: a Worker's job is bounded and fully specified,
-so a small fast model usually suffices — and reserving the expensive one for
-planning is the whole economic argument for splitting the tiers. If you cannot
-choose, the split buys you nothing.
-
-Platform knowledge lives in `configs/agent-platforms.yaml` as **data**, so
-adding your lab's tool (or a local model) is an entry there, not a change to
-the harness. Both tiers are recorded in the report, so which model built what
-is auditable rather than merely intended.
+That needs a recorded question, since a spawned Planner has nobody to ask.
 
 ### 4. Read the report and decide
 
@@ -160,10 +146,12 @@ one cannot be judged.
 
 | Symptom | What it means |
 | --- | --- |
+| The briefing says the question is **not settled** | Agree on it with the researcher, then `harness exp question <name> --set "..."`. |
 | `plan validate` says "still the scaffold" | The TODOs have not been filled in yet. |
 | A task is `blocked` | A Worker used up its attempts. Read the task log; usually the brief is ambiguous. |
 | `exp report` says `NOT READY` | It lists every blocker. Fix them — or decide the experiment failed, which is a valid outcome. |
 | `NOT REPRODUCIBLE` | Something is unseeded. See [docs/reproducibility.md](docs/reproducibility.md). |
+| `planner run` says **NEEDS_HUMAN** | No question is recorded. Record one, or drive the experiment interactively. |
 | `cost: not measured` | Expected. The harness does not estimate token spend. |
 
 ## Why
