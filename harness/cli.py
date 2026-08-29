@@ -1153,4 +1153,3 @@ def cmd_init(args: argparse.Namespace) -> int:
     print("  1. Verify starter spec:  harness verify --spec configs/demo.yaml")
     print("  2. Start an experiment:  harness exp start <experiment-name>")
     return 0
-
