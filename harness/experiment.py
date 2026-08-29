@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -211,6 +212,37 @@ plan:
 """
 
 
+#: Configuration a new worktree must inherit to behave like the project it
+#: came from. These live under `.harness/`, which is untracked, so a fresh
+#: worktree does not get them from git.
+_INHERITED_CONFIGS = ("agents.yaml", "agent-platforms.yaml", "project.yaml")
+
+
+def _inherit_agent_configs(root: Path, worktree: Path) -> list[str]:
+    """Copy the project's agent configuration into a new experiment worktree.
+
+    Without this the harness finds no ``agents.yaml`` in the worktree and falls
+    back to the manual adapter — silently. ``plan run`` then writes briefings
+    and stops, which is indistinguishable from success until you notice no
+    Worker ever ran. Inheriting the configuration makes the worktree behave
+    like the project it was cut from.
+    """
+    source = get_configs_dir(root)
+    target = get_configs_dir(worktree)
+    copied: list[str] = []
+    for name in _INHERITED_CONFIGS:
+        src = source / name
+        if not src.is_file():
+            continue
+        dst = target / name
+        if dst.exists():
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied.append(name)
+    return copied
+
+
 def start(
     name: str,
     root: str | Path = ".",
@@ -241,6 +273,7 @@ def start(
     experiment = Experiment(
         name=name, branch=branch, path=path, head=_git(path, "rev-parse", "HEAD")
     )
+    _inherit_agent_configs(root, path)
     if question.strip():
         # An experiment starts from a question. Storing it verbatim means a
         # Planner spawned later reads what the researcher actually asked,
@@ -464,6 +497,14 @@ def build_report(
             "worktree has uncommitted changes — the reported commit does not contain them"
         )
 
+    # A result whose Planner model is unknown cannot be compared with any other
+    # result, so the gap is stated rather than left to be noticed.
+    if not (report.tiers.get("planner") or {}).get("model"):
+        report.caveats.append(
+            "Planner model not recorded — this run cannot be compared with another. "
+            f"Register it: harness planner brief {name} --register <label> --model <model>"
+        )
+
     # Every blocker becomes a stated reason: a verdict the researcher cannot
     # explain is not a decision aid.
     blockers: list[str] = []
@@ -671,6 +712,23 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
                 lines.append(f"| `{module_id}` | {status} | {worker} | {deps} |")
             lines.append("")
 
+    registered = planner_of(experiment)
+    if not (registered or {}).get("model"):
+        # A hand-appointed Planner is the one agent the harness cannot inspect.
+        # If it does not say what it is, the report cannot either.
+        lines += [
+            "## Register yourself first",
+            "",
+            "This experiment has no Planner model on record, so its report cannot be",
+            "compared with any other. You were opened by a person; say what you are:",
+            "",
+            "```bash",
+            f"python -m harness planner brief {name} --register planner \\",
+            "  --model <the model you are running on> --effort <low|medium|high>",
+            "```",
+            "",
+        ]
+
     lines += [
         "## Next",
         "",
@@ -726,6 +784,7 @@ def register_planner(
     root: str | Path = ".",
     model: str = "",
     effort: str = "",
+    require_model: bool = False,
 ) -> Path:
     """Record who is driving an experiment, and on what.
 
@@ -733,7 +792,19 @@ def register_planner(
     a person — but recording it makes the tier split auditable: a report can
     then say which tier ran what, instead of the split being an intention
     nobody can check.
+
+    ``require_model`` is set when a person registers a session by hand, which
+    is the one case where the harness has no other way to learn the answer. A
+    spawned Planner may legitimately have no model of its own — its command can
+    pin one — so that path records whatever it knows and the report flags the
+    gap instead of refusing.
     """
+    if require_model and not str(model).strip():
+        raise ExperimentError(
+            "registering a Planner requires --model: a run whose Planner model is "
+            "unknown cannot be compared with any other run. Pass the model the "
+            "session is actually running on."
+        )
     experiment = find_experiment(name, root)
     marker = experiment.path / "results" / "experiments" / experiment.name / "planner.json"
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -808,6 +879,10 @@ class ProjectStatus:
     here: str | None = None
     headline: str = ""
     next_steps: list[str] = dataclasses.field(default_factory=list)
+    #: False when 'manual' is a fallback rather than a choice — the difference
+    #: between "nothing to spawn" and "nothing configured to spawn with".
+    agents_config_found: bool = True
+    agents_config_path: str = ""
 
 
 def experiment_state(experiment: Experiment) -> ExperimentState:
@@ -909,6 +984,8 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         worker_adapter=_worker_adapter(root),
         worker_tier=_agent_tier(root, "worker"),
         planner_tier=_agent_tier(root, "planner"),
+        agents_config_found=instantiated,
+        agents_config_path=str(get_agents_config_path(root)),
     )
 
     if not instantiated:

@@ -91,6 +91,10 @@ class Spec:
     name: str
     description: str = ""
     seed: int | None = None
+    #: Opt in to env vars that force deterministic GPU math. These change
+    #: kernel selection and therefore the numbers, so declaring a seed does not
+    #: imply them — see :func:`harness.reproducibility.math_env`.
+    deterministic_math: bool = False
     steps: list[Step] = dataclasses.field(default_factory=list)
     source: Path | None = None
 
@@ -118,6 +122,10 @@ def load_spec(path: str | Path) -> Spec:
     if seed is not None and not isinstance(seed, int):
         raise SpecError("'seed' must be an integer")
 
+    deterministic_math = raw.get("deterministic_math", False)
+    if not isinstance(deterministic_math, bool):
+        raise SpecError("'deterministic_math' must be a boolean")
+
     steps_data = raw.get("steps", [])
     if not isinstance(steps_data, list):
         raise SpecError("'steps' must be a list")
@@ -132,6 +140,7 @@ def load_spec(path: str | Path) -> Spec:
         name=name,
         description=str(raw.get("description", "")),
         seed=seed,
+        deterministic_math=deterministic_math,
         steps=steps,
         source=path,
     )

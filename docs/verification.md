@@ -35,7 +35,8 @@ and they are gated automatically.
 ```yaml
 name: my-spec          # required-ish (defaults to the file stem)
 description: ...       # optional
-seed: 42               # optional; sets deterministic env vars for all steps
+seed: 42               # optional; exports PYTHONHASHSEED to all steps
+deterministic_math: false  # optional; opt in to CUBLAS_WORKSPACE_CONFIG — CHANGES RESULTS
 steps:                 # ordered list; execution stops at the first failure
   - id: train          # unique, non-empty string
     run: <shell cmd>   # executed with sh in the repo root (or step cwd)
@@ -65,9 +66,11 @@ makes a spec fail on a fresh checkout. Likewise, spell seeds
 `--seed ${HARNESS_SEED}` so the spec's `seed:` stays the single source of
 truth instead of being duplicated in a command string.
 
-When `seed` is set, the runner also exports `PYTHONHASHSEED` and
-`CUBLAS_WORKSPACE_CONFIG=:4096:8` to every step (see
-[reproducibility.md](reproducibility.md)).
+When `seed` is set, the runner exports `PYTHONHASHSEED` to every step. It does
+**not** set `CUBLAS_WORKSPACE_CONFIG` — that changes results, so it is opt-in
+via `deterministic_math: true` (see [reproducibility.md](reproducibility.md)).
+Whatever the harness injects is recorded in the run's provenance and printed in
+the report, so it is never a hidden variable.
 
 ## Built-in checks
 

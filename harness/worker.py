@@ -38,6 +38,7 @@ from typing import Any
 
 import yaml
 
+from harness import guard
 from harness.paths import get_agents_config_path
 from harness.report import write_reports
 from harness.runner import RunResult
@@ -48,6 +49,78 @@ DEFAULT_TIMEOUT = 1800
 DEFAULT_CONFIG_PATH = "configs/agents.yaml"
 LEGACY_CONFIG_PATH = "configs/worker.yaml"
 DEFAULT_PLANNER_ATTEMPTS = 3
+
+#: Below this, an agent invocation cannot have done real work — it is a broken
+#: command line, and retrying it just delays the diagnosis.
+MIN_PLAUSIBLE_ATTEMPT_S = 5.0
+
+#: How many consecutive attempts may leave every deliverable untouched before
+#: the harness concludes the Worker is wedged and hands back to the Planner.
+#: One is normal (an agent may read before it writes); a run of them is not.
+MAX_CONSECUTIVE_NOOP_ATTEMPTS = 3
+
+#: How much of a failing step's output to put in front of the caller. Enough to
+#: name the cause; the full log stays in the run directory.
+_FAILURE_TAIL_CHARS = 600
+
+
+def _as_text(value: object) -> str:
+    """Decode captured output that may be bytes, str, or absent."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _failure_summary(result: RunResult, verbose: bool = False) -> str:
+    """Say *why* acceptance failed, not merely that it did.
+
+    'acceptance failed' sends the reader hunting through run directories for
+    the one line that matters. The cause is usually the tail of the first
+    failing step's log, so put it where the failure is reported.
+    """
+    for step in result.steps:
+        if step.success:
+            continue
+        failed_checks = [c.detail for c in step.checks if not c.passed]
+        head = f"acceptance failed at step '{step.step_id}' (exit={step.exit_code})"
+        detail = ""
+        log_path = Path(step.log_path) if step.log_path else None
+        if log_path and log_path.is_file():
+            text = log_path.read_text(encoding="utf-8", errors="replace").strip()
+            tail = text[-_FAILURE_TAIL_CHARS:]
+            if verbose and tail:
+                detail = f"\n{tail}"
+            elif tail:
+                last = [ln for ln in tail.splitlines() if ln.strip()]
+                if last:
+                    detail = f": {last[-1][:200]}"
+        if failed_checks and not detail:
+            detail = f": {failed_checks[0][:200]}"
+        return head + detail
+    return "acceptance failed"
+
+
+def _deliverable_hashes(task: Task, root: Path) -> dict[str, str]:
+    """Hash every declared deliverable; missing files hash as absent."""
+    hashes: dict[str, str] = {}
+    for rel in task.deliverables:
+        path = root / rel
+        hashes[rel] = guard._hash_file(path) if path.is_file() else ""
+    return hashes
+
+
+def _log_attempt(
+    task: Task, config: AgentConfig, label: str, number: int, attempt: Attempt
+) -> None:
+    tier = " ".join(x for x in (config.platform, config.model, config.effort) if x)
+    task.log.append(
+        f"{_now()} worker {label}"
+        + (f" [{tier}]" if tier else "")
+        + f" attempt {number}/{config.attempts}: {attempt.detail}"
+    )
+    save_task(task)
 
 
 class WorkerError(RuntimeError):
@@ -69,6 +142,11 @@ class AgentConfig:
     label: str = "worker"
     #: An existing session to attach to instead of starting a fresh one.
     session: str = ""
+    #: Containment level. ``strict`` (default) also fails a task whose Worker
+    #: modified tracked files it never declared; ``warn`` keeps only the
+    #: harness-self-modification guard; ``off`` disables both — for labs that
+    #: deliberately develop the harness and the project in one tree.
+    guard: str = "strict"
 
     @classmethod
     def from_dict(cls, data: Any, default_attempts: int = DEFAULT_ATTEMPTS) -> AgentConfig:
@@ -93,7 +171,10 @@ class AgentConfig:
             timeout=data.get("timeout", DEFAULT_TIMEOUT),
             label=str(data.get("label", "worker")),
             session=str(data.get("session", "")),
+            guard=str(data.get("guard", "strict")),
         )
+        if config.guard not in ("strict", "warn", "off"):
+            raise WorkerError(f"unknown guard level '{config.guard}'. available: strict, warn, off")
         if config.adapter == "cli" and not config.command.strip():
             raise WorkerError("worker adapter 'cli' requires a 'command'")
         # A command asking for a model or an effort it was never given would
@@ -270,6 +351,8 @@ class WorkerOutcome:
     brief_path: str | None = None
     cost: str = "not measured (adapter reports none)"
     message: str = ""
+    #: Paths the Worker changed that it had no contract to change.
+    guard_violations: list[str] = dataclasses.field(default_factory=list)
 
     @property
     def succeeded(self) -> bool:
@@ -290,17 +373,7 @@ def invoke_agent(
     set, so a tool that can continue a session keeps its context rather than
     starting from nothing.
     """
-    template = config.command
-    if not first_attempt and config.resume_command:
-        template = config.resume_command
-    command = template.format(
-        brief_file=str(brief_path),
-        root=str(root),
-        model=config.model,
-        effort=config.effort,
-        session=config.session,
-        **extra,
-    )
+    command = render_command(config, root, brief_path, first_attempt, **extra)
     return subprocess.run(  # noqa: S602 - the command is the lab's configuration
         command,
         shell=True,
@@ -310,6 +383,32 @@ def invoke_agent(
         text=True,
         timeout=config.timeout,
         check=False,
+    )
+
+
+def render_command(
+    config: AgentConfig,
+    root: Path,
+    brief_path: Path,
+    first_attempt: bool = True,
+    **extra: str,
+) -> str:
+    """Return the command line that will actually run, placeholders resolved.
+
+    Callers log *this*, never the raw template. Logging the template hides the
+    two things a reader needs when an invocation misbehaves — which model was
+    selected, and whether this attempt used ``command`` or ``resume_command``.
+    """
+    template = config.command
+    if not first_attempt and config.resume_command:
+        template = config.resume_command
+    return template.format(
+        brief_file=str(brief_path),
+        root=str(root),
+        model=config.model,
+        effort=config.effort,
+        session=config.session,
+        **extra,
     )
 
 
@@ -348,6 +447,21 @@ def run_task(
     brief_path.write_text(prompt, encoding="utf-8")
     outcome.brief_path = str(brief_path)
 
+    # A module the Planner declared as its own is never handed to a Worker.
+    # Briefing an agent to run an experiment or read a log costs more than
+    # doing it — the isolation a Worker buys is only worth its price when new
+    # code is being written.
+    if task.executor == "planner":
+        outcome.status = "needs_planner"
+        outcome.message = (
+            f"module '{task.id}' declares `executor: planner` — the Planner does this one "
+            f"itself, no Worker is spawned. Do the work, then:\n"
+            f"  python -m harness task verify --id {task.id}\n"
+            f"  python -m harness task done --id {task.id} --by planner\n"
+            f"Brief: {brief_path}"
+        )
+        return outcome
+
     if config.adapter == "manual":
         outcome.status = "needs_human"
         outcome.message = (
@@ -356,9 +470,37 @@ def run_task(
         )
         return outcome
 
+    consecutive_noop = 0
     for number in range(1, config.attempts + 1):
         attempt = Attempt(number=number)
         started = time.monotonic()
+        rendered = render_command(
+            config,
+            root,
+            brief_path,
+            first_attempt=number == 1,
+            task_id=task.id,
+            task_file=str(task.path),
+        )
+        # Snapshot both boundaries before handing control to the agent.
+        harness_before = guard.snapshot_harness() if config.guard != "off" else {}
+        repo_modified_before, repo_created_before = (
+            guard.repo_changes(root) if config.guard != "off" else (set(), set())
+        )
+        deliverables_before = _deliverable_hashes(task, root)
+
+        def _write_attempt_log(
+            exit_code: object,
+            stdout: str,
+            stderr: str,
+            _n: int = number,
+            _cmd: str = rendered,
+        ) -> None:
+            (brief_dir / f"attempt-{_n:02d}.log").write_text(
+                f"$ {_cmd}\nexit={exit_code}\n\n## stdout\n{stdout}\n\n## stderr\n{stderr}\n",
+                encoding="utf-8",
+            )
+
         try:
             proc = invoke_agent(
                 config,
@@ -370,13 +512,17 @@ def run_task(
                 task_file=str(task.path),
             )
             attempt.exit_code = proc.returncode
-            (brief_dir / f"attempt-{number:02d}.log").write_text(
-                f"$ {config.resume_command or config.command}\n"
-                f"exit={proc.returncode}\n\n## stdout\n{proc.stdout}\n\n## stderr\n{proc.stderr}\n",
-                encoding="utf-8",
-            )
-        except subprocess.TimeoutExpired:
+            _write_attempt_log(proc.returncode, proc.stdout, proc.stderr)
+        except subprocess.TimeoutExpired as exc:
             attempt.detail = f"worker timed out after {config.timeout}s"
+            # A timeout used to leave no record at all, so the most expensive
+            # attempt in a run was the only one you could not inspect.
+            # TimeoutExpired carries whatever the process managed to emit.
+            _write_attempt_log(
+                "timeout",
+                _as_text(exc.stdout),
+                _as_text(exc.stderr) + f"\n[timed out after {config.timeout}s]",
+            )
         except OSError as exc:
             attempt.duration_s = time.monotonic() - started
             attempt.detail = f"could not invoke worker: {exc}"
@@ -386,20 +532,50 @@ def run_task(
             return outcome
         attempt.duration_s = time.monotonic() - started
 
+        # --- containment ------------------------------------------------
+        # Checked before acceptance: a Worker that edited the harness may have
+        # made acceptance pass by changing the judge, so a pass here is not
+        # evidence of anything.
+        if config.guard != "off":
+            touched = guard.changed_paths(harness_before, guard.snapshot_harness())
+            if touched:
+                attempt.detail = (
+                    "worker modified the harness itself — "
+                    + ", ".join(Path(p).name for p in touched[:5])
+                    + (f" (+{len(touched) - 5} more)" if len(touched) > 5 else "")
+                )
+                outcome.attempts.append(attempt)
+                _log_attempt(task, config, label, number, attempt)
+                outcome.status = "error"
+                outcome.guard_violations = touched
+                outcome.message = (
+                    f"task '{task.id}' aborted: the Worker changed the harness package "
+                    f"({len(touched)} file(s)). Acceptance run under a modified harness "
+                    "proves nothing, so this is not retried. Review and revert:\n  "
+                    + "\n  ".join(touched)
+                )
+                block(tasks_dir, task_id, "worker modified the harness package")
+                return outcome
+
         result = verify_task(task, root=root, results_dir=results_dir)
         write_reports(result)
         attempt.passed = result.success
         if not attempt.detail:
-            attempt.detail = "acceptance passed" if result.success else "acceptance failed"
-        outcome.attempts.append(attempt)
+            attempt.detail = "acceptance passed" if result.success else _failure_summary(result)
 
-        tier = " ".join(x for x in (config.platform, config.model, config.effort) if x)
-        task.log.append(
-            f"{_now()} worker {label}"
-            + (f" [{tier}]" if tier else "")
-            + f" attempt {number}/{config.attempts}: {attempt.detail}"
-        )
-        save_task(task)
+        # Judge progress before logging, so the audit trail records not just
+        # that the attempt failed but whether it moved anything.
+        deliverables_after = _deliverable_hashes(task, root)
+        if result.success:
+            consecutive_noop = 0
+        elif deliverables_before == deliverables_after:
+            consecutive_noop += 1
+            attempt.detail += " (no deliverable changed)"
+        else:
+            consecutive_noop = 0
+
+        outcome.attempts.append(attempt)
+        _log_attempt(task, config, label, number, attempt)
 
         if result.success:
             task.status = "done"
@@ -408,6 +584,61 @@ def run_task(
             save_task(task)
             outcome.status = "done"
             outcome.message = f"task '{task.id}' done after {number} attempt(s)"
+            return outcome
+
+        # --- scope: did it change anything it never declared? -------------
+        if config.guard == "strict":
+            modified, created = guard.undeclared_changes(
+                root, task.deliverables, repo_modified_before, repo_created_before
+            )
+            if created:
+                task.log.append(
+                    f"{_now()} note: undeclared new file(s) after attempt {number}: "
+                    + ", ".join(created[:5])
+                )
+                save_task(task)
+            if modified:
+                outcome.status = "error"
+                outcome.guard_violations = modified
+                outcome.message = (
+                    f"task '{task.id}' aborted: the Worker modified tracked file(s) it "
+                    f"never declared as deliverables. An undeclared change is one nothing "
+                    f"checks. Review and revert:\n  " + "\n  ".join(modified)
+                )
+                block(tasks_dir, task_id, "worker modified undeclared tracked files")
+                return outcome
+
+        # --- is retrying going to achieve anything? ----------------------
+        # A run of attempts that leaves every deliverable byte-identical is a
+        # wedged resume-session: the agent believes it is already finished, so
+        # it edits nothing and the next attempt repeats exactly. One such
+        # attempt is normal — an agent may spend it reading before it writes —
+        # so only a run of them is evidence. And if this was the last attempt
+        # anyway, the ordinary cap path already says the right thing.
+        if consecutive_noop >= MAX_CONSECUTIVE_NOOP_ATTEMPTS and number < config.attempts:
+            outcome.status = "failed"
+            outcome.message = (
+                f"task '{task.id}' stopped after attempt {number}: {consecutive_noop} "
+                "consecutive attempts changed no deliverable, so the remaining "
+                f"{config.attempts - number} would repeat the same failure. The brief or "
+                "the acceptance is wrong — that is the Planner's call.\n"
+                f"{_failure_summary(result, verbose=True)}"
+            )
+            block(tasks_dir, task_id, f"worker made no progress for {consecutive_noop} attempts")
+            return outcome
+
+        # An agent cannot have done real work in a couple of seconds; that is
+        # what a misconfigured command line looks like, and retrying a broken
+        # invocation five more times only delays the diagnosis.
+        if attempt.duration_s < MIN_PLAUSIBLE_ATTEMPT_S and attempt.exit_code not in (0, None):
+            outcome.status = "error"
+            outcome.message = (
+                f"task '{task.id}' aborted: the Worker command exited in "
+                f"{attempt.duration_s:.2f}s with code {attempt.exit_code} — too fast to have "
+                "done any work. This is a worker configuration problem, not a coding "
+                f"problem. Check `harness setup --check`.\n  $ {rendered}"
+            )
+            block(tasks_dir, task_id, "worker command failed immediately — misconfigured")
             return outcome
 
         # Keep the same worker going with the real failure output: a coding

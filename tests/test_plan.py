@@ -208,3 +208,70 @@ plan:
 def test_missing_file_raises() -> None:
     with pytest.raises(PlanError, match="not found"):
         load_plan("/nonexistent/plan.yaml")
+
+
+# ---------------------------------------------------------------------------
+# approval — a plan is a proposal until someone agrees to it
+
+
+def test_a_fresh_plan_is_not_approved(tmp_path: Path) -> None:
+    from harness.plan import approval_status
+
+    path = write_plan(tmp_path, VALID_PLAN)
+    approved, reason = approval_status(path)
+    assert not approved
+    assert "never been approved" in reason
+
+
+def test_approval_is_tied_to_the_plans_contents(tmp_path: Path) -> None:
+    """Approving a plan must not approve whatever it is edited into next."""
+    from harness.plan import approval_status, record_approval
+
+    path = write_plan(tmp_path, VALID_PLAN)
+    record_approval(path, by="researcher", note="looks right")
+    approved, reason = approval_status(path)
+    assert approved
+    assert "researcher" in reason
+
+    path.write_text(VALID_PLAN + "\n# a module snuck in later\n", encoding="utf-8")
+    approved, reason = approval_status(path)
+    assert not approved
+    assert "changed after it was approved" in reason
+
+
+def test_cost_estimate_counts_only_worker_modules(tmp_path: Path) -> None:
+    """The Planner's own modules do not consume the agent budget."""
+    from harness.plan import estimate_cost
+
+    plan = load_plan(write_plan(tmp_path, VALID_PLAN))
+    plan.modules[0].executor = "planner"
+    cost = estimate_cost(plan, attempts=6, timeout=1800)
+    assert cost["planner_modules"] == 1
+    assert cost["worst_case_s"] == cost["worker_modules"] * 6 * 1800
+
+
+def test_plan_run_refuses_without_approval(tmp_path: Path, capsys) -> None:
+    """The gate sits where money starts being spent, not at validation."""
+    from harness.cli import main
+    from harness.plan import record_approval
+    from harness.task import materialize
+
+    path = write_plan(tmp_path, VALID_PLAN)
+    plan = load_plan(path)
+    materialize(plan, tmp_path / "tasks")
+
+    rc = main(
+        ["plan", "run", str(path), "--tasks-dir", str(tmp_path / "tasks"), "--root", str(tmp_path)]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "never been approved" in err
+    assert "plan approve" in err
+    # And it says what approving would commit you to.
+    assert "of agent time" in err
+
+    record_approval(path, by="researcher")
+    rc = main(
+        ["plan", "run", str(path), "--tasks-dir", str(tmp_path / "tasks"), "--root", str(tmp_path)]
+    )
+    assert "approved by researcher" in capsys.readouterr().out

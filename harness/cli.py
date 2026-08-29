@@ -40,6 +40,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from harness import experiment as exp_mod
+from harness import plan as plan_mod
 from harness import task as task_mod
 from harness.experiment import ExperimentError
 from harness.paths import (
@@ -478,7 +479,22 @@ def build_parser() -> argparse.ArgumentParser:
     plan_run.add_argument("--results-dir", default="results")
     plan_run.add_argument("--worker-config", default=None, help="Worker config YAML")
     plan_run.add_argument("--attempts", type=int, default=None, help="Override the attempt cap")
+    plan_run.add_argument(
+        "--skip-approval",
+        action="store_true",
+        help="Run without a recorded approval (for automation that approved elsewhere)",
+    )
     plan_run.set_defaults(func=cmd_plan_run)
+
+    plan_approve = plan_sub.add_parser(
+        "approve", help="Record agreement to run this plan, and show what it will cost"
+    )
+    plan_approve.add_argument("plan", help="Path to the plan YAML file")
+    plan_approve.add_argument("--by", required=True, help="Who is approving")
+    plan_approve.add_argument("--note", default="", help="Why, or what was changed first")
+    plan_approve.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    plan_approve.add_argument("--worker-config", default=None, help="Worker config YAML")
+    plan_approve.set_defaults(func=cmd_plan_approve)
 
     task_cmd = sub.add_parser("task", help="Worker task commands")
     task_sub = task_cmd.add_subparsers(dest="task_command", required=True)
@@ -600,6 +616,11 @@ def build_parser() -> argparse.ArgumentParser:
         setup_cmd.add_argument(
             f"--{tier}-attempts", type=int, default=default_attempts, help=f"{tier} retry cap"
         )
+    setup_cmd.add_argument(
+        "--check",
+        action="store_true",
+        help="Smoke-test the configured agent commands and exit (spawns one cheap prompt)",
+    )
     setup_cmd.add_argument("--label", default="worker", help="Name recorded on the board")
     setup_cmd.add_argument("--list", action="store_true", help="List platforms and exit")
     setup_cmd.add_argument("--platforms", default=None, help="Platform presets YAML")
@@ -660,13 +681,18 @@ def cmd_exp_start(args: argparse.Namespace) -> int:
             base=args.base,
             question=args.question or "",
         )
-        exp_mod.register_planner(
-            args.name,
-            args.planner,
-            root=args.root,
-            model=args.model or "",
-            effort=args.effort or "",
-        )
+        # At creation time nobody knows which model will drive this yet, so an
+        # unknown model leaves the Planner unregistered rather than recorded as
+        # blank. The briefing then opens by asking the session to say what it
+        # is — a placeholder would just look like an answer.
+        if (args.model or "").strip():
+            exp_mod.register_planner(
+                args.name,
+                args.planner,
+                root=args.root,
+                model=args.model,
+                effort=args.effort or "",
+            )
         brief = exp_mod.planner_brief(args.name, root=args.root)
     except ExperimentError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -775,6 +801,42 @@ def cmd_task_run(args: argparse.Namespace) -> int:
     return 0 if outcome.succeeded else 1
 
 
+def cmd_plan_approve(args: argparse.Namespace) -> int:
+    """Approve a plan — after printing what approving it commits you to."""
+    try:
+        plan = load_plan(args.plan)
+    except PlanError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    try:
+        config = load_worker_config(args.worker_config, root=args.root)
+    except WorkerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    cost = plan_mod.estimate_cost(plan, config.attempts, config.timeout)
+    print(f"Plan: {plan.name}")
+    print(f"Goal: {plan.goal.strip()[:400]}")
+    print()
+    for module_id in plan.topological_order():
+        module = plan.module(module_id)
+        deps = ", ".join(module.depends_on) or "-"
+        print(f"  [{module.executor:<7}] {module_id:<24} depends on: {deps}")
+    print()
+    print(
+        f"  Worker modules: {cost['worker_modules']} x {cost['attempts_per_module']} attempts "
+        f"x {cost['timeout_s']:g}s cap = up to {cost['worst_case_s'] / 3600:.1f}h of agent time"
+    )
+    if cost["planner_modules"]:
+        print(f"  Planner modules: {cost['planner_modules']} (you run these yourself)")
+    print()
+
+    record = plan_mod.record_approval(args.plan, args.by, args.note)
+    print(f"approved by {args.by} — recorded in {record}")
+    print("The approval is tied to the plan's contents: edit the plan and it lapses.")
+    return 0
+
+
 def cmd_plan_run(args: argparse.Namespace) -> int:
     """Drain the ready queue: run each ready task in dependency order."""
     tasks_dir = _resolve_tasks_dir(args.tasks_dir, args.root)
@@ -787,6 +849,34 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
     if args.attempts is not None:
         config.attempts = args.attempts
 
+    # A plan is a proposal until a person agrees to it. Everything after this
+    # line spends time and money, so this is where agreement is required —
+    # validating and materializing a plan stay free and unguarded.
+    if not getattr(args, "skip_approval", False):
+        approved, reason = plan_mod.approval_status(args.plan)
+        if not approved:
+            cost = plan_mod.estimate_cost(plan, config.attempts, config.timeout)
+            hours = cost["worst_case_s"] / 3600
+            print(f"error: {reason}.", file=sys.stderr)
+            print(
+                f"\nThis plan would run {cost['worker_modules']} Worker module(s) at "
+                f"{cost['attempts_per_module']} attempts and a {cost['timeout_s']:g}s cap "
+                f"— up to {hours:.1f}h of agent time"
+                + (
+                    f", plus {cost['planner_modules']} module(s) you run yourself."
+                    if cost["planner_modules"]
+                    else "."
+                ),
+                file=sys.stderr,
+            )
+            print(
+                f"\nRead the plan, then:\n"
+                f"  python -m harness plan approve {args.plan} --by <who>\n",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"plan {reason}\n")
+
     if config.adapter == "manual":
         print(
             "worker adapter is 'manual': each task writes a briefing and stops.\n"
@@ -796,7 +886,10 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
     completed = 0
     while True:
         board = task_mod.load_board(tasks_dir)
-        ready = task_mod.ready_task_ids(board)
+        by_id = {t.id: t for t in board}
+        # Modules the Planner claimed are not the drain loop's to run; skipping
+        # them lets the Worker queue finish instead of halting on the first one.
+        ready = [t for t in task_mod.ready_task_ids(board) if by_id[t].executor != "planner"]
         if not ready:
             break
         task_id = ready[0]
@@ -824,7 +917,25 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
     done = sum(1 for t in board if t.is_done)
     print(f"\n{completed} task(s) run this pass; {done}/{len(plan.modules)} module(s) done")
     if done < len(plan.modules):
-        print("no ready tasks left — remaining modules are blocked or unmaterialized")
+        # "no ready tasks left" on its own is the least useful sentence the
+        # harness can print: it is identical whether a task is blocked, waiting
+        # on a dependency, claimed by someone, or the Planner's own to do.
+        print("no ready tasks left. Remaining modules:")
+        for task in board:
+            if task.is_done:
+                continue
+            if task.executor == "planner":
+                why = "yours to run (`executor: planner`)"
+            elif task.status == "blocked":
+                why = "blocked — read its log, then fix the brief or the acceptance"
+            elif task.status == "in_progress":
+                why = f"claimed by {task.worker or 'someone'} — `task done` or re-claim it"
+            else:
+                waiting = [
+                    d for d in task.depends_on if d not in {t.id for t in board if t.is_done}
+                ]
+                why = f"waiting on {', '.join(waiting)}" if waiting else f"status '{task.status}'"
+            print(f"  {task.id:<24} {why}")
         return 1
     return 0
 
@@ -842,6 +953,7 @@ def cmd_planner_brief(args: argparse.Namespace) -> int:
                 root=args.root,
                 model=args.model or "",
                 effort=args.effort or "",
+                require_model=True,
             )
         print(exp_mod.planner_brief(args.name, root=args.root))
     except ExperimentError as exc:
@@ -889,11 +1001,22 @@ def cmd_status(args: argparse.Namespace) -> int:
             print(line)
     if status.worker_adapter == "manual" and status.experiments:
         print()
-        print(
-            "  Agents are MANUAL: the harness writes a briefing and stops rather\n"
-            "  than spawning anything. Run `harness setup` to pick the platform,\n"
-            "  model, and reasoning level for each tier."
-        )
+        if status.agents_config_found:
+            print(
+                "  Agents are MANUAL: the harness writes a briefing and stops rather\n"
+                "  than spawning anything. Run `harness setup` to pick the platform,\n"
+                "  model, and reasoning level for each tier."
+            )
+        else:
+            # Chosen-manual and fallen-back-to-manual used to look identical,
+            # so a worktree that never inherited its agent config looked like a
+            # working setup that simply had nothing to do.
+            print(
+                "  WARNING: no agent configuration found here, so agents fell back\n"
+                "  to MANUAL — `plan run` will write briefings and spawn nothing.\n"
+                f"  Expected: {status.agents_config_path}\n"
+                "  Copy it from the parent project, or run `harness setup`."
+            )
 
     print()
     print("Next:")
@@ -975,7 +1098,37 @@ def _choose_tier(
     return platform, model, effort, command, session or ""
 
 
+def _run_agent_check(root: str) -> int:
+    """Probe every configured tier and report whether it can actually be driven."""
+    from harness.setup import check_tier
+
+    print("Checking configured agents (one cheap prompt each)...\n")
+    failed = False
+    for tier in ("planner", "worker"):
+        outcome = check_tier(tier, root=root)
+        mark = "ok  " if outcome.ok else "FAIL"
+        timing = f" ({outcome.duration_s:.1f}s)" if outcome.duration_s else ""
+        print(f"  {mark} {tier:<8} [{outcome.adapter}]{timing}  {outcome.detail}")
+        if not outcome.ok:
+            failed = True
+            if outcome.command:
+                print(f"       $ {outcome.command}")
+    print()
+    if failed:
+        print(
+            "A tier that cannot be driven fails every attempt in under a second,\n"
+            "which reads as 'the agent tried and failed' rather than 'the agent was\n"
+            "never reached'. Fix the command in the agent config, then re-check."
+        )
+        return 1
+    print("All configured tiers responded.")
+    return 0
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
+    if getattr(args, "check", False):
+        return _run_agent_check(args.root)
+
     try:
         platforms = load_platforms(args.platforms, root=args.root)
     except SetupError as exc:

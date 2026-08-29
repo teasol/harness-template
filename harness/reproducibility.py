@@ -41,13 +41,43 @@ def set_all_seeds(seed: int) -> None:
         pass
 
 
-def deterministic_env(seed: int) -> dict[str, str]:
-    """Env vars that improve determinism of child processes."""
+def seed_env(seed: int) -> dict[str, str]:
+    """Env vars that make child processes seed-stable **without changing math**.
+
+    Safe to apply unconditionally: nothing here alters which kernels or
+    algorithms a numerical library selects, so numbers stay comparable to runs
+    made without the harness.
+    """
+    return {"PYTHONHASHSEED": str(seed)}
+
+
+def math_env() -> dict[str, str]:
+    """Env vars that force deterministic GPU math.
+
+    **These change results.** ``CUBLAS_WORKSPACE_CONFIG`` constrains cuBLAS
+    algorithm selection, so a measurement taken with it set is not directly
+    comparable to one taken without it — a reproduction can land a few
+    thousandths away from its own reference for this reason alone, and the
+    shift is systematic rather than symmetric noise.
+
+    That is why this is opt-in (``deterministic_math: true`` in the spec)
+    rather than something ``seed:`` turns on behind your back: declaring a seed
+    should not silently redefine the quantity you are reproducing.
+    """
     return {
-        "PYTHONHASHSEED": str(seed),
         # Required by CUDA >= 10.2 for deterministic cuBLAS ops (torch).
         "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
     }
+
+
+def deterministic_env(seed: int) -> dict[str, str]:
+    """Seed + math env together.
+
+    Kept for callers that want both. The runner no longer uses this: it applies
+    :func:`seed_env` for ``seed:`` and :func:`math_env` only when the spec sets
+    ``deterministic_math: true``.
+    """
+    return {**seed_env(seed), **math_env()}
 
 
 def _git(root: Path, *args: str) -> str | None:

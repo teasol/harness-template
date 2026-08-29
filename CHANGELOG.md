@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A Worker can no longer modify the harness itself.** Observed in the field:
+  an agent whose acceptance step failed for an infrastructural reason patched
+  `runner.py` to make it pass. Acceptance run under a harness the agent just
+  rewrote proves nothing, so this is now detected by hashing the package around
+  every invocation, and it is fatal — the task blocks immediately rather than
+  retrying. `AGENTS.md` had always forbidden this; it is now enforced.
+- **A Worker that modifies tracked files it never declared as deliverables now
+  fails the task.** An undeclared change is one nothing checks. New undeclared
+  files are recorded but allowed. Configurable per tier via `guard: strict |
+  warn | off` for labs that develop the harness alongside the project.
+
+### Added
+
+- **`plan approve`, and `plan run` requires it.** A plan is a proposal until a
+  person agrees to it. Approval is fingerprinted against the plan's contents,
+  so editing a plan lapses its approval. Approving prints what it commits you
+  to — module list and the worst-case agent time, which was previously
+  invisible (two modules at six attempts and a 30-minute cap is a six-hour
+  ceiling nobody could see). `--skip-approval` exists for automation.
+- **`executor: planner` on a plan module.** Work that runs an experiment or
+  reads a log does not benefit from Worker isolation, and briefing an agent to
+  do it costs more than doing it. Such modules are never handed to a Worker;
+  `plan run` skips them and names them as the Planner's own.
+- **`deterministic_math: true` on a spec** — see *Changed* below.
+- **`harness setup --check`** smoke-tests each configured tier with one cheap
+  prompt and reports whether the agent actually received it. A platform preset
+  that does not match the installed CLI used to fail silently: six attempts in
+  under a second each, with the agent never having seen the task.
+- **The retry loop stops when it stops making progress.** Three consecutive
+  attempts that leave every deliverable byte-identical hand back to the Planner
+  instead of spending the remaining cap repeating the same failure. An agent
+  invocation that exits non-zero in under five seconds is reported as a worker
+  *configuration* problem and not retried at all.
+
+### Changed
+
+- **`seed:` no longer changes your numbers.** It used to inject
+  `CUBLAS_WORKSPACE_CONFIG=:4096:8` alongside `PYTHONHASHSEED`, which
+  constrains cuBLAS algorithm selection — so declaring a seed silently
+  redefined the quantity being measured, and a reproduction could drift from
+  its own reference for a reason nobody declared. Deterministic math is now
+  opt-in via `deterministic_math: true`. Every variable the harness injects is
+  recorded in provenance and printed in the report.
+  **Migration:** specs that relied on the old behaviour must add
+  `deterministic_math: true`.
+- Attempt logs record the command that actually ran, placeholders resolved,
+  instead of the raw template. The old behaviour printed `{model}` literally
+  and always showed `resume_command`, which reads as a substitution bug during
+  exactly the debugging session it was meant to help.
+- A timed-out attempt now writes an attempt log with whatever the process
+  emitted. The most expensive attempt in a run used to be the only one that
+  left no record at all.
+- Acceptance failures say *why*: the failing step id and the tail of its log
+  travel with the verdict instead of only `acceptance failed`.
+- `plan run` now explains why each remaining module is not running — blocked,
+  waiting on a dependency, claimed, or the Planner's own — instead of
+  `no ready tasks left`.
+- `exp start` copies the project's agent configuration into the new worktree.
+  Without it the worktree found no `agents.yaml` and fell back to the manual
+  adapter silently, so `plan run` wrote briefings and spawned nothing while
+  looking like it had succeeded. `harness status` now distinguishes "manual by
+  choice" from "manual because nothing is configured".
+- Registering a Planner by hand requires `--model`. A run whose Planner model
+  is unknown cannot be compared with any other run; when it is missing, the
+  report says so as a stated caveat and the briefing opens by asking the
+  session to register itself.
+
 ### Fixed
 
 - **Progress was counted across every task file, not the plan's own modules.**

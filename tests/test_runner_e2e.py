@@ -134,3 +134,93 @@ def test_report_records_provenance(tmp_path: Path) -> None:
     assert "## Provenance" in text
     payload = json.loads((Path(result.run_dir) / "report.json").read_text(encoding="utf-8"))
     assert payload["provenance"]["seed"] == 42
+
+
+# ---------------------------------------------------------------------------
+# seeding must not silently redefine the quantity being measured
+
+
+def _env_probe_spec(tmp_path: Path, body: str) -> Path:
+    spec_path = tmp_path / "probe.yaml"
+    spec_path.write_text(body, encoding="utf-8")
+    return spec_path
+
+
+def test_seed_alone_does_not_inject_math_env(tmp_path: Path) -> None:
+    """`seed:` seeds. It must not change which GPU kernels get selected.
+
+    CUBLAS_WORKSPACE_CONFIG constrains cuBLAS algorithm choice, so applying it
+    behind a plain `seed:` would make every harness measurement incomparable to
+    the project's own historical numbers — a reproduction could fail, or worse
+    pass, for a reason nobody declared.
+    """
+    spec_path = _env_probe_spec(
+        tmp_path,
+        """
+name: probe
+seed: 42
+steps:
+  - id: probe
+    run: 'echo "hash=${PYTHONHASHSEED:-unset} cublas=${CUBLAS_WORKSPACE_CONFIG:-unset}"'
+    checks: []
+""",
+    )
+    result = Runner(root=".", results_dir=tmp_path / "results").run(load_spec(spec_path))
+    assert result.success
+    log = Path(result.steps[0].log_path).read_text(encoding="utf-8")
+    assert "hash=42" in log
+    assert "cublas=unset" in log
+    assert result.provenance["injected_env"] == {"PYTHONHASHSEED": "42"}
+    assert result.provenance["deterministic_math"] is False
+
+
+def test_deterministic_math_is_opt_in_and_recorded(tmp_path: Path) -> None:
+    spec_path = _env_probe_spec(
+        tmp_path,
+        """
+name: probe
+seed: 7
+deterministic_math: true
+steps:
+  - id: probe
+    run: 'echo "cublas=${CUBLAS_WORKSPACE_CONFIG:-unset}"'
+    checks: []
+""",
+    )
+    result = Runner(root=".", results_dir=tmp_path / "results").run(load_spec(spec_path))
+    assert result.success
+    assert "cublas=:4096:8" in Path(result.steps[0].log_path).read_text(encoding="utf-8")
+    assert result.provenance["injected_env"]["CUBLAS_WORKSPACE_CONFIG"] == ":4096:8"
+
+    # And it must be impossible to read the report without seeing it.
+    _, md_report = write_reports(result)
+    text = md_report.read_text(encoding="utf-8")
+    assert "Deterministic math is ON" in text
+    assert "CUBLAS_WORKSPACE_CONFIG" in text
+
+
+def test_steps_run_under_bash_not_dash(tmp_path: Path) -> None:
+    """Acceptance steps are written by humans and agents who assume bash.
+
+    `subprocess.run(shell=True)` uses /bin/sh, which on Debian/Ubuntu is dash —
+    so `set -o pipefail`, `[[ ]]` and arrays all fail with an error that names
+    the shell rather than the step, and nothing in the spec schema hints that
+    POSIX sh was the contract. Pinning bash removes the whole class.
+    """
+    spec_path = tmp_path / "bashism.yaml"
+    spec_path.write_text(
+        """
+name: bashism
+steps:
+  - id: pipefail
+    run: |
+      set -euo pipefail
+      arr=(a b c)
+      [[ ${#arr[@]} -eq 3 ]] && echo "bash ok"
+    checks: []
+""",
+        encoding="utf-8",
+    )
+    result = Runner(root=".", results_dir=tmp_path / "results").run(load_spec(spec_path))
+    assert result.success, Path(result.steps[0].log_path).read_text(encoding="utf-8")
+    assert "bash ok" in Path(result.steps[0].log_path).read_text(encoding="utf-8")

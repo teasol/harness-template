@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from harness import checks as checks_mod
-from harness.reproducibility import collect_provenance, deterministic_env
+from harness.reproducibility import collect_provenance, math_env, seed_env
 from harness.spec import Spec, Step
 
 _RUN_ENV_KEYS = ("HARNESS_RESULTS_DIR", "HARNESS_RUN_ID", "HARNESS_PYTHON", "HARNESS_SEED")
@@ -93,12 +93,21 @@ class Runner:
         else:
             os.environ.pop("HARNESS_SEED", None)
 
+        # Recorded in provenance so a reader can tell what the harness changed
+        # about the environment. A number measured under CUBLAS_WORKSPACE_CONFIG
+        # is not comparable to one measured without it, so this must never be
+        # invisible.
+        injected: dict[str, str] = {}
+        if spec.seed is not None:
+            injected.update(seed_env(spec.seed))
+        if spec.deterministic_math:
+            injected.update(math_env())
+
         step_results: list[StepResult] = []
         try:
             base_env = os.environ.copy()
             base_env["PYTHONPATH"] = _python_path(self.root, base_env.get("PYTHONPATH"))
-            if spec.seed is not None:
-                base_env.update(deterministic_env(spec.seed))
+            base_env.update(injected)
             for index, step in enumerate(spec.steps):
                 result = self._run_step(step, index, base_env, logs_dir)
                 step_results.append(result)
@@ -113,6 +122,9 @@ class Runner:
 
         finished = _utcnow()
         all_steps_ran = len(step_results) == len(spec.steps)
+        provenance = collect_provenance(self.root, seed=spec.seed)
+        provenance["injected_env"] = dict(injected)
+        provenance["deterministic_math"] = spec.deterministic_math
         return RunResult(
             spec_name=spec.name,
             started_at=started.isoformat(),
@@ -120,7 +132,7 @@ class Runner:
             success=bool(step_results) and all_steps_ran and all(r.success for r in step_results),
             run_dir=str(run_dir),
             steps=step_results,
-            provenance=collect_provenance(self.root, seed=spec.seed),
+            provenance=provenance,
         )
 
     def _run_step(
@@ -144,6 +156,7 @@ class Runner:
             proc = subprocess.run(  # noqa: S602 - shell commands are the point of specs
                 step.run,
                 shell=True,
+                executable="/bin/bash",
                 cwd=str(cwd),
                 env=step_env,
                 capture_output=True,

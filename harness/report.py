@@ -33,7 +33,7 @@ def _provenance_lines(result: RunResult) -> list[str]:
     commit = prov.get("git_commit") or "unknown"
     if prov.get("git_dirty"):
         commit += " (dirty worktree — uncommitted changes)"
-    return [
+    lines = [
         "## Provenance",
         "",
         f"- Commit: `{commit}`",
@@ -42,8 +42,23 @@ def _provenance_lines(result: RunResult) -> list[str]:
         f"- Platform: {prov.get('platform') or 'unknown'}",
         f"- Harness: {prov.get('harness_version') or 'unknown'}",
         f"- Seed: {prov.get('seed') if prov.get('seed') is not None else '(none declared)'}",
-        "",
     ]
+    # Anything the harness put into the step environment has to be visible: a
+    # number measured under CUBLAS_WORKSPACE_CONFIG is not comparable to one
+    # measured without it, and that must not be a hidden variable.
+    injected = prov.get("injected_env")
+    if isinstance(injected, dict) and injected:
+        rendered = ", ".join(f"`{k}={v}`" for k, v in sorted(injected.items()))
+        lines.append(f"- Injected env: {rendered}")
+    else:
+        lines.append("- Injected env: (none)")
+    if prov.get("deterministic_math"):
+        lines.append(
+            "- **Deterministic math is ON** — results are not directly comparable "
+            "to measurements taken without it."
+        )
+    lines.append("")
+    return lines
 
 
 def _markdown(result: RunResult) -> str:

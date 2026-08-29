@@ -156,6 +156,11 @@ class Module:
     id: str
     title: str
     brief: str
+    #: Who builds this. ``worker`` spawns an agent against the brief;
+    #: ``planner`` means the Planner does it directly — the right choice when
+    #: the module runs an experiment or reads logs rather than writing code,
+    #: where briefing a Worker costs more than doing the work.
+    executor: str = "worker"
     depends_on: list[str] = dataclasses.field(default_factory=list)
     deliverables: list[str] = dataclasses.field(default_factory=list)
     constraints: list[str] = dataclasses.field(default_factory=list)
@@ -317,10 +322,17 @@ def _module_from_dict(entry: Any) -> Module:
     except SpecError as exc:
         raise PlanError(f"module '{module_id}': invalid acceptance: {exc}") from exc
 
+    executor = str(entry.get("executor", "worker"))
+    if executor not in ("worker", "planner"):
+        raise PlanError(
+            f"module '{module_id}': unknown executor '{executor}'. available: worker, planner"
+        )
+
     return Module(
         id=module_id,
         title=str(entry.get("title", module_id)),
         brief=brief,
+        executor=executor,
         depends_on=[str(d) for d in depends_on],
         deliverables=[str(d) for d in entry.get("deliverables", [])],
         constraints=[str(c) for c in entry.get("constraints", [])],
@@ -361,3 +373,85 @@ def _validate_dag(modules: list[Module]) -> None:
         if module.depends_on and module.id in module.depends_on:
             raise PlanError(f"module '{module.id}' depends on itself")
     Plan(name="_dag", goal="_", modules=modules).topological_order()
+
+
+# ---------------------------------------------------------------------------
+# Approval — a plan is a proposal until someone says otherwise
+
+
+def plan_fingerprint(path: str | Path) -> str:
+    """sha256 of the plan file, so an approval cannot outlive the plan it read."""
+    import hashlib
+
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def approval_path(plan_path: str | Path) -> Path:
+    """Where a plan's approval record lives — beside the plan, not in results.
+
+    Approval is part of the experiment's record, so it belongs with the plan on
+    the branch rather than in a gitignored results directory.
+    """
+    plan_path = Path(plan_path)
+    return plan_path.with_suffix(plan_path.suffix + ".approved")
+
+
+def estimate_cost(plan: Plan, attempts: int, timeout: float) -> dict[str, Any]:
+    """A worst case, stated up front.
+
+    A plan looks cheap when the expensive part is invisible. Two Worker modules
+    at six attempts and a thirty-minute cap is a six-hour ceiling, and nobody
+    approving the plan can see that unless it is written down.
+    """
+    worker_modules = [m for m in plan.modules if m.executor == "worker"]
+    planner_modules = [m for m in plan.modules if m.executor == "planner"]
+    return {
+        "worker_modules": len(worker_modules),
+        "planner_modules": len(planner_modules),
+        "attempts_per_module": attempts,
+        "timeout_s": timeout,
+        "worst_case_s": len(worker_modules) * attempts * timeout,
+    }
+
+
+def record_approval(plan_path: str | Path, by: str, note: str = "") -> Path:
+    """Record that a human agreed to this exact plan."""
+    from datetime import datetime, timezone
+
+    plan_path = Path(plan_path)
+    target = approval_path(plan_path)
+    target.write_text(
+        yaml.safe_dump(
+            {
+                "plan": str(plan_path.name),
+                "fingerprint": plan_fingerprint(plan_path),
+                "approved_by": by,
+                "approved_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "note": note,
+            },
+            sort_keys=False,
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    return target
+
+
+def approval_status(plan_path: str | Path) -> tuple[bool, str]:
+    """Return ``(approved, reason)`` for the plan file as it stands right now."""
+    plan_path = Path(plan_path)
+    record = approval_path(plan_path)
+    if not record.is_file():
+        return False, "this plan has never been approved"
+    try:
+        data = yaml.safe_load(record.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        return False, f"approval record is unreadable: {exc}"
+    recorded = str(data.get("fingerprint", ""))
+    current = plan_fingerprint(plan_path)
+    if recorded != current:
+        return False, (
+            f"the plan changed after it was approved by "
+            f"{data.get('approved_by', 'someone')} at {data.get('approved_at', 'unknown time')}"
+        )
+    return True, f"approved by {data.get('approved_by')} at {data.get('approved_at')}"

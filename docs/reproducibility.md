@@ -15,8 +15,18 @@ flagged, because they cannot be reconstructed from a commit.
 
 ## 1. Seeds
 
-- Declare a `seed` in the spec; the runner exports `PYTHONHASHSEED` and
-  `CUBLAS_WORKSPACE_CONFIG=:4096:8` to every step.
+- Declare a `seed` in the spec; the runner exports `PYTHONHASHSEED` to every
+  step. Seeding is safe: nothing here changes which kernels a numerical
+  library selects, so numbers stay comparable to runs made outside the harness.
+- **Deterministic GPU math is separate, and opt-in.** Setting
+  `deterministic_math: true` exports `CUBLAS_WORKSPACE_CONFIG=:4096:8`, which
+  constrains cuBLAS algorithm selection and therefore **changes your numbers**.
+  A measurement taken with it set is not directly comparable to one taken
+  without it — the difference is a small systematic shift, not symmetric noise,
+  which is exactly the kind of thing that silently eats a reproduction
+  tolerance. Turn it on when you are chasing bit-level determinism; leave it
+  off when you are reproducing a historical measurement that was taken without
+  it. Either way the choice is recorded in provenance and shown in the report.
 - In-process code should call `harness.reproducibility.set_all_seeds(seed)`,
   which seeds stdlib `random`, `numpy`, and `torch` (whichever are importable).
 - Never use unseeded RNGs in committed code paths. Data loading shuffles,

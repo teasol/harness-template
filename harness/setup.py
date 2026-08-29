@@ -14,6 +14,8 @@ module reads that file; it hardcodes no vendor, no flag, and no model name.
 from __future__ import annotations
 
 import dataclasses
+import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -218,3 +220,107 @@ def write_agent_config(
     )
     target.write_text(HEADER + body, encoding="utf-8")
     return target
+
+
+# ---------------------------------------------------------------------------
+# connectivity check
+
+
+@dataclasses.dataclass
+class CheckOutcome:
+    """Result of smoke-testing one tier's configured command."""
+
+    tier: str
+    adapter: str
+    ok: bool
+    detail: str
+    command: str = ""
+    duration_s: float = 0.0
+
+
+#: A prompt cheap enough to be free and specific enough that a reply proves the
+#: agent actually received it — which is exactly what a misrouted prompt breaks.
+PROBE_PROMPT = "Reply with exactly this token and nothing else: HARNESS_OK"
+PROBE_TOKEN = "HARNESS_OK"
+PROBE_TIMEOUT = 180
+
+
+def check_tier(section: str = "worker", root: str | Path = ".", timeout: int = PROBE_TIMEOUT):
+    """Verify that the configured agent command actually runs and gets the prompt.
+
+    A platform preset is a guess about someone else's CLI, and CLIs change. When
+    the guess is wrong the failure is silent and expensive: the harness kept
+    handing the briefing to a command that consumed it as a flag, so six
+    attempts "failed" in under a second each with the agent never having seen
+    the task at all. One probe at setup time replaces that entire class of
+    debugging.
+    """
+    from harness.worker import AgentConfig, WorkerError, load_agent_config, render_command
+
+    root = Path(root).resolve()
+    try:
+        config = load_agent_config(section, root=root)
+    except WorkerError as exc:
+        return CheckOutcome(section, "unknown", False, f"config is invalid: {exc}")
+
+    if config.adapter == "manual":
+        return CheckOutcome(
+            section, "manual", True, "manual adapter — nothing is spawned, nothing to check"
+        )
+
+    probe = AgentConfig(**{**dataclasses.asdict(config), "timeout": timeout})
+    brief_path = root / ".harness-probe.md"
+    rendered = render_command(
+        probe, root, brief_path, first_attempt=True, task_id="probe", task_file=str(brief_path)
+    )
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(  # noqa: S602 - the command is the lab's configuration
+            rendered,
+            shell=True,
+            cwd=str(root),
+            input=PROBE_PROMPT,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return CheckOutcome(
+            section,
+            config.adapter,
+            False,
+            f"no reply within {timeout}s — the command may be waiting for input",
+            rendered,
+            time.monotonic() - started,
+        )
+    except OSError as exc:
+        return CheckOutcome(
+            section, config.adapter, False, f"could not run the command: {exc}", rendered
+        )
+    duration = time.monotonic() - started
+    output = f"{proc.stdout}\n{proc.stderr}"
+
+    if proc.returncode != 0:
+        first = next((ln for ln in output.splitlines() if ln.strip()), "(no output)")
+        return CheckOutcome(
+            section,
+            config.adapter,
+            False,
+            f"exited {proc.returncode}: {first[:200]}",
+            rendered,
+            duration,
+        )
+    if PROBE_TOKEN not in proc.stdout:
+        return CheckOutcome(
+            section,
+            config.adapter,
+            False,
+            "ran, but the reply did not contain the probe token — the briefing is "
+            "probably not reaching the agent on stdin",
+            rendered,
+            duration,
+        )
+    return CheckOutcome(
+        section, config.adapter, True, "received the prompt and replied", rendered, duration
+    )

@@ -24,7 +24,7 @@ yourself** — reporting is the Planner's job, merging is the researcher's.
 You are always acting in ONE of three roles — know which:
 
 - **Planner** (agents/planner.md): own plans, module DAGs, contracts, acceptance, the integration spec, and the experiment report. Work inside your experiment's worktree. Never write module code.
-- **Worker** (agents/worker.md): claim exactly one task, implement it fully against the task file's brief and contract, verify, mark done. Never touch other modules, the plan, or `harness/`.
+- **Worker** (agents/worker.md): claim exactly one task, implement it fully against the task file's brief and contract, verify, mark done. Never touch other modules, the plan, or `harness/` — **this is enforced, not merely asked**: the harness hashes its own package around every invocation and fails the task outright if it changed, and fails it too if you modified a tracked file you never declared as a deliverable. If acceptance fails for an infrastructural reason, say so in your output and stop; do not fix the harness.
 - **Maintainer** (default): work on project code, CI, or docs. Follow the rules below.
 
 ## Non-negotiable rules

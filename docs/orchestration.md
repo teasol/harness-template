@@ -72,6 +72,7 @@ plan:
   modules:                 # required, non-empty; forms a DAG
     - id: module-a         # unique
       title: ...           # human label
+      executor: worker     # worker (default) | planner — see below
       depends_on: []       # ids of modules whose outputs this consumes
       deliverables: [src/x/a.py]
       contract:
@@ -91,6 +92,46 @@ Validation enforces: unique ids, resolvable `depends_on`, acyclic DAG,
 non-empty brief and acceptance per module, known check types, deliverables
 owned by exactly one module, report paths that stay inside the experiment, and
 (if set) an existing integration spec file.
+
+### Who builds a module: `executor`
+
+`worker` (the default) spawns an agent against the brief. `planner` means the
+Planner does the work itself — no Worker, no retry loop — while the module
+keeps its contract, deliverables and acceptance exactly as before.
+
+Choose `planner` when the module does not write new code:
+
+| The module mainly... | executor |
+| --- | --- |
+| runs an experiment, drives a job, orchestrates existing scripts | `planner` |
+| reads logs and interprets results | `planner` |
+| implements something new, with tests | `worker` |
+
+The isolation a Worker buys is only worth its price when new code is being
+written. Briefing an agent to run a job you could run yourself costs more than
+running it — in one real experiment a wrapper script that called an existing
+evaluation script consumed 45 minutes of Worker time against 21 minutes of
+actual evaluation.
+
+`plan run` skips `planner` modules and names them; you run them, then
+`task verify` and `task done --by planner` as usual.
+
+## Approval (`plan approve`)
+
+A plan is a proposal until a person agrees to it. `plan run` refuses to start
+until the plan has been approved, and prints what approving would commit you to
+— the module list and the worst-case agent time:
+
+```bash
+python -m harness plan approve plans/my-plan.yaml --by researcher
+python -m harness plan run plans/my-plan.yaml
+```
+
+Approval is fingerprinted against the plan file's contents and stored beside it
+as `plans/my-plan.yaml.approved`, so it travels with the branch and **lapses
+the moment the plan is edited**. `plan validate` and `plan materialize` stay
+unguarded — they cost nothing. `--skip-approval` exists for automation that
+approved elsewhere.
 
 ## Task schema (`tasks/*.task.yaml`)
 
