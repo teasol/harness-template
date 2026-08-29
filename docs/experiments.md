@@ -23,6 +23,18 @@ flowchart TD
     R -->|"researcher's call"| M["git merge exp/&lt;name&gt;"]
 ```
 
+## The question comes first
+
+```bash
+harness exp start <name> --question "what you actually want to know"
+```
+
+An experiment starts from a question, so the question is stored with it
+(`experiments/<name>/question.md`, committed) and placed at the top of the
+Planner's briefing. A Planner spawned by `planner run` has no other way to
+learn what is being asked: the question's permanent home is the plan's
+`report.question`, and the plan is the thing the Planner has not written yet.
+
 ## Why worktrees
 
 A worktree is a second working directory backed by the same repository. Several
@@ -48,7 +60,7 @@ together; the door stays open.
 
 | Command | Purpose |
 | --- | --- |
-| `harness exp start <name> [--base main] [--path DIR]` | Create branch `exp/<name>` + worktree, scaffold `plans/<name>.yaml` |
+| `harness exp start <name> [--question "..."] [--base main]` | Create branch `exp/<name>` + worktree, store the question, scaffold `plans/<name>.yaml` and its integration spec |
 | `harness exp list` | Every experiment worktree git knows about |
 | `harness exp report <name> [--no-run] [--determinism] [--save]` | Build the researcher's decision aid; exits non-zero unless merge-ready |
 | `harness exp remove <name> [--force]` | Remove the worktree; **the branch is kept** — it is the record of the attempt |
@@ -241,7 +253,7 @@ lives only under `results/` and is gitignored.
 
 ```bash
 # Researcher
-python -m harness exp start sparse-attn --base main
+python -m harness exp start sparse-attn --question "does top-k attention keep the mass?"
 python -m harness planner brief sparse-attn --register session-01
 
 # Planner, inside .experiments/sparse-attn/

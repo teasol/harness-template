@@ -394,10 +394,13 @@ def test_status_reports_the_worker_adapter(clone: Path) -> None:
     exp_mod.start("w", root=clone)
     assert exp_mod.project_status(clone, cwd=clone).worker_adapter == "manual"
 
-    (clone / "configs" / "worker.yaml").write_text(
-        "worker:\n  adapter: cli\n  command: 'true'\n", encoding="utf-8"
+    (clone / "configs" / "agents.yaml").write_text(
+        "planner:\n  adapter: cli\n  command: 'true'\nworker:\n  adapter: cli\n  command: 'true'\n",
+        encoding="utf-8",
     )
-    assert exp_mod.project_status(clone, cwd=clone).worker_adapter == "cli"
+    status = exp_mod.project_status(clone, cwd=clone)
+    assert status.worker_adapter == "cli"
+    assert status.planner_tier["adapter"] == "cli"
 
 
 # ---------------------------------------------------------------------------
@@ -479,3 +482,25 @@ def test_planner_gives_up_and_says_so(clone: Path) -> None:
     assert outcome.status == "incomplete"
     assert len(outcome.attempts) == 2
     assert "researcher should look at it" in outcome.message
+
+
+@needs_git
+def test_the_question_reaches_the_planner(clone: Path) -> None:
+    """A spawned Planner must read what the researcher actually asked."""
+    question = "Are there more AABB-splittable primes than prime birthdays?"
+    experiment = exp_mod.start("asked", root=clone, question=question)
+
+    assert experiment.question == question
+    assert experiment.question_path.is_file()  # committed with the experiment
+    brief = exp_mod.planner_brief("asked", root=clone)
+    assert "## The researcher's question" in brief
+    assert question in brief
+    # It is also seeded into the scaffold, where it becomes report.question.
+    assert question in experiment.plan_path.read_text(encoding="utf-8")
+
+
+@needs_git
+def test_an_experiment_without_a_question_still_works(clone: Path) -> None:
+    experiment = exp_mod.start("unasked", root=clone)
+    assert experiment.question == ""
+    assert "## The researcher's question" not in exp_mod.planner_brief("unasked", root=clone)

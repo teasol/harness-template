@@ -25,6 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`harness exp start --question "..."`** — the research question, verbatim,
+  stored with the experiment and placed at the top of the Planner's briefing.
+  Without it a spawned Planner had no way to learn what was being asked: the
+  question lived in the plan's `report.question`, which is the very thing the
+  Planner has not written yet.
+
+### Fixed
+
+- Agent presets ran with permissions that allow edits but not execution, so a
+  Planner wrote a complete, valid plan and then stopped to ask permission to
+  run `plan materialize`. An unattended agent must be able to run the commands
+  it is judged by. Found on the first live run, and now covered by a test.
+
 - **Both tiers are configured, and both can be spawned.** `harness setup` now
   sets up the Planner *and* the Worker — platform, model, reasoning level, and
   retry cap each — writing `configs/agents.yaml` with the two side by side.

@@ -55,6 +55,17 @@ class Experiment:
     def plan_path(self) -> Path:
         return self.path / "plans" / f"{self.name}.yaml"
 
+    @property
+    def question_path(self) -> Path:
+        """The researcher's question, verbatim, committed with the experiment."""
+        return self.path / "experiments" / self.name / "question.md"
+
+    @property
+    def question(self) -> str:
+        if self.question_path.is_file():
+            return self.question_path.read_text(encoding="utf-8").strip()
+        return ""
+
 
 @dataclasses.dataclass
 class MetricValue:
@@ -164,7 +175,7 @@ plan:
   # this experiment — a report may not read another experiment's results.
   report:
     question: |
-      TODO: the researcher's instruction, verbatim.
+      {question}
     metrics:
       - name: TODO_metric
         source: ${{HARNESS_RESULTS_DIR}}/metrics.json
@@ -200,6 +211,7 @@ def start(
     worktree_root: str | Path = DEFAULT_WORKTREE_ROOT,
     base: str = "HEAD",
     scaffold: bool = True,
+    question: str = "",
 ) -> Experiment:
     """Create an experiment: a branch and a worktree to develop it in."""
     if not NAME_RE.match(name):
@@ -223,10 +235,24 @@ def start(
     experiment = Experiment(
         name=name, branch=branch, path=path, head=_git(path, "rev-parse", "HEAD")
     )
+    if question.strip():
+        # An experiment starts from a question. Storing it verbatim means a
+        # Planner spawned later reads what the researcher actually asked,
+        # rather than a paraphrase that passed through someone's summary.
+        experiment.question_path.parent.mkdir(parents=True, exist_ok=True)
+        experiment.question_path.write_text(question.strip() + "\n", encoding="utf-8")
     if scaffold:
         if not experiment.plan_path.exists():
             experiment.plan_path.parent.mkdir(parents=True, exist_ok=True)
-            experiment.plan_path.write_text(PLAN_TEMPLATE.format(name=name), encoding="utf-8")
+            experiment.plan_path.write_text(
+                PLAN_TEMPLATE.format(
+                    name=name,
+                    question=(
+                        question.strip() or "TODO: the researcher's instruction, verbatim."
+                    ).replace("\n", "\n      "),
+                ),
+                encoding="utf-8",
+            )
         # Scaffold the integration spec the plan points at, so the Planner's
         # first validation error is about the TODOs it must fill in, not about
         # a file the scaffold neglected to create.
@@ -576,6 +602,19 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
     lines = [
         f"# You are the Planner for experiment '{experiment.name}'",
         "",
+    ]
+    if experiment.question:
+        lines += [
+            "## The researcher's question",
+            "",
+            experiment.question,
+            "",
+            "Everything below serves answering exactly this. Do not widen it, and",
+            "do not narrow it; if it is genuinely ambiguous, pick the reading a",
+            "careful colleague would and state the assumption in the plan's goal.",
+            "",
+        ]
+    lines += [
         "Read agents/planner.md and follow it. You own this experiment end to end:",
         "decompose the goal into modules, hand them to Workers, verify, and report",
         "back. You never write module code, and you never merge — merging is the",

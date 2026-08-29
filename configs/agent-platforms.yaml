@@ -10,6 +10,14 @@
 # FLAGS GO STALE. Each entry was checked against a real installation, but your
 # version may differ — run `<tool> --help` if a command misbehaves, then fix it
 # here. A preset is a starting point, not a promise.
+#
+# PERMISSIONS. An unattended agent must be able to edit files AND run commands:
+# a Planner runs `harness plan materialize` and `plan run`, a Worker runs the
+# tests it is being judged on. A mode that only accepts edits leaves the agent
+# writing a correct plan and then stopping to ask permission — which is exactly
+# what happened the first time these presets were used. Run agents where you
+# are willing to let them execute: an experiment worktree is isolated and its
+# branch is disposable, which is the point.
 
 platforms:
   claude:
@@ -17,10 +25,10 @@ platforms:
     docs: claude --help
     command: >-
       claude -p --model {model} --effort {effort}
-      --permission-mode acceptEdits --add-dir {root}
+      --permission-mode bypassPermissions --add-dir {root}
     resume_command: >-
       claude -p --continue --model {model} --effort {effort}
-      --permission-mode acceptEdits --add-dir {root}
+      --permission-mode bypassPermissions --add-dir {root}
     efforts: [low, medium, high, xhigh, max]
     default_effort: low
     model_hint: "an alias (fable, opus, sonnet, haiku) or a full model id"
@@ -32,7 +40,7 @@ platforms:
     # Attaching an already-open session instead of starting a fresh one.
     session_command: >-
       claude -p --resume {session} --model {model} --effort {effort}
-      --permission-mode acceptEdits --add-dir {root}
+      --permission-mode bypassPermissions --add-dir {root}
     reads_brief_from: stdin
 
   codex:

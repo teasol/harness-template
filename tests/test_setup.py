@@ -123,3 +123,16 @@ def test_a_command_wanting_a_model_without_one_is_refused() -> None:
         AgentConfig.from_dict({"adapter": "cli", "command": "agent --model {model}"})
     with pytest.raises(WorkerError, match="no 'effort' is set"):
         AgentConfig.from_dict({"adapter": "cli", "command": "agent --effort {effort}"})
+
+
+def test_presets_let_an_agent_actually_run_things() -> None:
+    """Unattended agents must be able to execute, not only edit.
+
+    The first live run produced a correct plan and then stopped to ask for
+    permission to run `plan materialize`, because the preset only accepted
+    edits. A preset that cannot execute is a preset that cannot finish.
+    """
+    platforms = load_platforms(root=".")
+    assert "acceptEdits" not in platforms["claude"].command
+    assert "bypassPermissions" in platforms["claude"].command
+    assert "bypassPermissions" in platforms["claude"].resume_command

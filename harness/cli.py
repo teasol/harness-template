@@ -22,7 +22,7 @@ Usage::
     python -m harness task done --id <id> [--by <agent>] [--tasks-dir tasks]
 
     # Experiments (researcher <-> Planner): one hypothesis per branch+worktree
-    python -m harness exp start <name> [--base main] [--path DIR]
+    python -m harness exp start <name> [--question "..."] [--base main]
     python -m harness exp list
     python -m harness exp report <name> [--no-run] [--determinism] [--save]
     python -m harness exp remove <name> [--force]
@@ -492,6 +492,11 @@ def build_parser() -> argparse.ArgumentParser:
     exp_start.add_argument("name", help="Experiment name (lowercase, hyphens)")
     exp_start.add_argument("--base", default="HEAD", help="Commit/branch to branch from")
     exp_start.add_argument(
+        "--question",
+        default=None,
+        help="The research question, verbatim — carried to the Planner and the report",
+    )
+    exp_start.add_argument(
         "--path",
         default=exp_mod.DEFAULT_WORKTREE_ROOT,
         help="Directory holding experiment worktrees",
@@ -593,7 +598,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 def cmd_exp_start(args: argparse.Namespace) -> int:
     try:
         experiment = exp_mod.start(
-            args.name, root=args.root, worktree_root=args.path, base=args.base
+            args.name,
+            root=args.root,
+            worktree_root=args.path,
+            base=args.base,
+            question=args.question or "",
         )
     except ExperimentError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -602,6 +611,8 @@ def cmd_exp_start(args: argparse.Namespace) -> int:
     print(f"  branch:   {experiment.branch}")
     print(f"  worktree: {experiment.path}")
     print(f"  plan:     {experiment.plan_path}")
+    if experiment.question:
+        print(f"  question: {experiment.question.splitlines()[0][:70]}")
     print()
     print("Next (Planner, from inside the worktree):")
     print(f"  cd {experiment.path}")

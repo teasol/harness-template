@@ -36,8 +36,13 @@ someone else's finished task board.
 An experiment is **one question**:
 
 ```bash
-python -m harness exp start sparse-attention
+python -m harness exp start sparse-attention --question "
+Does keeping only the top 10% of attention weights preserve most of the
+attention mass? Report the retained mass and the fraction kept."
 ```
+
+The question is stored verbatim and put at the top of the Planner's briefing,
+so a Planner you spawn reads what you actually asked rather than a paraphrase.
 
 This creates the branch `exp/sparse-attention` and a separate working directory
 (a git *worktree*) under `.experiments/`. Several experiments coexist without
