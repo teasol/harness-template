@@ -10,7 +10,6 @@ from harness import task as task_mod
 from harness.plan import load_plan
 from harness.task import TaskError
 
-
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 
