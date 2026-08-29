@@ -40,6 +40,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from harness import experiment as exp_mod
+from harness import heartbeat
 from harness import plan as plan_mod
 from harness import planners as planners_mod
 from harness import project as project_mod
@@ -630,6 +631,22 @@ def build_parser() -> argparse.ArgumentParser:
     setup_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
     setup_cmd.set_defaults(func=cmd_setup)
 
+    progress_cmd = sub.add_parser(
+        "progress", help="Where the harness is right now (run it in another terminal)"
+    )
+    progress_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    progress_cmd.add_argument("--results-dir", default="results")
+    progress_cmd.add_argument(
+        "--watch",
+        nargs="?",
+        type=float,
+        const=5.0,
+        default=None,
+        metavar="SECONDS",
+        help="Refresh until interrupted (default every 5s)",
+    )
+    progress_cmd.set_defaults(func=cmd_progress)
+
     project_cmd = sub.add_parser(
         "project", help="What a Planner must know before it plans anything here"
     )
@@ -843,6 +860,7 @@ def cmd_task_run(args: argparse.Namespace) -> int:
             root=args.root,
             results_dir=args.results_dir,
             worker_name=args.by,
+            progress=_flushing_printer,
         )
     except (TaskError, WorkerError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -887,6 +905,16 @@ def cmd_plan_approve(args: argparse.Namespace) -> int:
     print(f"approved by {args.by} — recorded in {record}")
     print("The approval is tied to the plan's contents: edit the plan and it lapses.")
     return 0
+
+
+def _flushing_printer(line: str) -> None:
+    """Print progress as it happens, not when the buffer decides to.
+
+    `plan run` can sit for half an hour inside one attempt; a line that arrives
+    only at the end is not progress reporting.
+    """
+    print(line)
+    sys.stdout.flush()
 
 
 def cmd_plan_run(args: argparse.Namespace) -> int:
@@ -945,7 +973,10 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
         if not ready:
             break
         task_id = ready[0]
-        print(f"--- running task '{task_id}' ---")
+        total_modules = len(plan.modules)
+        module_index = plan.topological_order().index(task_id) + 1
+        print(f"--- running task '{task_id}' (module {module_index}/{total_modules}) ---")
+        sys.stdout.flush()
         try:
             outcome = run_task(
                 tasks_dir,
@@ -953,6 +984,8 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
                 config=config,
                 root=args.root,
                 results_dir=args.results_dir,
+                position=(module_index, total_modules),
+                progress=_flushing_printer,
             )
         except (TaskError, WorkerError) as exc:
             print(f"error: {exc}", file=sys.stderr)
@@ -990,6 +1023,42 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
             print(f"  {task.id:<24} {why}")
         return 1
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Progress
+
+
+def cmd_progress(args: argparse.Namespace) -> int:
+    """Say where the harness is right now — from a second terminal, while it works."""
+    import time as _time
+
+    results_dir = Path(args.root) / args.results_dir
+
+    def render() -> int:
+        beat = heartbeat.read(results_dir)
+        if beat is None:
+            print("Nothing running.")
+            print(f"  (looked in {heartbeat.heartbeat_path(results_dir)})")
+            return 1
+        print(beat.describe())
+        if beat.detail.get("log"):
+            print(f"  output so far: {beat.detail['log']}")
+        if beat.pid:
+            print(f"  pid {beat.pid}")
+        return 0
+
+    if not args.watch:
+        return render()
+
+    try:
+        while True:
+            print("\033[2J\033[H", end="")
+            print(f"harness progress — refreshing every {args.watch}s, Ctrl-C to stop\n")
+            render()
+            _time.sleep(args.watch)
+    except KeyboardInterrupt:
+        return 0
 
 
 # ---------------------------------------------------------------------------
@@ -1146,6 +1215,14 @@ def cmd_planner_brief(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     status = exp_mod.project_status(args.root)
     print(f"Project: {status.project_name}\n")
+
+    # What is happening *now* outranks what the board says, and is the one
+    # thing a stale-looking board cannot tell you.
+    beat = heartbeat.read(Path(args.root) / "results")
+    if beat is not None:
+        print(f"  RUNNING NOW: {beat.describe()}")
+        print("  watch it:    harness progress --watch\n")
+
     print(status.headline)
 
     if status.experiments:

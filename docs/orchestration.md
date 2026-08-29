@@ -116,6 +116,32 @@ actual evaluation.
 `plan run` skips `planner` modules and names them; you run them, then
 `task verify` and `task done --by planner` as usual.
 
+## Watching a run that has not finished
+
+`plan run` and `harness verify` block, and a child's output is buffered until
+it exits — so a Worker attempt with a thirty-minute cap shows nothing for
+thirty minutes. From a second terminal:
+
+```bash
+python -m harness progress            # once
+python -m harness progress --watch    # until you stop it
+```
+
+```
+worker primary7-runner (module 1/2 · attempt 2/6) · running 12m30s · 17m30s before the cap
+  output so far: results/workers/primary7-runner
+  pid 1196982
+```
+
+The position comes from the plan, which is serial: module *m* of *n*, attempt
+*a* of *b*, or step *s* of *t* inside a spec. `harness status` shows the same
+line above everything else.
+
+The timestamp keeps ticking while work runs, which answers the other question a
+long wait raises: **is it still alive?** A heartbeat that stopped ticking is
+reported as dead rather than slow, because a process killed mid-attempt leaves
+its heartbeat behind and would otherwise look like very slow progress.
+
 ## Approval (`plan approve`)
 
 A plan is a proposal until a person agrees to it. `plan run` refuses to start

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from harness import checks as checks_mod
+from harness import heartbeat
 from harness.reproducibility import collect_provenance, math_env, seed_env
 from harness.spec import Spec, Step
 
@@ -133,7 +134,7 @@ class Runner:
             base_env["PYTHONPATH"] = _python_path(self.root, base_env.get("PYTHONPATH"))
             base_env.update(injected)
             for index, step in enumerate(spec.steps):
-                result = self._run_step(step, index, base_env, logs_dir)
+                result = self._run_step(step, index, base_env, logs_dir, len(spec.steps), spec.name)
                 step_results.append(result)
                 if stop_on_failure and not result.success:
                     break
@@ -165,6 +166,8 @@ class Runner:
         index: int,
         base_env: dict[str, str],
         logs_dir: Path,
+        total_steps: int = 0,
+        spec_name: str = "",
     ) -> StepResult:
         log_path = logs_dir / f"{index:02d}-{step.id}.log"
         step_env = dict(base_env)
@@ -176,18 +179,29 @@ class Runner:
         stdout = ""
         stderr = ""
         timed_out = False
+        # A step's output is buffered until it exits, so without this a long
+        # step is indistinguishable from a hung one for its whole duration.
+        beat = heartbeat.Beat(
+            self.results_dir,
+            activity="step",
+            label=step.id,
+            position=f"{index + 1}/{total_steps}" if total_steps else "",
+            timeout_s=step.timeout,
+            detail={"spec": spec_name, "log": str(log_path)},
+        )
         try:
-            proc = subprocess.run(  # noqa: S602 - shell commands are the point of specs
-                step.run,
-                shell=True,
-                executable="/bin/bash",
-                cwd=str(cwd),
-                env=step_env,
-                capture_output=True,
-                text=True,
-                timeout=step.timeout,
-                check=False,
-            )
+            with beat:
+                proc = subprocess.run(  # noqa: S602 - shell commands are the point of specs
+                    step.run,
+                    shell=True,
+                    executable="/bin/bash",
+                    cwd=str(cwd),
+                    env=step_env,
+                    capture_output=True,
+                    text=True,
+                    timeout=step.timeout,
+                    check=False,
+                )
             exit_code, stdout, stderr = proc.returncode, proc.stdout, proc.stderr
         except subprocess.TimeoutExpired as exc:
             timed_out = True

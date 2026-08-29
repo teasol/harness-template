@@ -49,6 +49,7 @@ python -m harness task list|show|claim|block|verify|done --id <id>
 python -m harness task verify --all [--status done]       # audit the board
 python -m harness task run --id <id>                      # invoke a Worker + verify
 python -m harness plan run <plan>.yaml                    # drain the ready queue
+python -m harness progress [--watch]                      # where it is right now
 ```
 
 Experiment commands (Tier 1 boundary):

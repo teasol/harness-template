@@ -33,12 +33,13 @@ import dataclasses
 import json
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from harness import guard
+from harness import guard, heartbeat
 from harness.paths import get_agents_config_path
 from harness.report import write_reports
 from harness.runner import RunResult
@@ -419,6 +420,8 @@ def run_task(
     root: str | Path = ".",
     results_dir: str | Path = "results",
     worker_name: str | None = None,
+    position: tuple[int, int] | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> WorkerOutcome:
     """Invoke a Worker on one task, verifying and retrying until the cap.
 
@@ -440,6 +443,7 @@ def run_task(
     brief_dir = Path(results_dir)
     if not brief_dir.is_absolute():
         brief_dir = root / brief_dir
+    results_root = brief_dir
     brief_dir = brief_dir / "workers" / task.id
     brief_dir.mkdir(parents=True, exist_ok=True)
     brief_path = brief_dir / "brief.md"
@@ -501,16 +505,38 @@ def run_task(
                 encoding="utf-8",
             )
 
-        try:
-            proc = invoke_agent(
-                config,
-                root,
-                prompt,
-                brief_path,
-                first_attempt=number == 1,
-                task_id=task.id,
-                task_file=str(task.path),
+        where = f"{position[0]}/{position[1]}" if position else ""
+        if progress:
+            cap = f", cap {int(config.timeout)}s" if config.timeout else ""
+            progress(
+                f"    attempt {number}/{config.attempts} started{cap} "
+                f"— `harness progress` shows it while it runs"
             )
+
+        # An agent attempt buffers everything until it exits. Without a
+        # heartbeat, a 30-minute cap is 30 minutes in which a working agent and
+        # a wedged one look exactly the same.
+        beat = heartbeat.Beat(
+            results_root,
+            activity="worker",
+            label=task.id,
+            position=f"module {where} · attempt {number}/{config.attempts}"
+            if where
+            else f"attempt {number}/{config.attempts}",
+            timeout_s=config.timeout,
+            detail={"plan": task.plan, "model": config.model, "log": str(brief_dir)},
+        )
+        try:
+            with beat:
+                proc = invoke_agent(
+                    config,
+                    root,
+                    prompt,
+                    brief_path,
+                    first_attempt=number == 1,
+                    task_id=task.id,
+                    task_file=str(task.path),
+                )
             attempt.exit_code = proc.returncode
             _write_attempt_log(proc.returncode, proc.stdout, proc.stderr)
         except subprocess.TimeoutExpired as exc:
@@ -576,6 +602,11 @@ def run_task(
 
         outcome.attempts.append(attempt)
         _log_attempt(task, config, label, number, attempt)
+        if progress:
+            progress(
+                f"    attempt {number}/{config.attempts} "
+                f"({heartbeat.human_duration(attempt.duration_s)}): {attempt.detail}"
+            )
 
         if result.success:
             task.status = "done"

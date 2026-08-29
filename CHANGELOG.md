@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A progress heartbeat, and `harness progress` to read it.** Long operations
+  were opaque by construction: the step runner and the Worker adapter both call
+  `subprocess.run(capture_output=True)`, which buffers everything until the
+  child exits — so a Worker attempt running to a 30-minute cap produced no
+  output, no elapsed time, and no way to tell a working agent from a wedged
+  one. A plan is serial, so the position is always knowable; it is now
+  published to `results/heartbeat.json` with a timestamp that keeps ticking
+  while work is in flight.
+
+  ```
+  $ harness progress
+  worker primary7-runner (module 1/2 · attempt 2/6) · running 12m30s · 17m30s before the cap
+  ```
+
+  `--watch` refreshes it. `harness status` shows what is running before
+  anything else. A heartbeat whose ticker stopped is reported as **dead**
+  rather than slow — the distinction you actually need during a long wait —
+  and the blocked terminal now prints each attempt as it starts, with its cap,
+  instead of only when it ends. Writing a heartbeat is best-effort: describing
+  the work can never fail the work.
+
 ## [0.3.0] - 2026-08-29
 
 First release shaped by real use: the harness was pointed at an existing
