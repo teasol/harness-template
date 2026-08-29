@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-29
+
+First release shaped by real use: the harness was pointed at an existing
+research project end to end, and every entry below fixes something that
+went wrong doing it rather than something that looked wrong on paper.
+
+> **Note on versions.** `0.2.0` shipped without bumping `pyproject.toml`
+> or `harness.__version__`, both of which stayed at `0.1.0`. Provenance
+> recorded during that period therefore reports `0.1.0` — treat a run
+> claiming `0.1.0` as "0.1.0 or 0.2.0". A test now keeps the package
+> version and `pyproject.toml` in agreement so this cannot recur.
+
 ### Security
 
 - **A Worker can no longer modify the harness itself.** Observed in the field:
