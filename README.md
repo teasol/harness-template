@@ -23,13 +23,17 @@ python -m harness status     # reads the real state, names the next command
 python scripts/instantiate.py --exam-demo      # watch the whole flow on real output
 python scripts/instantiate.py --name my-project
 git add -A && git commit -m "chore: instantiate from harness-template"
-make setup && make verify && make test
+make setup && make verify && make test         # install, then prove it works here
+make agents-setup                              # which model runs each tier
 ```
 
 `--exam-demo` runs the shipped example end to end — plan, board, acceptance,
 integration, determinism — so you see the shape before adopting it.
 Instantiating then removes that example: a project should not begin holding
 someone else's finished task board.
+
+`make agents-setup` is optional: skip it and the harness writes briefings for
+you to hand to a session yourself. Run it and the harness spawns agents.
 
 ### 1. Start an experiment
 
@@ -180,46 +184,143 @@ one cannot be judged.
 ## Why
 
 Research code rots because verification is ad-hoc: "run this notebook, eyeball
-the numbers." This template makes verification a first-class artifact:
+the numbers." This template makes verification a first-class artifact, and
+then builds an agent workflow on top of it:
 
-- **Declarative** — what to run and what to check lives in `configs/*.yaml`, not tribal memory.
-- **Deterministic** — seeds are explicit; CI re-runs pipelines and compares hashes.
-- **Agent-first** — `AGENTS.md` gives AI coding agents (and humans) the same ground rules, and `make verify` is the machine-checkable definition of "done."
-- **Reportable** — every run produces `report.json` + `report.md` under `results/runs/`.
+- **Declarative** — what to run and what to check lives in YAML, not tribal memory.
+- **Deterministic** — seeds are explicit; every run's artifacts are hash-compared.
+- **Enforced** — anything declared (deliverables, dependencies, report sources)
+  is machine-checked. A rule the harness cannot check is prose, and prose is
+  not a gate.
+- **Measured, not narrated** — an agent says *where* a number lives; the
+  harness reads the artifact. No result reaches you on an agent's word.
+- **Human at the end** — the harness reports readiness and stops. Which
+  hypothesis enters the record is your decision, and the one thing here that is
+  deliberately not automated.
 
-## Everyday commands
+## How it works
 
-```bash
-make status    # where am I, what next
-make setup     # choose the Worker platform / model / reasoning level
-make verify    # run the verification spec end-to-end
-make reproduce # run it twice and diff every artifact (determinism gate)
-make test      # pytest suite
-make lint      # ruff check + format check
-make audit     # re-verify every task marked done
-make drift     # validate every plan, fail on task/plan drift
+Three tiers. You set direction and decide what gets merged; a Planner owns one
+experiment end to end; Workers each build one module.
+
+```mermaid
+flowchart TD
+    R["Tier 1 · Researcher<br/>the question, and the merge decision"]
+    P["Tier 2 · Planner<br/>one experiment · own branch + worktree"]
+    W["Tier 3 · Workers<br/>one module each · sequential"]
+    R -->|"harness exp start --question"| P
+    P -->|"tasks with contracts + acceptance"| W
+    W -->|"verified deliverables"| P
+    P -->|"measured report"| R
+    R -->|"git merge — yours alone"| R
 ```
 
-## How verification works
+### Tier 1 ↔ 2 — experiments
+
+An experiment is one hypothesis, on its own branch in its own git worktree, so
+several run side by side without colliding.
+
+```bash
+python -m harness exp start sparse-attn --question "does top-k keep the mass?"
+python -m harness planner run sparse-attn     # spawn a Planner, or open one yourself
+python -m harness exp list                    # what is in flight
+python -m harness exp report sparse-attn --determinism --save
+git merge exp/sparse-attn                     # only you do this
+```
+
+`exp report` measures the spine itself — integration result, per-task
+acceptance re-verified, determinism, the exact commit to merge, and an explicit
+list of what went **unverified** — then extracts the metrics you asked for from
+real run artifacts. `READY TO MERGE` means the harness found nothing wrong, not
+that the result is interesting.
+
+Reports are self-contained by rule: a plan that reads another experiment's
+results is rejected, because comparing experiments is your job, done by reading
+finished reports. A result that only makes sense beside another cannot be
+judged on its own.
+
+Full reference: [docs/experiments.md](docs/experiments.md).
+
+### Tier 2 ↔ 3 — plans, tasks, and Workers
+
+The Planner decomposes the goal into modules with typed contracts and
+machine-checkable acceptance, then hands each to a Worker through the harness —
+never by hand.
+
+```mermaid
+flowchart TD
+    P["Planner"] -->|"writes"| PL["plans/*.yaml<br/>goal · DAG · contracts · report"]
+    PL -->|"materialize"| T["tasks/*.task.yaml<br/>self-contained work orders"]
+    T -->|"plan run"| W["Workers"]
+    W -->|"implement"| S["src/… deliverables"]
+    S -->|"acceptance + deliverables"| H["Runner + checks"]
+    H -->|"pass → done · fail → retry · exhausted → blocked"| T
+    T -->|"all done"| I["integration spec"]
+```
+
+```bash
+python -m harness plan validate plans/sparse-attn.yaml
+python -m harness plan materialize plans/sparse-attn.yaml   # one task per module
+python -m harness plan run plans/sparse-attn.yaml           # Workers build them
+```
+
+`plan run` invokes a Worker per module in dependency order, verifies acceptance
+**and** declared deliverables, and retries with the real failure output — up to
+a cap (default 6). A module that still fails is `blocked` and handed back to
+the Planner, which usually means the brief is wrong rather than the Worker.
+
+Workers run **one at a time** within an experiment. Isolation belongs at the
+experiment level: a plan's DAG is near-linear so concurrency buys little, while
+per-Worker branches would fracture the task board and make dependency gates
+read stale state.
+
+- **Planner contract**: [agents/planner.md](agents/planner.md)
+- **Worker contract**: [agents/worker.md](agents/worker.md)
+- **Full reference**: [docs/orchestration.md](docs/orchestration.md)
+
+### Choosing the tiers
+
+```bash
+python -m harness setup --list      # platforms available
+python -m harness setup             # interactive, or:
+python -m harness setup \
+  --planner-platform claude --planner-model claude-opus-5 --planner-effort high \
+  --worker-platform  claude --worker-model  claude-haiku-4-5-20251001 --worker-effort low
+```
+
+**A tier you cannot choose is not a tier.** A Worker's task is bounded and
+fully specified, so a small fast model usually suffices; reserving the
+expensive one for planning is the whole economic argument for splitting them.
+Both tiers land in `configs/agents.yaml` side by side, and both are recorded in
+the report, so which model built what is auditable rather than merely intended.
+
+Platform knowledge lives in `configs/agent-platforms.yaml` as **data** — adding
+your lab's tool, or a local model, is an entry there, not a change to
+`harness/`. `--planner-session <id>` attaches a tier to a session you already
+have open. The default adapter is `manual`: the harness writes a briefing and
+stops, so the template works with no API key.
+
+## The verification layer
+
+Everything above stands on one engine: a spec is an ordered list of steps, each
+a shell command followed by checks.
 
 ```mermaid
 flowchart LR
-    A["Spec YAML<br/>configs/*.yaml"] -->|"load_spec"| B["Runner"]
-    B -->|"subprocess"| C["Steps<br/>scripts / experiments"]
-    C --> D["Artifacts<br/>results/runs/..."]
-    D -->|"run_check"| E["Checks<br/>file_exists, json_metric, ..."]
-    E --> F["Report<br/>report.json / report.md"]
-    F --> G["CI gate<br/>(Verification workflow)"]
+    A["Spec YAML"] -->|"load_spec"| B["Runner"]
+    B -->|"subprocess"| C["Steps"]
+    C --> D["Artifacts<br/>results/runs/…"]
+    D -->|"run_check"| E["Checks"]
+    E --> F["report.json / report.md<br/>+ provenance"]
+    F --> G["CI gate"]
 ```
-
-A minimal spec:
 
 ```yaml
 name: my-experiment
 seed: 42
 steps:
   - id: train
-    run: python scripts/train.py --config configs/default.yaml
+    run: ${HARNESS_PYTHON} scripts/train.py --seed ${HARNESS_SEED}
     timeout: 3600
     checks:
       - type: file_exists
@@ -230,118 +331,68 @@ steps:
         min: 0.5
 ```
 
-Run it with `python -m harness verify --spec configs/my-experiment.yaml`.
-Full reference: [docs/verification.md](docs/verification.md).
+A task's acceptance is a spec run by this same Runner, and an experiment's
+report is that machinery run over a whole plan. One engine, three altitudes.
 
-## Three-tier research workflow
+Every report records its provenance — commit, dirty flag, interpreter,
+platform, seed — so a result found months later can be traced back to code.
+`harness reproduce` runs a spec twice and diffs a hash manifest of **every**
+artifact, and refuses to pass a spec that produced nothing to compare.
 
-The researcher sets direction and decides what enters the record; a Planner
-owns one experiment end to end; Workers each implement one module.
+Full reference: [docs/verification.md](docs/verification.md) ·
+[docs/reproducibility.md](docs/reproducibility.md).
 
-```mermaid
-flowchart TD
-    R["Tier 1 · Researcher<br/>defines the question, decides the merge"]
-    P["Tier 2 · Planner<br/>one experiment, own branch + worktree"]
-    W["Tier 3 · Workers<br/>one module each, sequential"]
-    R -->|"instruction"| P
-    P -->|"tasks with contracts"| W
-    W -->|"acceptance + deliverables"| P
-    P -->|"measured report"| R
-    R -->|"git merge (researcher's call)"| R
-```
-
-Each experiment gets its own branch and git worktree, so several hypotheses run
-side by side without colliding:
+## Everyday commands
 
 ```bash
-python -m harness exp start sparse-attn      # branch exp/sparse-attn + worktree
-python -m harness exp list                   # what is in flight
-python -m harness exp report sparse-attn --determinism --save
-git merge exp/sparse-attn                    # only the researcher does this
+make status        # where am I, what next
+make agents-setup  # choose platform / model / reasoning level per tier
+make verify        # run the verification spec end-to-end
+make reproduce     # run it twice and diff every artifact (determinism gate)
+make run           # put every ready task through a Worker
+make test          # pytest suite
+make lint          # ruff check + format check
+make audit         # re-verify every task marked done
+make drift         # validate every plan, fail on task/plan drift
+make experiments   # list experiment branches/worktrees
 ```
 
-The Planner hands modules to Workers through the harness, not by hand:
-
-```bash
-python -m harness planner brief sparse-attn --register session-01  # become the Planner
-python -m harness plan run plans/sparse-attn.yaml                  # drain the ready queue
-```
-
-`task run` invokes the configured Worker, verifies acceptance and deliverables,
-and retries with the real failure output up to a cap (default 6) — then blocks
-the task for the Planner. Workers are configured in `configs/worker.yaml`; the
-default writes a briefing for a human, and `adapter: cli` points at whichever
-headless coding agent your lab uses. The harness names no vendor.
-
-`exp report` measures the spine itself — integration result, per-task
-acceptance, determinism, the commit to merge, and what went **unverified** —
-and extracts the metrics the researcher asked for from real run artifacts. The
-Planner declares *where* each number lives; it never supplies a value. Reports
-are self-contained by rule: a plan that reads another experiment's results is
-rejected, because comparing experiments is the researcher's job.
-
-Full reference: [docs/experiments.md](docs/experiments.md).
-
-## Two-tier agent orchestration
-
-Beyond single pipelines, this template orchestrates **multiple agents
-hierarchically**: a **Planner** owns direction and flow; **Workers** each own
-one module, built in isolation against a self-contained spec.
-
-```mermaid
-flowchart TD
-    P["Planner agent"] -->|"writes"| PL["plans/*.yaml<br/>goal · DAG · contracts"]
-    PL -->|"materialize"| T["tasks/*.task.yaml"]
-    T -->|"claim"| W["Worker agents"]
-    W -->|"implement + verify"| S["src/... deliverables"]
-    S -->|"task done"| T
-    T -->|"all done"| I["integration spec"]
-    I --> H["Runner + checks"]
-```
-
-Try the shipped example end-to-end:
-
-```bash
-make plan        # validate plans/demo-pipeline.yaml + refresh tasks
-make tasks       # show the board
-python -m harness task show --id stats        # a Worker's complete work order
-python -m harness verify --spec configs/demo-pipeline.yaml   # Planner's integration gate
-```
-
-- **Planner contract**: [agents/planner.md](agents/planner.md)
-- **Worker contract**: [agents/worker.md](agents/worker.md)
-- **Full reference**: [docs/orchestration.md](docs/orchestration.md)
+`make setup` is the ordinary editable install; `make agents-setup` is the one
+that picks your models.
 
 ## Project structure
 
 ```
 harness-template/
 ├── AGENTS.md               # Agent-facing ground rules (read this first)
-├── Makefile                # setup / lint / test / verify / plan / tasks
+├── Makefile                # status / setup / verify / reproduce / run / audit / drift
 ├── pyproject.toml          # Project metadata + tool config
 ├── .experiments/           # Experiment worktrees (gitignored, one per hypothesis)
 ├── agents/                 # Role contracts for hierarchical agents
-│   ├── planner.md          #   Planner: owns plans, DAGs, contracts, flow
+│   ├── planner.md          #   Planner: owns plans, DAGs, contracts, the report
 │   └── worker.md           #   Worker: owns one module task, in isolation
 ├── plans/                  # Orchestration plans (Planner output)
-│   └── demo-pipeline.yaml
-├── tasks/                  # Materialized work orders (Worker input)
-├── harness/                # Core verification harness (Python package)
+├── tasks/                  # Materialized work orders + lifecycle (Worker input)
+├── harness/                # The harness itself (stdlib + PyYAML only)
 │   ├── spec.py             #   Spec loading & validation
 │   ├── runner.py           #   Step execution engine
 │   ├── checks.py           #   Built-in checks + registry
 │   ├── report.py           #   JSON/Markdown report generation
-│   ├── reproducibility.py  #   Seeding & hashing utilities
-│   ├── experiment.py       #   Experiments: worktrees, branches, reports
-│   ├── worker.py           #   Worker adapters + the retry loop
-│   ├── plan.py             #   Plans: module DAGs + contracts + report spec
-│   ├── task.py             #   Task lifecycle, board, materialization
-│   └── cli.py              #   `python -m harness verify|hash|plan|task`
-├── src/                    # Project code (demo_pipeline ships as example)
-├── configs/                # Verification & integration specs (YAML)
+│   ├── reproduce.py        #   Determinism gate: repeat a spec, diff artifacts
+│   ├── reproducibility.py  #   Seeding, hashing, run provenance
+│   ├── plan.py             #   Plans: module DAGs, contracts, report spec
+│   ├── task.py             #   Task lifecycle, board, deliverable enforcement
+│   ├── worker.py           #   Agent adapters + the verify-and-retry loop
+│   ├── experiment.py       #   Experiments: worktrees, briefings, reports
+│   ├── setup.py            #   First-run choice of platform / model / effort
+│   └── cli.py              #   status | setup | verify | reproduce | plan | task | exp | planner
+├── configs/                # Specs, and which agent runs each tier
+│   ├── agents.yaml         #   planner + worker: platform, model, effort
+│   └── agent-platforms.yaml#   Platform presets (data, not code)
+├── src/                    # Project code (demo_pipeline ships as the example)
 ├── scripts/                # Runnable steps (bootstrap, demo, instantiate)
 ├── tests/                  # Pytest suite (incl. end-to-end harness tests)
-├── docs/                   # Architecture & reference docs
+├── docs/                   # Reference docs
 ├── integrations/           # Optional tool-specific shims (nothing required)
 ├── data/                   # Datasets (gitignored; see data/README.md)
 ├── results/                # Run outputs & reports (gitignored)
@@ -349,7 +400,7 @@ harness-template/
 ```
 
 Put project-specific code in a package of your choice (e.g. `src/<project>/`);
-the `harness` package is verification infrastructure and stays as-is.
+the `harness` package is infrastructure and stays as-is.
 
 ## Creating a new project from this template
 
@@ -371,12 +422,14 @@ python -m harness status
 
 ## Documentation
 
-- [AGENTS.md](AGENTS.md) — ground rules for agents & contributors
-- [docs/experiments.md](docs/experiments.md) — experiments, worktrees, reports
-- [docs/orchestration.md](docs/orchestration.md) — two-tier orchestration reference
-- [docs/verification.md](docs/verification.md) — spec & check reference
-- [docs/reproducibility.md](docs/reproducibility.md) — determinism policy
-- [docs/architecture.md](docs/architecture.md) — component overview
+- [AGENTS.md](AGENTS.md) — ground rules every agent (and human) works under
+- [docs/experiments.md](docs/experiments.md) — Tier 1 ↔ 2: worktrees, tiers, reports
+- [docs/orchestration.md](docs/orchestration.md) — Tier 2 ↔ 3: plans, tasks, contracts
+- [docs/verification.md](docs/verification.md) — specs, checks, `reproduce`
+- [docs/reproducibility.md](docs/reproducibility.md) — determinism and provenance
+- [docs/architecture.md](docs/architecture.md) — components and design rules
+- [agents/planner.md](agents/planner.md) · [agents/worker.md](agents/worker.md) — role contracts
+- [integrations/](integrations/README.md) — optional tool shims (nothing required)
 
 ## CI
 
