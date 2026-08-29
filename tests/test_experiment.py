@@ -195,8 +195,19 @@ def test_report_on_a_finished_experiment(clone: Path) -> None:
     (wt / "configs/finished.yaml").write_text(
         spec_text.replace("name: demo-pipeline", "name: finished", 1), encoding="utf-8"
     )
+
+    # Materialize and complete all tasks for this experiment
+    import yaml
+
+    plan = load_plan(wt / "plans/finished.yaml")
+    task_mod.materialize(plan, wt / "tasks")
+    for path in (wt / "tasks").glob("*.task.yaml"):
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data["task"]["status"] = "done"
+        path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
     _run(wt, "git", "add", "-A")
-    _run(wt, "git", "commit", "--quiet", "-m", "plan for finished")
+    _run(wt, "git", "commit", "--quiet", "-m", "plan and tasks for finished")
 
     report = exp_mod.build_report("finished", root=clone, run_integration=True)
 
@@ -263,6 +274,7 @@ def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
     text = text.replace("depends_on: [data-gen]", "depends_on: [alpha]", 1)
     (wt / "plans/scoped.yaml").write_text(text, encoding="utf-8")
     # ...while tasks/ holds a task from another plan.
+    (wt / "tasks").mkdir(parents=True, exist_ok=True)
     (wt / "tasks" / "foreign.task.yaml").write_text(
         "task:\n  id: foreign\n  plan: other-plan\n  status: done\n  acceptance:\n    steps: []\n",
         encoding="utf-8",
