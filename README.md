@@ -281,24 +281,34 @@ experiments over the life of a project.
 ```mermaid
 flowchart TD
     subgraph T1 ["Tier 1 · research strategy and decision"]
-        R["👤 Researcher"] <-->|"question · dialogue"| P["🧠 Planner"]
+        direction LR
+        U(["👤 Researcher"]) <-->|"research question · dialogue"| P["🧠 Planner"]
     end
 
-    subgraph T2 ["Tier 2 · serial experimentation · one branch per experiment"]
-        M["🤖 Main Worker = the Planner<br/>core logic · planning · orchestration"]
-        M -->|"executor: main — does it"| D["direct implementation"]
-        M -->|"executor: sub — delegates, one at a time"| S["⚙️ Sub-Worker<br/>routine bulk: long coding, log parsing"]
-        S -->|"returns output"| M
-        H["⚙️ Harness<br/>acceptance · integration · determinism · metrics"]
+    subgraph T2 ["Tier 2 · serial experimentation"]
+        direction TB
+        subgraph BR ["🌿 dedicated branch — exp/idea-v1"]
+            direction TB
+            MW["🤖 Main Worker — the Planner itself<br/>core logic · planning · orchestration"]
+            subgraph EX ["serial execution"]
+                direction TB
+                SELF["executor: main<br/>direct implementation"]
+                SUB["⚙️ Sub-Worker<br/>executor: sub — long coding, log parsing"]
+            end
+            MW -->|"does it itself"| SELF
+            MW -->|"spawns, one at a time"| SUB
+            SUB -->|"returns output"| MW
+        end
+        H["⚙️ Harness<br/>integration · module acceptance<br/>reproducibility · metric extraction"]
     end
 
-    P -->|"starts each experiment"| M
-    D & S --> H
-    H -->|"measured report"| P
-    P -->|"report"| R
-    R --> DEC{"merge?"}
-    DEC -->|yes| MAIN[("🌿 main")]
-    DEC -->|no| NEXT["next experiment"]
+    P ==>|"initiates each experiment"| MW
+    EX ==>|"completed run"| H
+    H ==>|"report — metrics and status"| P
+    P ==>|"final report"| U
+    U --> DEC{"merge to main?"}
+    DEC -->|"yes"| MAIN[("🌿 main")]
+    DEC -->|"no"| NEXT["next experiment · iterate"]
     NEXT --> P
 ```
 
