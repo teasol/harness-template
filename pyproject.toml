@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "research-harness"
-version = "0.3.2"
+version = "0.3.3"
 description = "Agent-first orchestration harness for reproducible research and automated verification"
 readme = "README.md"
 requires-python = ">=3.10"
