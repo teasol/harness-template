@@ -36,24 +36,13 @@ jobs:
       - name: Completed tasks still pass acceptance
         run: python -m harness task verify --all --status done --results-dir results/tasks
 
-      - name: Integration spec
-        run: python -m harness verify --spec configs/demo-pipeline.yaml --results-dir results/pipeline
-
-      # The experiment layer creates real branches and worktrees, so exercise
-      # it against a throwaway clone rather than the checkout itself.
-      # The retry loop itself is covered by tests/test_worker.py (a shell
-      # command stands in for a coding agent — no model, network, or API key).
-      # Here we smoke-test the shipped default: the manual adapter must write a
-      # usable briefing and exit 1, since the work is not done.
-      - name: Worker adapter (default path)
-        run: |
-          set +e
-          python -m harness task run --id data-gen --results-dir results/worker
-          code=$?
-          set -e
-          test "$code" = "1" || { echo "expected exit 1 (needs_human), got $code"; exit 1; }
-          test -s results/worker/workers/data-gen/brief.md
-          grep -q "Definition of done" results/worker/workers/data-gen/brief.md
+      # Two steps stood here: the demo-pipeline integration spec and a smoke
+      # test of the shipped `data-gen` task. Both were removed from the
+      # repository in a964912 but left in this workflow, so every run since
+      # has failed on files that no longer exist. The Worker adapter and its
+      # retry loop are covered by tests/test_worker.py and tests/test_guard.py,
+      # where a shell command stands in for a coding agent — no model, no
+      # network, no API key.
 
       - name: Experiment lifecycle (worktree isolation + report)
         run: |

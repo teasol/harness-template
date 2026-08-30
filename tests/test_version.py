@@ -11,8 +11,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import tomllib
-
 import harness
 from harness.reproducibility import collect_provenance
 
@@ -20,8 +18,24 @@ PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 CHANGELOG = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 
 
+def _declared_version() -> str:
+    """Read `version` from pyproject's [project] table.
+
+    Deliberately not `tomllib`: that is stdlib only from 3.11, and this project
+    supports 3.10 — a version-consistency test that cannot run on the oldest
+    supported interpreter defeats its own purpose. One field does not justify a
+    dependency either, so it is read directly.
+    """
+    text = PYPROJECT.read_text(encoding="utf-8")
+    section = re.search(r"^\[project\]\s*$(.*?)(?=^\[|\Z)", text, re.MULTILINE | re.DOTALL)
+    assert section, "pyproject.toml has no [project] table"
+    found = re.search(r"""^version\s*=\s*["'](?P<v>[^"']+)["']""", section.group(1), re.MULTILINE)
+    assert found, "no version in pyproject's [project] table"
+    return found.group("v")
+
+
 def test_package_version_matches_pyproject() -> None:
-    declared = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]["version"]
+    declared = _declared_version()
     assert harness.__version__ == declared, (
         f"harness.__version__ is {harness.__version__} but pyproject says {declared}; "
         "provenance would record the wrong harness for every run"
