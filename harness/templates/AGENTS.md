@@ -16,32 +16,25 @@ keep using the harness for anything that needs to be trusted or reproduced.
 
 ## Orchestration roles
 
-Work happens in three tiers. The researcher (Tier 1) sets direction and
-decides what gets merged; the Planner (Tier 2) owns one experiment end to end;
-Workers (Tier 3) each implement one module. **Never merge an experiment branch
+Work happens in **two tiers**.
+
+**Tier 1 — research strategy and decision.** The researcher and the Planner
+talk: what is being asked, what would count as an answer, what gets reported.
+The researcher decides what gets merged. **Never merge an experiment branch
 yourself** — reporting is the Planner's job, merging is the researcher's.
 
-You are always acting in ONE of three roles — know which:
+**Tier 2 — serial experimentation**, on a dedicated branch per experiment. The
+Planner is also the **Main Worker**: it does the core logic, planning and
+orchestration itself, and delegates routine bulk — long mechanical coding, log
+parsing — to a **Sub-Worker**, one at a time. One Planner runs **many**
+experiments; each experiment has one Planner. The harness verifies whatever
+comes out, whoever produced it.
 
-- **Planner** ([.harness/agents/planner.md](.harness/agents/planner.md)): own `.harness/plans/*.yaml`,
-  module DAGs, contracts, acceptance, the integration spec, and the experiment
-  `report:` the researcher asked for. Work inside your experiment's worktree.
-  Never write module code. Hand off via `harness plan materialize`; hand back
-  via `harness exp report`.
-- **Worker** ([.harness/agents/worker.md](.harness/agents/worker.md)): claim exactly one task
-  (`harness task claim`), implement it fully against the task file's brief
-  and contract, verify (`harness task verify`), mark done (`harness task
-  done`). Never touch other modules, the plan, or `harness/`.
-- **Maintainer** (default): work on project code, CI, or docs. Follow
-  the rules below.
+You are always acting in ONE of these roles — know which:
 
-If a Worker finds a contract ambiguous or a dependency broken: `harness task
-block --reason "..."` and hand back to the Planner. Never improvise the plan.
-
-The harness enforces the handoff rather than trusting it: `task claim` refuses
-a task with unfinished dependencies, `task verify`/`done` fail when a declared
-deliverable is missing, and `plan materialize --force` refreshes a task's spec
-without erasing its status, worker, or log.
+- **Planner / Main Worker** (agents/planner.md): own the plans, module DAGs, contracts, acceptance, the integration spec, and the report. Implement directly when the work is core logic or orchestration; delegate when it is routine bulk. Choosing which is your judgement, and it is the judgement the tier exists for.
+- **Sub-Worker** (agents/worker.md): claim exactly one task, implement it fully against the task file's brief and contract, verify, mark done. Never touch other modules, the plan, or `harness/` — **this is enforced, not merely asked**: the harness hashes its own package around every invocation and fails the task outright if it changed, and fails it too if you modified a tracked file you never declared as a deliverable. If acceptance fails for an infrastructural reason, say so in your output and stop; do not fix the harness.
+- **Maintainer** (default): work on project code, CI, or docs. Follow the rules below.
 
 ## Non-negotiable rules
 

@@ -452,15 +452,14 @@ def run_task(
     brief_path.write_text(prompt, encoding="utf-8")
     outcome.brief_path = str(brief_path)
 
-    # A module the Planner declared as its own is never handed to a Worker.
-    # Briefing an agent to run an experiment or read a log costs more than
-    # doing it — the isolation a Worker buys is only worth its price when new
-    # code is being written.
-    if task.executor == "planner":
+    # A module the Planner kept for itself is never delegated. The Planner is
+    # the Main Worker: core logic, planning and orchestration are its own work,
+    # and only routine bulk is worth the cost of briefing a Sub-Worker.
+    if task.executor == "main":
         outcome.status = "needs_planner"
         outcome.message = (
-            f"module '{task.id}' declares `executor: planner` — the Planner does this one "
-            f"itself, no Worker is spawned. Do the work, then:\n"
+            f"module '{task.id}' declares `executor: main` — the Main Worker (you) does this "
+            f"one itself, no Sub-Worker is spawned. Do the work, then:\n"
             f"  python -m harness task verify --id {task.id}\n"
             f"  python -m harness task done --id {task.id} --by planner\n"
             f"Brief: {brief_path}"

@@ -945,14 +945,14 @@ def cmd_plan_approve(args: argparse.Namespace) -> int:
     for module_id in plan.topological_order():
         module = plan.module(module_id)
         deps = ", ".join(module.depends_on) or "-"
-        print(f"  [{module.executor:<7}] {module_id:<24} depends on: {deps}")
+        print(f"  [{module.executor:<4}] {module_id:<24} depends on: {deps}")
     print()
     print(
         f"  Worker modules: {cost['worker_modules']} x {cost['attempts_per_module']} attempts "
         f"x {cost['timeout_s']:g}s cap = up to {cost['worst_case_s'] / 3600:.1f}h of agent time"
     )
     if cost["planner_modules"]:
-        print(f"  Planner modules: {cost['planner_modules']} (you run these yourself)")
+        print(f"  Main Worker modules: {cost['planner_modules']} (you run these yourself)")
     print()
 
     record = plan_mod.record_approval(args.plan, args.by, args.note)
@@ -1021,9 +1021,9 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
     while True:
         board = task_mod.load_board(tasks_dir)
         by_id = {t.id: t for t in board}
-        # Modules the Planner claimed are not the drain loop's to run; skipping
-        # them lets the Worker queue finish instead of halting on the first one.
-        ready = [t for t in task_mod.ready_task_ids(board) if by_id[t].executor != "planner"]
+        # Modules the Main Worker kept are not the drain loop's to run; skipping
+        # them lets the delegated queue finish instead of halting on the first.
+        ready = [t for t in task_mod.ready_task_ids(board) if by_id[t].executor != "main"]
         if not ready:
             break
         task_id = ready[0]
@@ -1063,8 +1063,8 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
         for task in board:
             if task.is_done:
                 continue
-            if task.executor == "planner":
-                why = "yours to run (`executor: planner`)"
+            if task.executor == "main":
+                why = "yours to run (`executor: main`)"
             elif task.status == "blocked":
                 why = "blocked — read its log, then fix the brief or the acceptance"
             elif task.status == "in_progress":

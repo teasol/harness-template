@@ -320,14 +320,14 @@ def test_repo_changes_outside_git_is_empty(tmp_path: Path) -> None:
 # executor: planner — some work should never go through a Worker
 
 
-PLANNER_TASK_YAML = TASK_YAML.replace("  status: todo", "  executor: planner\n  status: todo")
+MAIN_TASK_YAML = TASK_YAML.replace("  status: todo", "  executor: main\n  status: todo")
 
 
-def test_planner_modules_are_not_handed_to_a_worker(tmp_path: Path) -> None:
-    """Briefing an agent to run an experiment costs more than running it."""
+def test_main_worker_modules_are_never_delegated(tmp_path: Path) -> None:
+    """The Planner is the Main Worker; what it kept is not the queue's to run."""
     (tmp_path / "tasks").mkdir()
     (tmp_path / "src").mkdir()
-    (tmp_path / "tasks" / "widget.task.yaml").write_text(PLANNER_TASK_YAML, encoding="utf-8")
+    (tmp_path / "tasks" / "widget.task.yaml").write_text(MAIN_TASK_YAML, encoding="utf-8")
 
     # A command that would definitely succeed, to prove it was never invoked.
     outcome = run_task(
@@ -339,4 +339,4 @@ def test_planner_modules_are_not_handed_to_a_worker(tmp_path: Path) -> None:
     assert outcome.status == "needs_planner"
     assert not outcome.attempts, "no Worker should have been spawned"
     assert not (tmp_path / "src" / "widget.py").exists()
-    assert "executor: planner" in outcome.message
+    assert "executor: main" in outcome.message

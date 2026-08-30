@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Two tiers, not three.** Tier 1 is the researcher and the Planner settling
+  the question and deciding the merge. Tier 2 is one experiment branch, where
+  **the Planner is also the Main Worker**: it implements the core work itself
+  and delegates routine bulk — long mechanical coding, log parsing — to a
+  **Sub-Worker**, one at a time. And a Planner runs **many** experiments rather
+  than being consumed by one.
+
+  This was already half-true in the code (`executor:`, persistent Planners) but
+  the documentation said the opposite, and the Planner's own role contract
+  opened with "Never implement modules yourself" — the exact behaviour the
+  model now requires. Agents read those contracts, so a contract that
+  contradicts the model is worse than none.
+
+  `executor:` values are now `main` (the Main Worker does it) and `sub`
+  (delegate); `planner`/`worker` are still accepted, since they named the same
+  two roles. Whichever is chosen, the module keeps its contract and its
+  acceptance: what changes is who writes the code, never whether it is checked.
+
 ### Fixed
 
 - **`harness init` is safe to re-run.** A project initialized by an older

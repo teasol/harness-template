@@ -56,8 +56,9 @@ record is a *measurement*, so pin the numbers before anything moves. See
 
 ### 1. Register a Planner, then start an experiment
 
-An experiment has **exactly one Planner** who owns it end to end (and can
-explore or refine questions/hypotheses within it). **The Planner comes first.**
+A Planner runs **many** experiments; each experiment has **one** Planner, who
+owns it end to end and can refine the question within it. **The Planner comes
+first** — it outlives any one experiment.
 
 ```bash
 python -m harness create -n your-planner --model <model> --effort high
@@ -271,22 +272,42 @@ then builds an agent workflow on top of it:
 
 ## How it works
 
-Three tiers. You set direction and decide what gets merged; a Planner owns one
-experiment end to end; Workers each build one module.
+**Two tiers.** You and the Planner settle the question and you decide what gets
+merged. Everything else happens inside one experiment branch, where the Planner
+is also the **Main Worker**: it implements the core work itself and delegates
+routine bulk to a **Sub-Worker**, one at a time. One Planner runs many
+experiments over the life of a project.
 
 ```mermaid
 flowchart TD
-    R["Tier 1 · Researcher<br/>the question, and the merge decision"]
-    P["Tier 2 · Planner<br/>one experiment · own branch + worktree"]
-    W["Tier 3 · Workers<br/>one module each · sequential"]
-    R -->|"harness exp start --question"| P
-    P -->|"tasks with contracts + acceptance"| W
-    W -->|"verified deliverables"| P
-    P -->|"measured report"| R
-    R -->|"git merge — yours alone"| R
+    subgraph T1 ["Tier 1 · research strategy and decision"]
+        R["👤 Researcher"] <-->|"question · dialogue"| P["🧠 Planner"]
+    end
+
+    subgraph T2 ["Tier 2 · serial experimentation · one branch per experiment"]
+        M["🤖 Main Worker = the Planner<br/>core logic · planning · orchestration"]
+        M -->|"executor: main — does it"| D["direct implementation"]
+        M -->|"executor: sub — delegates, one at a time"| S["⚙️ Sub-Worker<br/>routine bulk: long coding, log parsing"]
+        S -->|"returns output"| M
+        H["⚙️ Harness<br/>acceptance · integration · determinism · metrics"]
+    end
+
+    P -->|"starts each experiment"| M
+    D & S --> H
+    H -->|"measured report"| P
+    P -->|"report"| R
+    R --> DEC{"merge?"}
+    DEC -->|yes| MAIN[("🌿 main")]
+    DEC -->|no| NEXT["next experiment"]
+    NEXT --> P
 ```
 
-### Tier 1 ↔ 2 — experiments
+The harness verifies whatever comes out, whoever produced it: a module the
+Planner wrote itself carries the same contract and the same acceptance as one a
+Sub-Worker built. What the split changes is who writes the code, never whether
+it is checked.
+
+### Tier 1 — experiments and the merge decision
 
 An experiment is one hypothesis or investigation branch in its own git worktree, so
 several run side by side without colliding.
@@ -323,7 +344,7 @@ judged on its own.
 
 Full reference: [docs/experiments.md](docs/experiments.md).
 
-### Tier 2 ↔ 3 — plans, tasks, and Workers
+### Tier 2 — plans, tasks, and Sub-Workers
 
 The Planner decomposes the goal into modules with typed contracts and
 machine-checkable acceptance, then hands each to a Worker through the harness —
@@ -523,12 +544,12 @@ python -m harness status
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — ground rules every agent (and human) works under
-- [docs/experiments.md](docs/experiments.md) — Tier 1 ↔ 2: worktrees, tiers, reports
-- [docs/orchestration.md](docs/orchestration.md) — Tier 2 ↔ 3: plans, tasks, contracts
+- [docs/experiments.md](docs/experiments.md) — Tier 1: worktrees, Planners, reports
+- [docs/orchestration.md](docs/orchestration.md) — Tier 2: plans, tasks, contracts
 - [docs/verification.md](docs/verification.md) — specs, checks, `reproduce`
 - [docs/reproducibility.md](docs/reproducibility.md) — determinism and provenance
 - [docs/architecture.md](docs/architecture.md) — components and design rules
-- [agents/planner.md](agents/planner.md) · [agents/worker.md](agents/worker.md) — role contracts
+- [agents/planner.md](agents/planner.md) · [agents/worker.md](agents/worker.md) — Planner/Main Worker and Sub-Worker contracts
 - [integrations/](integrations/README.md) — optional tool shims (nothing required)
 
 ## CI

@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from harness.plan import Contract, Module, Plan
+from harness.plan import Contract, Module, Plan, normalize_executor
 from harness.report import write_reports
 from harness.runner import CheckResult, Runner, RunResult, StepResult
 from harness.spec import Spec, Step
@@ -52,7 +52,7 @@ class Task:
     constraints: list[str] = dataclasses.field(default_factory=list)
     contract: Contract = dataclasses.field(default_factory=Contract)
     acceptance: list[Step] = dataclasses.field(default_factory=list)
-    executor: str = "worker"
+    executor: str = "sub"
     status: str = "todo"
     worker: str | None = None
     log: list[str] = dataclasses.field(default_factory=list)
@@ -134,7 +134,7 @@ def _task_from_dict(data: dict[str, Any], path: Path | None = None) -> Task:
         constraints=[str(c) for c in entry.get("constraints", [])],
         contract=Contract.from_dict(entry.get("contract")),
         acceptance=acceptance,
-        executor=str(entry.get("executor", "worker")),
+        executor=normalize_executor(str(entry.get("executor", "sub"))) or "sub",
         status=status,
         worker=entry.get("worker"),
         log=[str(line) for line in entry.get("log", [])],

@@ -13,9 +13,10 @@ automated.
 ```mermaid
 flowchart TD
     R["Researcher (Tier 1)"] -->|"instruction"| E["harness exp start<br/>branch + worktree"]
-    E --> P["Planner (Tier 2)<br/>writes plans/&lt;name&gt;.yaml"]
+    E --> P["Planner = Main Worker (Tier 2)<br/>writes plans/&lt;name&gt;.yaml"]
     P -->|"materialize"| T["tasks/*.task.yaml"]
-    T -->|"one at a time"| W["Workers (Tier 3)"]
+    T -->|"executor: main"| P
+    T -->|"executor: sub — one at a time"| W["Sub-Workers"]
     W -->|"acceptance + deliverables"| T
     T -->|"all done"| I["integration spec"]
     I --> RPT["harness exp report"]

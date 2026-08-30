@@ -2,12 +2,16 @@
 
 > New here? Start with the walkthrough at the top of [README.md](../README.md).
 
-This document covers Tier 2 ↔ Tier 3. The tier above — experiments, worktrees,
-and the report a researcher reads to decide a merge — is in
-[experiments.md](experiments.md).
+This document covers Tier 2 — what happens inside one experiment branch. Tier 1
+— the dialogue with the researcher, and the report they read to decide a merge —
+is in [experiments.md](experiments.md).
+
+The Planner is also the **Main Worker**: it implements modules marked
+`executor: main` itself and delegates `executor: sub` modules to Sub-Workers,
+one at a time. Both kinds carry the same contract and the same acceptance.
 
 This template implements a **two-tier agent harness**: a Planner agent owns
-the direction and the module DAG; Worker agents each own one module, built in
+the direction and the module DAG; Sub-Worker agents each own one module, built in
 isolation against a self-contained spec. The harness is the contract between
 them — everything machine-checkable is enforced, everything else is written
 down.

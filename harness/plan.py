@@ -31,6 +31,23 @@ class PlanError(ValueError):
     """Raised when a plan cannot be parsed or is semantically invalid."""
 
 
+#: Canonical executor names, plus the older ones they replaced. The Planner is
+#: the Main Worker, so "planner" and "main" are the same thing said twice.
+_EXECUTORS = {
+    "main": "main",
+    "planner": "main",
+    "self": "main",
+    "sub": "sub",
+    "worker": "sub",
+    "delegate": "sub",
+}
+
+
+def normalize_executor(value: str) -> str | None:
+    """Map any accepted executor spelling to ``main`` or ``sub``; None if unknown."""
+    return _EXECUTORS.get(value.strip().lower())
+
+
 @dataclasses.dataclass
 class Port:
     """A typed input or output of a module contract."""
@@ -156,11 +173,13 @@ class Module:
     id: str
     title: str
     brief: str
-    #: Who builds this. ``worker`` spawns an agent against the brief;
-    #: ``planner`` means the Planner does it directly — the right choice when
-    #: the module runs an experiment or reads logs rather than writing code,
-    #: where briefing a Worker costs more than doing the work.
-    executor: str = "worker"
+    #: Who builds this. ``sub`` delegates to a Sub-Worker spawned against the
+    #: brief; ``main`` means the Main Worker — the Planner itself — does it
+    #: directly. Delegation is for routine bulk: long mechanical coding, log
+    #: parsing, anything where writing the brief costs less than doing the work
+    #: twice. Core logic, planning and orchestration stay with the Main Worker.
+    #: ``planner``/``worker`` are accepted as the older names for ``main``/``sub``.
+    executor: str = "sub"
     depends_on: list[str] = dataclasses.field(default_factory=list)
     deliverables: list[str] = dataclasses.field(default_factory=list)
     constraints: list[str] = dataclasses.field(default_factory=list)
@@ -322,10 +341,11 @@ def _module_from_dict(entry: Any) -> Module:
     except SpecError as exc:
         raise PlanError(f"module '{module_id}': invalid acceptance: {exc}") from exc
 
-    executor = str(entry.get("executor", "worker"))
-    if executor not in ("worker", "planner"):
+    executor = normalize_executor(str(entry.get("executor", "sub")))
+    if executor is None:
         raise PlanError(
-            f"module '{module_id}': unknown executor '{executor}'. available: worker, planner"
+            f"module '{module_id}': unknown executor '{entry.get('executor')}'. "
+            "available: main (the Planner does it), sub (delegate to a Sub-Worker)"
         )
 
     return Module(
@@ -403,8 +423,8 @@ def estimate_cost(plan: Plan, attempts: int, timeout: float) -> dict[str, Any]:
     at six attempts and a thirty-minute cap is a six-hour ceiling, and nobody
     approving the plan can see that unless it is written down.
     """
-    worker_modules = [m for m in plan.modules if m.executor == "worker"]
-    planner_modules = [m for m in plan.modules if m.executor == "planner"]
+    worker_modules = [m for m in plan.modules if m.executor == "sub"]
+    planner_modules = [m for m in plan.modules if m.executor == "main"]
     return {
         "worker_modules": len(worker_modules),
         "planner_modules": len(planner_modules),

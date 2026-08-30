@@ -239,12 +239,12 @@ def test_approval_is_tied_to_the_plans_contents(tmp_path: Path) -> None:
     assert "changed after it was approved" in reason
 
 
-def test_cost_estimate_counts_only_worker_modules(tmp_path: Path) -> None:
-    """The Planner's own modules do not consume the agent budget."""
+def test_cost_estimate_counts_only_delegated_modules(tmp_path: Path) -> None:
+    """What the Main Worker keeps does not consume the Sub-Worker budget."""
     from harness.plan import estimate_cost
 
     plan = load_plan(write_plan(tmp_path, VALID_PLAN))
-    plan.modules[0].executor = "planner"
+    plan.modules[0].executor = "main"
     cost = estimate_cost(plan, attempts=6, timeout=1800)
     assert cost["planner_modules"] == 1
     assert cost["worst_case_s"] == cost["worker_modules"] * 6 * 1800
@@ -275,3 +275,64 @@ def test_plan_run_refuses_without_approval(tmp_path: Path, capsys) -> None:
         ["plan", "run", str(path), "--tasks-dir", str(tmp_path / "tasks"), "--root", str(tmp_path)]
     )
     assert "approved by researcher" in capsys.readouterr().out
+
+
+def test_executor_accepts_the_older_names(tmp_path: Path) -> None:
+    """`planner`/`worker` were the same two roles under their previous names.
+
+    Plans and task files written before the two-tier model must keep loading —
+    the Planner *is* the Main Worker, so the rename says nothing new about them.
+    """
+    from harness.plan import normalize_executor
+
+    assert normalize_executor("planner") == "main"
+    assert normalize_executor("self") == "main"
+    assert normalize_executor("MAIN") == "main"
+    assert normalize_executor("worker") == "sub"
+    assert normalize_executor("delegate") == "sub"
+    assert normalize_executor("nonsense") is None
+
+    plan = load_plan(
+        write_plan(
+            tmp_path,
+            VALID_PLAN.replace(
+                "      brief: build a", "      executor: planner\n      brief: build a"
+            ),
+        )
+    )
+    assert plan.modules[0].executor == "main"
+
+
+def test_unknown_executor_is_rejected_with_the_choices(tmp_path: Path) -> None:
+    body = VALID_PLAN.replace(
+        "      brief: build a", "      executor: sideways\n      brief: build a"
+    )
+    with pytest.raises(PlanError, match="main .*sub"):
+        load_plan(write_plan(tmp_path, body))
+
+
+def test_the_two_tier_model_is_stated_where_agents_read_it() -> None:
+    """The role contracts are what an agent actually reads, so they decide behaviour.
+
+    The Planner contract used to say "Never implement modules yourself", which
+    is the opposite of the Main Worker role. A doc that contradicts the model is
+    worse than no doc, because agents follow it.
+    """
+    root = Path(__file__).resolve().parent.parent
+    planner = (root / "agents" / "planner.md").read_text(encoding="utf-8")
+    worker = (root / "agents" / "worker.md").read_text(encoding="utf-8")
+    agents_md = (root / "AGENTS.md").read_text(encoding="utf-8")
+
+    assert "Never implement modules yourself" not in planner
+    assert "Main Worker" in planner
+    assert "executor: main" in planner and "executor: sub" in planner
+    assert "many experiments" in planner
+    assert "Sub-Worker" in worker
+    assert "two tiers" in agents_md
+    assert "Tier 3" not in agents_md
+
+    # The scaffolded copies are what land in someone else's project.
+    for rel in ("harness/templates/agents/planner.md", "harness/templates/AGENTS.md"):
+        text = (root / rel).read_text(encoding="utf-8")
+        assert "Tier 3" not in text
+        assert "Never implement modules yourself" not in text
