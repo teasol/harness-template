@@ -7,6 +7,7 @@ neatly encapsulated under `.harness/` to avoid collisions with existing project 
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import shutil
 from pathlib import Path
@@ -23,6 +24,22 @@ class InitError(Exception):
     """Raised when project initialization fails."""
 
 
+@dataclasses.dataclass
+class InitResult:
+    """What `init` changed, and what it deliberately did not."""
+
+    created: list[Path] = dataclasses.field(default_factory=list)
+    kept: list[Path] = dataclasses.field(default_factory=list)
+    already_initialized: bool = False
+
+    def __iter__(self):
+        """Older callers treated the return value as the list of created files."""
+        return iter(self.created)
+
+    def __len__(self) -> int:
+        return len(self.created)
+
+
 def slugify(name: str) -> str:
     """Convert arbitrary project name into a clean kebab-case slug."""
     slug = re.sub(r"[^a-z0-9-]+", "-", name.strip().lower()).strip("-")
@@ -35,21 +52,26 @@ def init_project(
     target_dir: str | Path = ".",
     name: str | None = None,
     force: bool = False,
-) -> list[Path]:
-    """Scaffold a directory with harness templates and structure under .harness/."""
+) -> InitResult:
+    """Scaffold a directory with harness templates and structure under .harness/.
+
+    Safe to re-run: by default it adds only what is missing, so a project set up
+    by an older version can be brought forward without losing its configuration.
+    """
     target = Path(target_dir).resolve()
     target.mkdir(parents=True, exist_ok=True)
 
     if not TEMPLATE_ROOT.is_dir():
         raise InitError(f"Harness template directory not found at: {TEMPLATE_ROOT}")
 
-    # Safety check: avoid accidentally overwriting unless --force is given
+    # Re-running init must be safe. A project initialized by an older version is
+    # missing whatever shipped since, and the only way to get it used to be
+    # --force, which overwrites `agents.yaml` too — throwing away the platform,
+    # model and command the lab had configured, to fix a missing file. So the
+    # default is additive: add what is absent, never touch what exists. --force
+    # keeps its meaning for a deliberate reset.
     agents_yaml = get_agents_config_path(target)
-    if agents_yaml.is_file() and not force:
-        raise InitError(
-            f"Project already initialized at {target} ('{agents_yaml.name}' exists). "
-            "Use --force to overwrite existing files."
-        )
+    already_initialized = agents_yaml.is_file()
 
     # Standard encapsulated directory skeleton
     harness_dir = get_harness_dir(target)
@@ -66,6 +88,7 @@ def init_project(
         d.mkdir(parents=True, exist_ok=True)
 
     created_files: list[Path] = []
+    kept_files: list[Path] = []
 
     # Copy files from templates into .harness/ namespace
     files_to_copy = [
@@ -86,6 +109,7 @@ def init_project(
         if not src_path.is_file():
             continue
         if dst_path.exists() and not force:
+            kept_files.append(dst_path)
             continue
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(src_path, dst_path)
@@ -111,4 +135,8 @@ def init_project(
                     for entry in missing_entries:
                         f.write(f"{entry}\n")
 
-    return created_files
+    return InitResult(
+        created=created_files,
+        kept=kept_files,
+        already_initialized=already_initialized,
+    )

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`harness init` is safe to re-run.** A project initialized by an older
+  version could not catch up: `init` refused with "already initialized", and
+  the only way forward was `--force`, which overwrites `agents.yaml` too —
+  throwing away the platform, model and command a lab had configured in order
+  to install a file that was merely missing. It is now additive by default,
+  adds only what is absent, reports how many existing files it left alone, and
+  keeps `--force` for a deliberate reset.
+- **The Antigravity preset shipped an invocation that does not work.** `agy`
+  takes the prompt as the value of `-p` while the harness delivers the briefing
+  on stdin, so bare `-p` swallowed the next flag as its prompt and the agent
+  never saw the task — six attempts failing in under a second each. The preset
+  now uses `-p="$(cat)"`, which is the form `agy` accepts; `harness setup --check`
+  catches the same class of mismatch for any platform.
+
 ### Changed
 
 - **`harness create -n <name> --model <model>`.** A Planner is the only thing

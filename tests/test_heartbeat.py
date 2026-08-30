@@ -118,14 +118,19 @@ def test_beat_clears_itself_even_when_the_work_raises(tmp_path: Path) -> None:
 
 
 def test_ticker_keeps_the_timestamp_moving(tmp_path: Path) -> None:
-    """Liveness is the whole point: a frozen timestamp means nobody is home."""
+    """Liveness is the whole point: a frozen timestamp means nobody is home.
+
+    Timestamps have second resolution, so proving movement needs more than a
+    second of sleep — asserting on sub-second slack instead just makes the test
+    fail on a loaded machine without testing anything more.
+    """
     with heartbeat.Beat(tmp_path, "step", "slow", tick_seconds=0.05):
         first = heartbeat.read(tmp_path)
-        time.sleep(0.35)
+        time.sleep(1.3)
         second = heartbeat.read(tmp_path)
     assert first is not None and second is not None
-    assert second.updated_at >= first.updated_at
-    assert second.silent_s < 1.0
+    assert second.updated_at > first.updated_at, "the ticker must actually advance it"
+    assert not second.is_stale
 
 
 def test_a_broken_results_dir_never_breaks_the_run(tmp_path: Path) -> None:

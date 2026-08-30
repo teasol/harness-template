@@ -1623,14 +1623,33 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 2
 
     resolved_target = target_dir.resolve()
-    count = len(created)
-    print(f"Initialized Research Harness in {resolved_target} ({count} file(s) created/updated):")
-    for path in created:
+
+    def _rel(path: Path) -> Path:
         try:
-            rel = path.relative_to(resolved_target)
+            return path.relative_to(resolved_target)
         except ValueError:
-            rel = path
-        print(f"  + {rel}")
+            return path
+
+    if created.already_initialized and not args.force:
+        if created.created:
+            print(
+                f"Updated Research Harness in {resolved_target} "
+                f"({len(created.created)} file(s) added):"
+            )
+            for path in created.created:
+                print(f"  + {_rel(path)}")
+        else:
+            print(f"Research Harness in {resolved_target} is already up to date.")
+        if created.kept:
+            print(f"\n  {len(created.kept)} existing file(s) left untouched, including your")
+            print("  agent configuration. Use --force to reset them to the shipped defaults.")
+    else:
+        print(
+            f"Initialized Research Harness in {resolved_target} "
+            f"({len(created.created)} file(s) created/updated):"
+        )
+        for path in created.created:
+            print(f"  + {_rel(path)}")
 
     # If interactive and not --no-setup, configure agents
     if not args.no_setup and sys.stdin.isatty():

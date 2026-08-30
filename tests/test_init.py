@@ -5,10 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import pytest
-
 from harness.cli import find_project_root, main
-from harness.init import InitError, init_project
+from harness.init import init_project
 
 
 def test_init_fresh_directory(tmp_path: Path) -> None:
@@ -65,10 +63,44 @@ def test_init_preserves_existing_project_configs_and_tasks(tmp_path: Path) -> No
     assert (project_dir / ".harness" / "tasks").is_dir()
 
 
-def test_init_existing_directory_without_force_raises(tmp_path: Path) -> None:
+def test_rerunning_init_adds_what_is_missing_and_keeps_the_rest(tmp_path: Path) -> None:
+    """A project set up by an older version must be able to catch up.
+
+    It used to refuse, and `--force` was the only way forward — which overwrites
+    `agents.yaml` too, throwing away the platform, model and command a lab had
+    configured in order to install a file that was merely missing.
+    """
     init_project(tmp_path)
-    with pytest.raises(InitError, match="already initialized"):
-        init_project(tmp_path, force=False)
+    agents = tmp_path / ".harness" / "configs" / "agents.yaml"
+    agents.write_text("worker:\n  adapter: cli\n  command: my-own-agent\n", encoding="utf-8")
+    missing = tmp_path / ".harness" / "scripts" / "demo_step.py"
+    missing.unlink()
+
+    result = init_project(tmp_path)
+
+    assert result.already_initialized
+    assert missing.is_file(), "the absent file is restored"
+    assert [p.name for p in result.created] == ["demo_step.py"]
+    assert agents in result.kept
+    assert "my-own-agent" in agents.read_text(encoding="utf-8"), "config must survive"
+
+
+def test_rerunning_init_when_nothing_is_missing_changes_nothing(tmp_path: Path) -> None:
+    init_project(tmp_path)
+    result = init_project(tmp_path)
+    assert result.already_initialized
+    assert result.created == []
+    assert result.kept
+
+
+def test_rerun_reports_what_it_did(tmp_path: Path, capsys) -> None:
+    init_project(tmp_path)
+    (tmp_path / ".harness" / "scripts" / "demo_step.py").unlink()
+    assert main(["init", str(tmp_path), "--no-setup"]) == 0
+    out = capsys.readouterr().out
+    assert "Updated Research Harness" in out
+    assert "left untouched" in out
+    assert "agent configuration" in out
 
 
 def test_init_with_force_overwrites(tmp_path: Path) -> None:

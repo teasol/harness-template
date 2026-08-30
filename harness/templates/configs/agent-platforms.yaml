@@ -76,12 +76,17 @@ platforms:
   antigravity:
     label: Google Antigravity (agy)
     docs: agy --help
+    # `agy` takes the prompt as the VALUE of -p, while the harness delivers the
+    # briefing on stdin. Bare `-p` therefore swallows the next flag as its
+    # prompt and the agent never sees the task — six attempts failing in under
+    # a second each, with nothing to show for it. `-p="$(cat)"` feeds stdin into
+    # the flag, which is the form agy accepts. Check yours with `harness setup --check`.
     command: >-
-      agy -p --model {model} --effort {effort}
-      --dangerously-skip-permissions --add-dir {root}
+      agy --model {model} --effort {effort}
+      --dangerously-skip-permissions --add-dir {root} -p="$(cat)"
     resume_command: >-
-      agy -p --continue --model {model} --effort {effort}
-      --dangerously-skip-permissions --add-dir {root}
+      agy --continue --model {model} --effort {effort}
+      --dangerously-skip-permissions --add-dir {root} -p="$(cat)"
     efforts: [low, medium, high]
     default_effort: low
     model_hint: "a model name or alias (e.g. gemini-3.7-flash, flash, flash_lite)"
