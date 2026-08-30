@@ -1138,11 +1138,25 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
 
     if not experiments:
         status.headline = f"'{project_name}' is set up, with no experiments yet."
-        status.next_steps = [
-            "harness exp start <hypothesis>            # a branch + worktree for one question",
-            "harness planner brief <hypothesis> --register <label>"
-            "   # give this to an agent session",
-        ]
+        # A Planner comes before the experiment it owns: registering one first
+        # means the experiment inherits its model — so the report is never
+        # "model not recorded" — and everything that Planner has already
+        # learned here. Registering afterwards works, but by then the first
+        # briefing has already been written without any of it.
+        from harness import planners as planners_mod
+
+        known = [p.name for p in planners_mod.list_planners(root)]
+        if known:
+            status.next_steps = [
+                f"harness exp start <hypothesis> --planner {known[0]}"
+                "   # a branch + worktree for one question",
+            ]
+        else:
+            status.next_steps = [
+                "harness planner create <name> --model <model>"
+                "   # a Planner outlives one experiment",
+                "harness exp start <hypothesis> --planner <name>   # then the experiment it owns",
+            ]
         return status
 
     unfinished = [e for e in experiments if e.state != "ready to report"]

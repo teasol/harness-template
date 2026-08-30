@@ -123,3 +123,50 @@ def test_brief_of_a_first_run_says_so(repo: Path) -> None:
 
 def test_no_planner_means_no_section(repo: Path) -> None:
     assert planners_mod.brief_lines(None) == []
+
+
+# ---------------------------------------------------------------------------
+# the Planner comes before the experiment it owns
+
+
+def test_status_asks_for_a_planner_before_an_experiment(repo: Path, capsys) -> None:
+    """Registering afterwards works, but the first briefing is already written."""
+    from harness.cli import main
+    from harness.init import init_project
+
+    init_project(repo, name="p")
+    main(["status", "--root", str(repo)])
+    out = capsys.readouterr().out
+    create_at = out.find("planner create")
+    start_at = out.find("exp start")
+    assert create_at != -1 and start_at != -1
+    assert create_at < start_at, "the Planner has to be offered first"
+
+
+def test_status_names_the_planner_once_one_exists(repo: Path, capsys) -> None:
+    from harness.cli import main
+    from harness.init import init_project
+
+    init_project(repo, name="p")
+    planners_mod.create("owner", model="m", root=repo)
+    main(["status", "--root", str(repo)])
+    out = capsys.readouterr().out
+    assert "--planner owner" in out
+    assert "planner create" not in out
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_exp_start_says_when_its_planner_is_only_a_label(
+    repo: Path, capsys, registered: bool
+) -> None:
+    """An unregistered Planner means no model on record, so say so at the one
+    moment it is still cheap to fix."""
+    from harness.cli import main
+    from harness.init import init_project
+
+    init_project(repo, name="p")
+    if registered:
+        planners_mod.create("owner", model="claude-opus-5", root=repo)
+    assert main(["exp", "start", "e1", "--planner", "owner", "--root", str(repo)]) == 0
+    out = capsys.readouterr().out
+    assert ("is a label, not a registered Planner" in out) is not registered

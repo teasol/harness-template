@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The Planner is registered before the experiment it owns, everywhere.**
+  `planner create` shipped, but `init`, `status` and the README all still led
+  straight to `exp start`, so the documented flow and the intended one had
+  drifted apart. Ordering matters and is not cosmetic: an experiment started
+  under a registered Planner inherits its model — without one the report says
+  "model not recorded" and the run cannot be compared with any other — and its
+  briefing opens with what that Planner already learned here. Registering
+  afterwards works, but by then the first briefing has been written without any
+  of it. `status` now offers `planner create` first and names the Planner once
+  one exists, and `exp start` says plainly when the name it was given is only a
+  label.
+
 ### Fixed
 
 - **The quickstart did not work.** `harness init` followed by

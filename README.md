@@ -52,14 +52,25 @@ to satisfy, and the ordering principle that in research code the artifact of
 record is a *measurement*, so pin the numbers before anything moves. See
 [docs/experiments.md](docs/experiments.md#adopting-an-existing-project).
 
-### 1. Start an experiment — and its Planner
+### 1. Register a Planner, then start an experiment
 
-An experiment has **exactly one Planner** who owns it end to end (and can explore or refine questions/hypotheses within it).
-Starting an experiment creates its branch, its isolated working directory (a git *worktree*) under `.experiments/`, a plan skeleton, and prints the Planner's briefing:
+An experiment has **exactly one Planner** who owns it end to end (and can
+explore or refine questions/hypotheses within it). **The Planner comes first.**
 
 ```bash
-python -m harness exp start your-experiment-name
+python -m harness planner create your-planner --model <model> --effort high
+python -m harness exp start your-experiment-name --planner your-planner
 ```
+
+A registered Planner outlives one experiment. Starting an experiment under one
+means it inherits that Planner's model — so its report is never "model not
+recorded", and two runs planned by different models can be told apart — and its
+briefing opens with everything that Planner already learned in this project.
+Register afterwards and the first briefing has already been written without any
+of it.
+
+`exp start` creates the branch, an isolated working directory (a git *worktree*)
+under `.experiments/`, a plan skeleton, and prints the Planner's briefing:
 
 Example command output:
 
@@ -205,10 +216,13 @@ merge — the branch remains, so the attempt stays on the record.
 ### Running several at once
 
 ```bash
-python -m harness exp start baseline
-python -m harness exp start your-experiment-name
+python -m harness exp start baseline --planner your-planner
+python -m harness exp start your-experiment-name --planner your-planner
 python -m harness exp list
 ```
+
+One Planner can own several experiments — that is the point of registering it
+separately from any of them.
 
 Each report stands on its own: an experiment may not read another's results,
 and the harness rejects a plan that tries. Comparing them is **your** job, done

@@ -804,6 +804,16 @@ def cmd_exp_start(args: argparse.Namespace) -> int:
     print(f"Experiment '{experiment.name}' created on {experiment.branch}.")
     print(f"Its Planner is '{args.planner}'. Everything below is that Planner's briefing —")
     print("follow it, or hand this session to whoever will.\n")
+    if not planners_mod.exists(args.planner, args.root):
+        # Said once, here, because this is the last moment it is cheap: the
+        # briefing below is about to be written without any model on record and
+        # without whatever an earlier Planner learned in this project.
+        print(
+            f"note: '{args.planner}' is a label, not a registered Planner. This experiment\n"
+            "      therefore carries no Planner model, and its report will say so. Register\n"
+            "      one and future experiments inherit its model and its notes:\n"
+            f"        harness planner create {args.planner} --model <model>\n"
+        )
     print("=" * 70)
     print(brief)
     return 0
@@ -1627,7 +1637,8 @@ def cmd_init(args: argparse.Namespace) -> int:
     print("\nNext steps:")
     if adoption is None:
         print("  1. Verify starter spec:  harness verify --spec configs/demo.yaml")
-        print("  2. Start an experiment:  harness exp start <experiment-name>")
+        print("  2. Register a Planner:   harness planner create <name> --model <model>")
+        print("  3. Start an experiment:  harness exp start <name> --planner <name>")
         return 0
 
     print(
