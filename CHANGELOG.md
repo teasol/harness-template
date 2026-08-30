@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-30
+
+Everything here came from the first release meeting a real project: the harness
+was pointed at an existing research codebase, drove a full reproduction end to
+end, and each entry below fixes something that went wrong while doing it.
+
 ### Changed
 
 - **Two tiers, not three.** Tier 1 is the researcher and the Planner settling
