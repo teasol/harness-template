@@ -263,3 +263,60 @@ def test_planner_set_via_cli(repo: Path, capsys) -> None:
     planners_mod.create("icf", root=repo)
     assert main(["planner", "set", "icf", "--model", "m-1", "--root", str(repo)]) == 0
     assert "now records m-1" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# a manual Planner has to be handed something
+
+
+def test_create_prints_a_paste_block_for_a_manual_planner(repo: Path, capsys) -> None:
+    """Nobody spawns a manual Planner, so `create` has to give you what to paste."""
+    from harness.cli import main
+    from harness.init import init_project
+
+    init_project(repo, name="p")  # ships a manual Planner tier
+    assert main(["create", "-n", "owner", "--root", str(repo)]) == 0
+    out = capsys.readouterr().out
+
+    assert "paste this" in out
+    assert 'You are the Planner "owner"' in out
+    # Paths, not pasted contracts: the files are long and already authoritative,
+    # and a copy in a prompt only drifts from them.
+    assert ".harness/agents/planner.md" in out
+    assert "AGENTS.md" in out
+    assert "harness planner set owner --model" in out
+    assert "harness status" in out
+    # Short enough to actually paste.
+    block = out[out.index("─") :]
+    assert len(block.splitlines()) < 20, "the block must stay short"
+
+
+def test_the_paste_block_only_lists_files_that_exist(repo: Path) -> None:
+    """Sending a Planner to a missing path is worse than sending it nowhere."""
+    from harness.init import init_project
+    from harness.project import write_template
+
+    init_project(repo, name="p")
+    planner = planners_mod.create("owner", root=repo)
+
+    without = "\n".join(planners_mod.onboarding_lines(planner, repo))
+    assert "project.yaml" not in without
+
+    write_template(repo)
+    with_project = "\n".join(planners_mod.onboarding_lines(planner, repo))
+    assert "configs/project.yaml" in with_project
+
+
+def test_no_paste_block_when_the_planner_is_spawned(repo: Path, capsys) -> None:
+    """A configured tier is briefed by the harness; a paste block would be noise."""
+    from harness.cli import main
+    from harness.init import init_project
+    from harness.setup import build_config, load_platforms, write_agent_config
+
+    init_project(repo, name="p")
+    platforms = load_platforms(root=repo)
+    tier = build_config(platforms["opencode"], model="deepseek/deepseek-v4-pro", effort="high")
+    write_agent_config(tier, tier, root=repo)
+
+    assert main(["create", "-n", "spawned", "--root", str(repo)]) == 0
+    assert "paste this" not in capsys.readouterr().out

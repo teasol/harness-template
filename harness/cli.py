@@ -1192,6 +1192,16 @@ def cmd_project_show(args: argparse.Namespace) -> int:
 # Planner registration
 
 
+def _planner_tier_is_manual(root: str) -> bool:
+    """True when nobody spawns the Planner — a person opens that session."""
+    from harness.worker import WorkerError, load_agent_config
+
+    try:
+        return load_agent_config("planner", root=root).adapter == "manual"
+    except WorkerError:
+        return True
+
+
 def _configured_planner_tier(root: str) -> tuple[str, str]:
     """The model and effort `harness setup` recorded for the Planner tier, if any.
 
@@ -1238,13 +1248,19 @@ def cmd_create(args: argparse.Namespace) -> int:
         print(
             "\nNo model on record. That is expected for a manual Planner, but until one\n"
             "is set every report under it will say the run cannot be compared with\n"
-            "another. Once you know what the session is running on:\n"
-            f"  harness planner set {planner.name} --model <model>"
+            "another."
         )
     print(
         f"\nStart experiments under it, and they inherit its model and its notes:\n"
         f"  harness exp start <name> --planner {planner.name}"
     )
+
+    # A manual Planner is opened by hand, so the harness cannot brief it the way
+    # it briefs a spawned one — and whoever just ran `create` has nothing to hand
+    # that session. Give them something to paste.
+    if _planner_tier_is_manual(args.root):
+        print("\nYour Planner tier is manual, so open that session yourself and paste this:\n")
+        print("\n".join(planners_mod.onboarding_lines(planner, args.root)))
     return 0
 
 

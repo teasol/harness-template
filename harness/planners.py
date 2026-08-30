@@ -270,3 +270,66 @@ def brief_lines(planner: Planner | None, experiment: str = "") -> list[str]:
         "",
     ]
     return lines
+
+
+def _first_existing(root: Path, *candidates: str) -> Path | None:
+    for rel in candidates:
+        path = root / rel
+        if path.is_file():
+            return path
+    return None
+
+
+def onboarding_lines(planner: Planner, root: str | Path = ".") -> list[str]:
+    """A short block a person can paste into the session they just opened.
+
+    A manual Planner is opened by hand, which means the harness cannot brief it
+    the way it briefs a spawned one — and a person who has just run `create` has
+    nothing to hand that session at all.
+
+    Deliberately short, and mostly paths. The role contract and the ground rules
+    are long, they are already written down, and pasting them into a prompt only
+    means they can drift from the files that actually govern. Only files that
+    exist are listed: sending a Planner to a missing path is worse than sending
+    it nowhere, because it is told where to look and finds nothing.
+    """
+    root = Path(root).resolve()
+    harness_dir = root / ".harness"
+    base = harness_dir if harness_dir.is_dir() else root
+
+    refs: list[tuple[Path, str]] = []
+    contract = _first_existing(base, "agents/planner.md") or _first_existing(
+        root, "agents/planner.md"
+    )
+    if contract:
+        refs.append((contract, "your role contract — read it first"))
+    rules = _first_existing(root, "AGENTS.md")
+    if rules:
+        refs.append((rules, "ground rules for every agent here"))
+    project = _first_existing(base, "configs/project.yaml") or _first_existing(
+        root, "configs/project.yaml"
+    )
+    if project:
+        refs.append((project, "what this project expects of you"))
+
+    # Relative to the root, which line one already names: absolute paths here
+    # are mostly noise, and the block has to stay short enough to paste.
+    rels = [(str(path.relative_to(root)), why) for path, why in refs]
+    width = max((len(rel) for rel, _ in rels), default=0)
+    lines = [
+        "─" * 72,
+        f'You are the Planner "{planner.name}" for the project at {root}.',
+        "",
+        "Read these, in order:",
+    ]
+    lines += [f"  {rel:<{width}}  {why}" for rel, why in rels]
+    lines += [
+        "",
+        "Then record what you are running on, so results can be compared:",
+        f"  harness planner set {planner.name} --model <the model you are>",
+        "",
+        "Then, from that directory:",
+        "  harness status        # reads real state and names the next command",
+        "─" * 72,
+    ]
+    return lines

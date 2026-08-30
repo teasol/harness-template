@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`harness create` hands you something to paste when the Planner is manual.**
+  Nobody spawns a manual Planner — a person opens that session — so the harness
+  cannot brief it the way it briefs a configured one, and whoever just ran
+  `create` had nothing to give it. It now prints a short block naming the
+  Planner, the files to read (role contract, ground rules, `project.yaml` when
+  present), how to record its model, and `harness status` for what to do next.
+  Paths, not pasted contracts: those files are long, already authoritative, and
+  a copy inside a prompt only drifts from them. Only files that exist are
+  listed. Nothing is printed for a configured tier, where it would be noise.
+
 ## [0.3.2] - 2026-08-30
 
 ### Fixed
