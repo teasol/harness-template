@@ -174,21 +174,43 @@ def exists(name: str, root: str | Path = ".") -> bool:
     return planner_path(name, root).is_file()
 
 
-def create(name: str, model: str, effort: str = "", root: str | Path = ".") -> Planner:
-    """Register a Planner. The model is required — it is half of what a Planner *is*."""
+def create(name: str, model: str = "", effort: str = "", root: str | Path = ".") -> Planner:
+    """Register a Planner.
+
+    The model may be unknown at this point and that is legitimate: a manual
+    Planner is a session a person opens later, so nobody can name its model in
+    advance. Requiring it here blocked creation outright for exactly the tier
+    where it is unknowable.
+
+    Knowing the model still matters — two runs planned by different models are
+    not the same experiment — but the place to insist on it is the report, which
+    already refuses to call a run comparable when the model is missing. Record
+    it whenever it becomes known with :func:`set_model`.
+    """
     if not NAME_RE.match(name):
         raise PlannerError(
             f"invalid planner name '{name}' — use lowercase letters, digits, and hyphens"
-        )
-    if not model.strip():
-        raise PlannerError(
-            "a planner needs --model: two runs planned by different models are not "
-            "the same experiment, and the record has to be able to say which was which"
         )
     path = planner_path(name, root)
     if path.exists():
         raise PlannerError(f"planner '{name}' already exists: {path}")
     planner = Planner(name=name, model=model, effort=effort, created_at=_now(), path=path)
+    save(planner)
+    return planner
+
+
+def set_model(name: str, model: str, effort: str | None = None, root: str | Path = ".") -> Planner:
+    """Record what a Planner turned out to be running on.
+
+    For a manual Planner this is how the gap left at creation gets closed: the
+    session that opened knows what it is, and says so.
+    """
+    if not model.strip():
+        raise PlannerError("a model is required — that is the whole point of this command")
+    planner = load(name, root)
+    planner.model = model.strip()
+    if effort is not None:
+        planner.effort = effort
     save(planner)
     return planner
 

@@ -65,6 +65,12 @@ python -m harness create -n your-planner --model <model> --effort high
 python -m harness exp start your-experiment-name --planner your-planner
 ```
 
+`--model` is optional. It defaults to whatever `harness setup` recorded for the
+Planner tier, and a **manual** Planner legitimately has none yet — that session
+is one you open later, so nobody can name its model in advance. Record it once
+you know, with `harness planner set <name> --model <model>`; until then every
+report under that Planner says the run cannot be compared with another.
+
 A registered Planner outlives one experiment. Starting an experiment under one
 means it inherits that Planner's model — so its report is never "model not
 recorded", and two runs planned by different models can be told apart — and its

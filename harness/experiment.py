@@ -539,8 +539,9 @@ def build_report(
     if not ((report.tiers.get("planner") or {}).get("model") or _planner_model(experiment, root)):
         report.caveats.append(
             "Planner model not recorded — this run cannot be compared with another. "
-            f"Create one with `harness create -n <name> --model <model>`, or record this "
-            f"session with `harness planner brief {name} --register <label> --model <model>`."
+            "Record it on the Planner with `harness planner set <planner> --model <model>`, "
+            f"or on this experiment alone with `harness planner brief {name} "
+            "--register <label> --model <model>`."
         )
 
     # Every blocker becomes a stated reason: a verdict the researcher cannot

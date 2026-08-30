@@ -65,7 +65,8 @@ Experiment commands (Tier 1 boundary):
 
 ```bash
 python -m harness project init|show                        # what a Planner must know here
-python -m harness create -n <name> --model M [--effort E]   # a Planner
+python -m harness create -n <name> [--model M] [--effort E]  # a Planner
+python -m harness planner set <name> --model M            # once a manual one is known
 python -m harness planner list|show <name>
 python -m harness planner note <name> --add "..." [--experiment E]
 python -m harness exp start <name> [--question "..."] [--planner P] [--base main]

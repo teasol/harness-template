@@ -31,10 +31,38 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_a_planner_needs_a_model(repo: Path) -> None:
-    """Two runs planned by different models are not the same experiment."""
-    with pytest.raises(PlannerError, match="needs --model"):
-        planners_mod.create("icf", model="", root=repo)
+def test_a_manual_planner_may_be_created_without_a_model(repo: Path) -> None:
+    """Requiring it at creation blocked the one tier where it is unknowable.
+
+    A manual Planner is a session a person opens later, so nobody can name its
+    model in advance. Knowing it still matters — two runs planned by different
+    models are not the same experiment — but the report is where that gets
+    insisted on, not creation.
+    """
+    planner = planners_mod.create("icf", root=repo)
+    assert planner.model == ""
+    assert planners_mod.load("icf", root=repo).model == ""
+
+
+def test_the_model_can_be_recorded_once_it_is_known(repo: Path) -> None:
+    planners_mod.create("icf", root=repo)
+    planners_mod.set_model("icf", "claude-opus-5", effort="high", root=repo)
+    planner = planners_mod.load("icf", root=repo)
+    assert planner.model == "claude-opus-5"
+    assert planner.effort == "high"
+    with pytest.raises(PlannerError, match="a model is required"):
+        planners_mod.set_model("icf", "  ", root=repo)
+
+
+def test_setting_a_model_keeps_the_notes(repo: Path) -> None:
+    """Filling in the gap must not cost the memory that is the point of a Planner."""
+    planners_mod.create("icf", root=repo)
+    planners_mod.add_note("icf", "the node is A5000", "baseline", repo)
+    planners_mod.link_experiment("icf", "baseline", root=repo)
+    planners_mod.set_model("icf", "m", root=repo)
+    planner = planners_mod.load("icf", root=repo)
+    assert [n.text for n in planner.notes] == ["the node is A5000"]
+    assert planner.experiments == ["baseline"]
 
 
 def test_invalid_names_rejected(repo: Path) -> None:
@@ -191,9 +219,47 @@ def test_create_refuses_a_duplicate(repo: Path, capsys) -> None:
     assert "already exists" in capsys.readouterr().err
 
 
-def test_create_still_requires_a_model(repo: Path) -> None:
-    """argparse enforces it before the registry has to."""
+def test_create_still_requires_a_name(repo: Path) -> None:
+    """`--model` became optional; `-n` did not."""
     from harness.cli import main
 
     with pytest.raises(SystemExit):
-        main(["create", "-n", "owner", "--root", str(repo)])
+        main(["create", "--model", "m", "--root", str(repo)])
+
+
+def test_create_without_a_model_under_a_manual_tier(repo: Path, capsys) -> None:
+    """The reported bug: manual Planner tier, and `harness create` refused to run."""
+    from harness.cli import main
+    from harness.init import init_project
+
+    init_project(repo, name="p")  # ships a manual planner tier
+    assert main(["create", "-n", "planner-first", "--root", str(repo)]) == 0
+    out = capsys.readouterr().out
+    assert "model not recorded" in out
+    assert "expected for a manual Planner" in out
+    assert "harness planner set planner-first --model" in out
+    assert planners_mod.exists("planner-first", root=repo)
+
+
+def test_create_inherits_the_configured_planner_model(repo: Path, capsys) -> None:
+    """Nobody should retype what `harness setup` already recorded."""
+    from harness.cli import main
+    from harness.init import init_project
+    from harness.setup import build_config, load_platforms, write_agent_config
+
+    init_project(repo, name="p")
+    platforms = load_platforms(root=repo)
+    tier = build_config(platforms["opencode"], model="deepseek/deepseek-v4-pro", effort="high")
+    write_agent_config(tier, tier, root=repo)
+
+    assert main(["create", "-n", "auto", "--root", str(repo)]) == 0
+    assert "taken from the Planner tier" in capsys.readouterr().out
+    assert planners_mod.load("auto", root=repo).model == "deepseek/deepseek-v4-pro"
+
+
+def test_planner_set_via_cli(repo: Path, capsys) -> None:
+    from harness.cli import main
+
+    planners_mod.create("icf", root=repo)
+    assert main(["planner", "set", "icf", "--model", "m-1", "--root", str(repo)]) == 0
+    assert "now records m-1" in capsys.readouterr().out

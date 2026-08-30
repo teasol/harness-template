@@ -686,7 +686,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Create a Planner (the only thing the harness creates)",
     )
     create_cmd.add_argument("-n", "--name", required=True, help="Planner name")
-    create_cmd.add_argument("--model", required=True, help="Model this Planner runs on")
+    create_cmd.add_argument(
+        "--model",
+        default=None,
+        help="Model this Planner runs on. Optional: taken from the configured "
+        "Planner tier when it has one, and legitimately unknown for a manual "
+        "Planner until its session says so (`harness planner set`).",
+    )
     create_cmd.add_argument("--effort", default=None, help="Reasoning level")
     create_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
     create_cmd.set_defaults(func=cmd_create)
@@ -724,6 +730,15 @@ def build_parser() -> argparse.ArgumentParser:
     planner_show.add_argument("name", help="Planner name")
     planner_show.add_argument("--root", default=".", help="Repo root (default: cwd)")
     planner_show.set_defaults(func=cmd_planner_show)
+
+    planner_set = planner_sub.add_parser(
+        "set", help="Record what a Planner is running on (fills the gap a manual one leaves)"
+    )
+    planner_set.add_argument("name", help="Planner name")
+    planner_set.add_argument("--model", required=True, help="Model it runs on")
+    planner_set.add_argument("--effort", default=None, help="Reasoning level")
+    planner_set.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    planner_set.set_defaults(func=cmd_planner_set)
 
     planner_note = planner_sub.add_parser(
         "note", help="Record something the next run should not rediscover"
@@ -1177,20 +1192,70 @@ def cmd_project_show(args: argparse.Namespace) -> int:
 # Planner registration
 
 
+def _configured_planner_tier(root: str) -> tuple[str, str]:
+    """The model and effort `harness setup` recorded for the Planner tier, if any.
+
+    A manual tier has neither: that session is opened by a person, so there is
+    nothing configured to inherit.
+    """
+    from harness.worker import WorkerError, load_agent_config
+
+    try:
+        config = load_agent_config("planner", root=root)
+    except WorkerError:
+        return "", ""
+    if config.adapter == "manual":
+        return "", ""
+    return config.model, config.effort
+
+
 def cmd_create(args: argparse.Namespace) -> int:
     """Create a Planner. It is the only thing this harness creates."""
+    model, effort = (args.model or ""), (args.effort or "")
+    inherited = False
+    if not model:
+        # Do not make anyone retype what `setup` already recorded.
+        model, tier_effort = _configured_planner_tier(args.root)
+        effort = effort or tier_effort
+        inherited = bool(model)
+
     try:
-        planner = planners_mod.create(args.name, args.model, args.effort or "", root=args.root)
+        planner = planners_mod.create(args.name, model, effort, root=args.root)
     except planners_mod.PlannerError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    tier = planner.model + (f", effort {planner.effort}" if planner.effort else "")
-    print(f"Planner '{planner.name}' created ({tier}).")
+
+    described = planner.model or "model not recorded"
+    if planner.effort:
+        described += f", effort {planner.effort}"
+    print(f"Planner '{planner.name}' created ({described}).")
     print(f"  record: {planner.path}")
+    if inherited:
+        print("  model taken from the Planner tier in your agent config.")
+    if not planner.model:
+        # Legitimate for a manual Planner — nobody knows yet which session will
+        # drive it — but it is not free, so say what it costs and how to close it.
+        print(
+            "\nNo model on record. That is expected for a manual Planner, but until one\n"
+            "is set every report under it will say the run cannot be compared with\n"
+            "another. Once you know what the session is running on:\n"
+            f"  harness planner set {planner.name} --model <model>"
+        )
     print(
         f"\nStart experiments under it, and they inherit its model and its notes:\n"
         f"  harness exp start <name> --planner {planner.name}"
     )
+    return 0
+
+
+def cmd_planner_set(args: argparse.Namespace) -> int:
+    try:
+        planner = planners_mod.set_model(args.name, args.model, effort=args.effort, root=args.root)
+    except planners_mod.PlannerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    tier = planner.model + (f", effort {planner.effort}" if planner.effort else "")
+    print(f"Planner '{planner.name}' now records {tier}.")
     return 0
 
 

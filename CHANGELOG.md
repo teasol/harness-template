@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-30
+
+### Fixed
+
+- **`harness create` refused to run under a manual Planner tier.** `--model`
+  was required, so the one configuration where the model is genuinely
+  unknowable — a manual Planner is a session a person opens later — could not
+  create a Planner at all:
+
+  ```
+  harness create: error: the following arguments are required: --model
+  ```
+
+  The requirement was right, the enforcement point was wrong. Knowing the model
+  still matters (two runs planned by different models are not the same
+  experiment), but that is insisted on where it can be — the report, which
+  already refuses to call such a run comparable. So `--model` is now optional:
+  it defaults to whatever `harness setup` recorded for the Planner tier, and
+  when nothing is known the Planner is created anyway and told plainly what the
+  gap costs. **`harness planner set <name> --model <model>`** closes it once the
+  session says what it is, without disturbing the Planner's notes or history.
+
 ## [0.3.1] - 2026-08-30
 
 Everything here came from the first release meeting a real project: the harness
