@@ -38,7 +38,8 @@ You are the Planner for the <experiment> experiment in <absolute project path>.
 Run `python -m harness planner brief <experiment> --register <your-label>`
 and follow it exactly. Re-run it whenever you need current state.
 
-Do not write module code yourself, and do not merge anything.
+You are the Main Worker as well as the Planner: implement modules yourself
+when that is cheaper than briefing a Sub-Worker. Do not merge anything.
 ```
 
 The briefing is a command rather than a pasted block on purpose: a paste is a

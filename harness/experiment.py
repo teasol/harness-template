@@ -901,9 +901,17 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "## Your role",
         "",
         "Read agents/planner.md and follow it. You own this experiment end to end:",
-        "settle the question, decompose it into modules, hand each to a Worker,",
-        "verify, and report back. You never write module code, and you never",
-        "merge — merging is the researcher's decision.",
+        "settle the question, agree the plan with the researcher, get each module",
+        "built, verify, and report back.",
+        "",
+        "**You are also the Main Worker, so building a module yourself is a normal",
+        "move, not a fallback.** Delegate to a Sub-Worker when the work is routine",
+        "bulk a brief can specify completely; do it yourself when writing that brief",
+        "would cost more than the work, and when a Sub-Worker has already failed on",
+        "it. Either way the module keeps its contract and its acceptance — what",
+        "changes is who writes the code, never whether it is checked.",
+        "",
+        "You never merge — that is the researcher's decision.",
         "",
         f"- Worktree: {exp_root}",
         f"- Branch:   {experiment.branch}",
@@ -1105,7 +1113,8 @@ def experiment_state(experiment: Experiment) -> ExperimentState:
     if blocked:
         return state(
             "blocked",
-            f"worker gave up on {blocked} — the brief or contract needs the Planner",
+            f"a Sub-Worker gave up on {blocked} — fix the brief, or take it over "
+            "yourself (`executor: main`)",
             f"harness task show --id {blocked[0]}",
         )
 

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Planner was still being told it does not do the work.** The two-tier
+  change updated the role contracts but missed the two places a Planner
+  actually reads at runtime: the "Your role" section of its own briefing, which
+  said *"You never write module code"*, and the integration shim, which said
+  *"Do not write module code yourself"*. Both now say the opposite, because the
+  Planner is the Main Worker and building a module itself is a normal move
+  rather than a fallback. A test asserts no surface forbids it.
+- **A blocked task now names the way out.** Exhausting the attempt cap left the
+  Planner with "blocked for the Planner" and no suggestion, so the only obvious
+  move was to fix the brief and try again. It now says the second option
+  plainly — set `executor: main`, re-materialize with `--force`, build it
+  yourself — which is the right call when the brief is already precise or when
+  writing a better one costs more than the work. The route is covered
+  end to end: `--force` keeps the blocked lifecycle, the task stops being
+  delegated, and it can still be completed and verified.
+- A heartbeat test raced the work it was watching by sleeping a fixed amount;
+  it now polls for the condition.
+
 ### Added
 
 - **A plan now has to be explained before it can be built.** The Planner's

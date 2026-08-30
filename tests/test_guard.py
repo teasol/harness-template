@@ -340,3 +340,66 @@ def test_main_worker_modules_are_never_delegated(tmp_path: Path) -> None:
     assert not outcome.attempts, "no Worker should have been spawned"
     assert not (tmp_path / "src" / "widget.py").exists()
     assert "executor: main" in outcome.message
+
+
+def test_the_planner_can_take_over_a_module_a_sub_worker_failed(tmp_path: Path) -> None:
+    """A blocked task is not a dead end — it is a choice, and one branch is "do it".
+
+    The Planner is the Main Worker, so when a brief is already precise and a
+    Sub-Worker still cannot land it, taking the module over is the answer rather
+    than raising the cap. The route has to actually work: re-materializing a
+    blocked task must keep its state, stop delegating it, and still let it be
+    completed and verified.
+    """
+    from harness.plan import load_plan
+    from harness.task import complete, materialize
+
+    (tmp_path / "src").mkdir()
+    plan_path = tmp_path / "plan.yaml"
+    body = """
+plan:
+  name: t
+  goal: prove the take-over path works
+  modules:
+    - id: hard
+      title: hard one
+      executor: {executor}
+      deliverables: [src/hard.py]
+      brief: make src/hard.py
+      acceptance:
+        steps:
+          - id: check
+            run: test -f src/hard.py
+            checks: [{{type: file_exists, path: src/hard.py}}]
+"""
+    plan_path.write_text(body.format(executor="sub"), encoding="utf-8")
+    materialize(load_plan(plan_path), tmp_path / "tasks")
+
+    outcome = run_task(
+        tmp_path / "tasks", "hard", _config(tmp_path, "true", attempts=2), root=tmp_path
+    )
+    assert outcome.status == "failed"
+    assert "executor: main" in outcome.message, "the way out has to be named"
+    assert load_task(tmp_path / "tasks", "hard").status == "blocked"
+
+    # The Planner takes it over.
+    plan_path.write_text(body.format(executor="main"), encoding="utf-8")
+    materialize(load_plan(plan_path), tmp_path / "tasks", force=True)
+    task = load_task(tmp_path / "tasks", "hard")
+    assert task.executor == "main"
+    assert task.status == "blocked", "--force refreshes the spec, not the lifecycle"
+
+    # It is no longer delegated, even with a Sub-Worker command that would pass.
+    outcome = run_task(
+        tmp_path / "tasks",
+        "hard",
+        _config(tmp_path, "touch src/hard.py"),
+        root=tmp_path,
+    )
+    assert outcome.status == "needs_planner"
+    assert not (tmp_path / "src" / "hard.py").exists()
+
+    # The Planner does the work, and a blocked task can still be completed.
+    (tmp_path / "src" / "hard.py").write_text("x = 1\n", encoding="utf-8")
+    task, result = complete(tmp_path / "tasks", "hard", worker="planner", root=tmp_path)
+    assert result.success and task.status == "done"

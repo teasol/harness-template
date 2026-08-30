@@ -78,9 +78,19 @@ delegated buys no verification.
    python -m harness plan run plans/<plan>.yaml  # drain the ready queue in order
    ```
    Track progress with `python -m harness plan status plans/<plan>.yaml`. If a
-   task exhausts its attempts the harness blocks it and hands it back to you —
-   that is a signal the brief or contract is wrong, not a reason to raise the
-   cap and retry blindly.
+   task exhausts its attempts the harness blocks it and hands it back to you.
+   That is never a reason to raise the cap and retry blindly. It leaves you two
+   real options, and picking between them is your job:
+   - **Fix the brief or the contract**, if the failure output shows the
+     Sub-Worker was asked for the wrong thing, or asked ambiguously.
+   - **Take the module over.** Set `executor: main`, re-materialize it with
+     `--force`, and build it yourself. This is the right call when the brief is
+     already precise and the Sub-Worker still cannot land it, or when writing a
+     brief good enough to succeed would cost more than the work. You are the
+     Main Worker; doing the work is not an admission of defeat.
+
+   The module keeps its contract and acceptance either way, so taking it over
+   costs no verification.
 4. **Close the loop.** When every task is `done`, run the integration spec:
    ```bash
    python -m harness verify --spec configs/<integration>.yaml

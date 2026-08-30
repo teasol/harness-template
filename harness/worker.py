@@ -680,8 +680,9 @@ def run_task(
 
     outcome.status = "failed"
     outcome.message = (
-        f"task '{task_id}' still failing after {config.attempts} attempt(s) "
-        "— blocked for the Planner"
+        f"task '{task_id}' still failing after {config.attempts} attempt(s) — blocked. "
+        "Either the brief is wrong, or this one is yours: set `executor: main`, "
+        "re-materialize with --force, and build it yourself."
     )
     block(tasks_dir, task_id, f"worker {label} exhausted {config.attempts} attempts")
     return outcome

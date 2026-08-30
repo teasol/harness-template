@@ -336,3 +336,37 @@ def test_the_two_tier_model_is_stated_where_agents_read_it() -> None:
         text = (root / rel).read_text(encoding="utf-8")
         assert "Tier 3" not in text
         assert "Never implement modules yourself" not in text
+
+
+def test_nothing_tells_the_planner_it_may_not_implement() -> None:
+    """The Planner is the Main Worker, and every surface it reads must agree.
+
+    Reported after a real run: the Planner still said it does not do the work.
+    The two-tier change had missed the briefing text and an integration shim,
+    which are exactly the places a Planner actually reads.
+    """
+    root = Path(__file__).resolve().parent.parent
+    surfaces = [
+        "agents/planner.md",
+        "harness/templates/agents/planner.md",
+        "AGENTS.md",
+        "harness/templates/AGENTS.md",
+        "harness/experiment.py",
+        "integrations/README.md",
+        "README.md",
+    ]
+    for rel in surfaces:
+        text = (root / rel).read_text(encoding="utf-8")
+        for forbidden in (
+            "never write module code",
+            "Never implement modules yourself",
+            "Do not write module code",
+        ):
+            assert forbidden not in text, f"{rel} still forbids the Main Worker from working"
+
+    # And the way out of a blocked task has to be spelled out where it happens.
+    contract = (root / "agents" / "planner.md").read_text(encoding="utf-8")
+    assert "Take the module over" in contract
+    assert "executor: main" in contract
+    worker_src = (root / "harness" / "worker.py").read_text(encoding="utf-8")
+    assert "set `executor: main`" in worker_src

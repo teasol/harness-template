@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import subprocess
 import textwrap
+import threading
 import time
 from pathlib import Path
 
@@ -141,6 +142,28 @@ def test_a_broken_results_dir_never_breaks_the_run(tmp_path: Path) -> None:
         pass  # must not raise
 
 
+def _watch_for(results: Path, label: str, timeout: float = 8.0) -> list[heartbeat.Heartbeat]:
+    """Poll until the named leg is in flight, in a thread, and return what was seen.
+
+    A fixed sleep races the work it is watching: too early and the step has not
+    started, too late and it has finished. Polling for a condition does not.
+    """
+    seen: list[heartbeat.Heartbeat] = []
+
+    def watch() -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            beat = heartbeat.read(results)
+            if beat is not None and beat.label == label:
+                seen.append(beat)
+                return
+            time.sleep(0.02)
+
+    thread = threading.Thread(target=watch)
+    thread.start()
+    return seen, thread
+
+
 # ---------------------------------------------------------------------------
 # published from the real code paths
 
@@ -164,19 +187,7 @@ def test_a_running_step_is_visible_from_outside(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     results = tmp_path / "results"
-    seen: list[heartbeat.Heartbeat] = []
-
-    import threading
-
-    def watch() -> None:
-        # A second terminal, asking mid-run where things are.
-        time.sleep(0.9)
-        beat = heartbeat.read(results)
-        if beat is not None:
-            seen.append(beat)
-
-    watcher = threading.Thread(target=watch)
-    watcher.start()
+    seen, watcher = _watch_for(results, "slow-one")
     result = Runner(root=tmp_path, results_dir=results).run(load_spec(spec_path))
     watcher.join()
 
@@ -203,19 +214,8 @@ def test_a_running_worker_attempt_is_visible_from_outside(tmp_path: Path) -> Non
     script.chmod(0o755)
 
     results = tmp_path / "results"
-    seen: list[heartbeat.Heartbeat] = []
     lines: list[str] = []
-
-    import threading
-
-    def watch() -> None:
-        time.sleep(0.9)
-        beat = heartbeat.read(results)
-        if beat is not None:
-            seen.append(beat)
-
-    watcher = threading.Thread(target=watch)
-    watcher.start()
+    seen, watcher = _watch_for(results, "widget")
     outcome = run_task(
         tmp_path / "tasks",
         "widget",
