@@ -165,7 +165,7 @@ def next_steps(root: str | Path = ".") -> list[str]:
             )
     if not planners_mod.list_planners(root):
         steps.append(
-            "harness planner create <name> --model <model>   # it will outlive this experiment"
+            "harness create -n <name> --model <model>        # a Planner outlives this experiment"
         )
     steps.append("harness exp start <name> --planner <name>       # and plan the adoption there")
     return steps

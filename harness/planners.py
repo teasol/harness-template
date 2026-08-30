@@ -9,7 +9,7 @@ would have prevented them was never written anywhere.
 
 So a Planner is a thing with a name and a memory, and experiments hang off it:
 
-    harness planner create icf --model claude-opus-5 --effort high
+    harness create -n icf --model claude-opus-5 --effort high
     harness exp start baseline --planner icf
     harness planner note icf --add "ICF_CKPT is empty on this node; that is correct."
 

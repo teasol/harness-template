@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`harness create -n <name> --model <model>`.** A Planner is the only thing
+  the harness creates, so it does not need a namespace to itself — the command
+  now reads like `conda create -n`. `harness planner create` still works, since
+  it shipped in 0.3.0, but everything that teaches the flow points at
+  `harness create`.
+- `harness init` no longer opens with the demo spec. Creating a Planner is the
+  actual next step; the smoke test stays reachable on a following line rather
+  than standing between you and starting work.
+
 - **The Planner is registered before the experiment it owns, everywhere.**
   `planner create` shipped, but `init`, `status` and the README all still led
   straight to `exp start`, so the documented flow and the intended one had

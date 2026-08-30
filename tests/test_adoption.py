@@ -109,7 +109,7 @@ def test_init_names_the_adoption_path(existing_project: Path, capsys) -> None:
     assert "already has 3 source file(s)" in out
     assert "none of" in out
     # It points at a Planner rather than at a procedure.
-    assert "harness planner create" in out
+    assert "harness create -n" in out
     assert "harness project init" in out
     assert "exp start" in out
 
@@ -119,8 +119,10 @@ def test_init_on_an_empty_project_keeps_the_greenfield_path(tmp_path: Path, caps
 
     assert main(["init", str(tmp_path), "--no-setup"]) == 0
     out = capsys.readouterr().out
-    assert "Verify starter spec" in out
+    assert "Create a Planner" in out
     assert "already has" not in out
+    # The demo stays reachable, just off the main path.
+    assert "configs/demo.yaml" in out
 
 
 def test_next_steps_drop_what_is_already_done(existing_project: Path) -> None:
@@ -131,13 +133,13 @@ def test_next_steps_drop_what_is_already_done(existing_project: Path) -> None:
     (existing_project / ".harness" / "configs").mkdir(parents=True, exist_ok=True)
     steps = adoption.next_steps(existing_project)
     assert any("project init" in s for s in steps)
-    assert any("planner create" in s for s in steps)
+    assert any("harness create -n" in s for s in steps)
 
     project_mod.write_template(existing_project)
     planners_mod.create("owner", model="m", root=existing_project)
     steps = adoption.next_steps(existing_project)
     assert not any("project init" in s for s in steps)
-    assert not any("planner create" in s for s in steps)
+    assert not any("harness create -n" in s for s in steps)
     assert any("exp start" in s for s in steps)
 
 

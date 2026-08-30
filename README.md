@@ -26,7 +26,9 @@ pip install git+https://github.com/teasol/harness-template.git
 # 2. Initialize in your project:
 cd my-project
 harness init                                   # scaffolds AGENTS.md, agents/, configs/, and configures agent tiers
-harness verify --spec configs/demo.yaml        # prove it works here
+
+# 3. Create the Planner that will own your experiments:
+harness create -n my-planner --model <model> --effort high
 ```
 
 `harness init` scaffolds the agent role contracts (`agents/`), platform configurations (`configs/`), and prompts you to configure each agent tier — **Manual** (you paste briefings into an agent session yourself) or an automated **AI platform** (Antigravity, Claude Code, Codex, opencode, …). Change it later with `harness setup`.
@@ -37,9 +39,9 @@ files predate it, so "not verified yet" has a boundary instead of being a
 feeling — and prints the order that works.
 
 ```bash
-harness project init                            # what a Planner must know here
-harness planner create <name> --model <model>   # a Planner that outlives one experiment
-harness exp start <name> --planner <name>       # and it plans the rest
+harness project init                       # what a Planner must know here
+harness create -n <name> --model <model>   # a Planner that outlives one experiment
+harness exp start <name> --planner <name>  # and it plans the rest
 ```
 
 The first Planner's briefing opens with the situation: none of this code is
@@ -58,7 +60,7 @@ An experiment has **exactly one Planner** who owns it end to end (and can
 explore or refine questions/hypotheses within it). **The Planner comes first.**
 
 ```bash
-python -m harness planner create your-planner --model <model> --effort high
+python -m harness create -n your-planner --model <model> --effort high
 python -m harness exp start your-experiment-name --planner your-planner
 ```
 
@@ -290,7 +292,7 @@ An experiment is one hypothesis or investigation branch in its own git worktree,
 several run side by side without colliding.
 
 ```bash
-python -m harness planner create <name> --model <model>            # a Planner across experiments
+python -m harness create -n <name> --model <model>                 # a Planner across experiments
 python -m harness exp start your-experiment-name --planner <name>  # creates + briefs the Planner
 python -m harness exp question your-experiment-name --set "..."   # once you have settled it
 python -m harness planner brief your-experiment-name              # current state, any time
@@ -306,7 +308,7 @@ list of what went **unverified** — then extracts the metrics you asked for fro
 real run artifacts. `READY TO MERGE` means the harness found nothing wrong, not
 that the result is interesting.
 
-A Planner registered with `planner create` outlives one experiment: it carries
+A Planner made with `harness create` outlives one experiment: it carries
 its model — so a report is never "model not recorded" — and the notes it wrote
 in earlier runs, which is the hour it spent learning the project not being paid
 twice. `harness planner note <name> --add "..."` records something the next run

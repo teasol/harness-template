@@ -137,7 +137,7 @@ def test_status_asks_for_a_planner_before_an_experiment(repo: Path, capsys) -> N
     init_project(repo, name="p")
     main(["status", "--root", str(repo)])
     out = capsys.readouterr().out
-    create_at = out.find("planner create")
+    create_at = out.find("harness create -n")
     start_at = out.find("exp start")
     assert create_at != -1 and start_at != -1
     assert create_at < start_at, "the Planner has to be offered first"
@@ -170,3 +170,30 @@ def test_exp_start_says_when_its_planner_is_only_a_label(
     assert main(["exp", "start", "e1", "--planner", "owner", "--root", str(repo)]) == 0
     out = capsys.readouterr().out
     assert ("is a label, not a registered Planner" in out) is not registered
+
+
+def test_create_is_a_top_level_command(repo: Path, capsys) -> None:
+    """A Planner is the only thing the harness creates, so `harness create`."""
+    from harness.cli import main
+
+    assert main(["create", "-n", "owner", "--model", "claude-opus-5", "--root", str(repo)]) == 0
+    out = capsys.readouterr().out
+    assert "Planner 'owner' created (claude-opus-5)" in out
+    assert "--planner owner" in out, "it must point at the next step"
+    assert planners_mod.load("owner", root=repo).model == "claude-opus-5"
+
+
+def test_create_refuses_a_duplicate(repo: Path, capsys) -> None:
+    from harness.cli import main
+
+    assert main(["create", "-n", "owner", "--model", "m", "--root", str(repo)]) == 0
+    assert main(["create", "-n", "owner", "--model", "m", "--root", str(repo)]) == 2
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_create_still_requires_a_model(repo: Path) -> None:
+    """argparse enforces it before the registry has to."""
+    from harness.cli import main
+
+    with pytest.raises(SystemExit):
+        main(["create", "-n", "owner", "--root", str(repo)])

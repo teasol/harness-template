@@ -94,7 +94,7 @@ Most projects do not start empty. The order that works:
 pip install research-harness
 harness init .                                  # notices the code already here
 harness project init                            # what a Planner must know
-harness planner create <name> --model <model>   # it outlives this experiment
+harness create -n <name> --model <model>        # a Planner outlives this experiment
 harness exp start <name> --planner <name>       # the Planner plans the rest
 ```
 
@@ -162,7 +162,7 @@ first-time mistakes, because what would have prevented them was never written
 down.
 
 ```bash
-python -m harness planner create icf --model claude-opus-5 --effort high
+python -m harness create -n icf --model claude-opus-5 --effort high
 python -m harness exp start baseline --planner icf     # inherits model + memory
 python -m harness planner note icf --experiment baseline \
   --add "ICF_CKPT is empty on this node; that is correct for a training-free arm."

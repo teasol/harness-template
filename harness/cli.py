@@ -681,6 +681,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     progress_cmd.set_defaults(func=cmd_progress)
 
+    create_cmd = sub.add_parser(
+        "create",
+        help="Create a Planner (the only thing the harness creates)",
+    )
+    create_cmd.add_argument("-n", "--name", required=True, help="Planner name")
+    create_cmd.add_argument("--model", required=True, help="Model this Planner runs on")
+    create_cmd.add_argument("--effort", default=None, help="Reasoning level")
+    create_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    create_cmd.set_defaults(func=cmd_create)
+
     project_cmd = sub.add_parser(
         "project", help="What a Planner must know before it plans anything here"
     )
@@ -812,7 +822,7 @@ def cmd_exp_start(args: argparse.Namespace) -> int:
             f"note: '{args.planner}' is a label, not a registered Planner. This experiment\n"
             "      therefore carries no Planner model, and its report will say so. Register\n"
             "      one and future experiments inherit its model and its notes:\n"
-            f"        harness planner create {args.planner} --model <model>\n"
+            f"        harness create -n {args.planner} --model <model>\n"
         )
     print("=" * 70)
     print(brief)
@@ -1165,6 +1175,23 @@ def cmd_project_show(args: argparse.Namespace) -> int:
 
 # ---------------------------------------------------------------------------
 # Planner registration
+
+
+def cmd_create(args: argparse.Namespace) -> int:
+    """Create a Planner. It is the only thing this harness creates."""
+    try:
+        planner = planners_mod.create(args.name, args.model, args.effort or "", root=args.root)
+    except planners_mod.PlannerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    tier = planner.model + (f", effort {planner.effort}" if planner.effort else "")
+    print(f"Planner '{planner.name}' created ({tier}).")
+    print(f"  record: {planner.path}")
+    print(
+        f"\nStart experiments under it, and they inherit its model and its notes:\n"
+        f"  harness exp start <name> --planner {planner.name}"
+    )
+    return 0
 
 
 def cmd_planner_create(args: argparse.Namespace) -> int:
@@ -1636,9 +1663,11 @@ def cmd_init(args: argparse.Namespace) -> int:
     adoption = adoption_mod.record(target_dir)
     print("\nNext steps:")
     if adoption is None:
-        print("  1. Verify starter spec:  harness verify --spec configs/demo.yaml")
-        print("  2. Register a Planner:   harness planner create <name> --model <model>")
-        print("  3. Start an experiment:  harness exp start <name> --planner <name>")
+        print("  1. Create a Planner:     harness create -n <name> --model <model>")
+        print("  2. Start an experiment:  harness exp start <name> --planner <name>")
+        print(
+            "\n  (smoke-test the harness itself any time: harness verify --spec configs/demo.yaml)"
+        )
         return 0
 
     print(
