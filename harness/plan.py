@@ -457,6 +457,18 @@ def record_approval(plan_path: str | Path, by: str, note: str = "") -> Path:
     return target
 
 
+def approved_by(plan_path: str | Path) -> str:
+    """Who recorded the approval, or "" when there is none to read."""
+    record = approval_path(Path(plan_path))
+    if not record.is_file():
+        return ""
+    try:
+        data = yaml.safe_load(record.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return ""
+    return str(data.get("approved_by", "") or "")
+
+
 def approval_status(plan_path: str | Path) -> tuple[bool, str]:
     """Return ``(approved, reason)`` for the plan file as it stands right now."""
     plan_path = Path(plan_path)

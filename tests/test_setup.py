@@ -147,3 +147,63 @@ def test_presets_let_an_agent_actually_run_things() -> None:
     assert "bypassPermissions" in platforms["claude"].resume_command
     assert "dangerously-skip-permissions" in platforms["antigravity"].command
     assert "dangerously-skip-permissions" in platforms["antigravity"].resume_command
+
+
+# ---------------------------------------------------------------------------
+# choosing a model instead of typing one
+
+
+def test_opencode_offers_verified_models() -> None:
+    """Ids are long and versioned; a wrong one fails much later, as a dead agent."""
+    from harness.setup import load_platforms
+
+    opencode = load_platforms(root=".")["opencode"]
+    assert opencode.models == [
+        "zai/glm-5.3",
+        "deepseek/deepseek-v4-flash",
+        "deepseek/deepseek-v4-pro",
+    ]
+    # The cheap one for bounded Worker tasks, the stronger one for planning —
+    # which is the whole economic argument for splitting the tiers.
+    assert opencode.default_model == "deepseek/deepseek-v4-flash"
+    assert opencode.planner_model == "zai/glm-5.3"
+
+
+def test_a_number_picks_from_the_list(monkeypatch, capsys) -> None:
+    from harness.cli import _prompt_model
+    from harness.setup import load_platforms
+
+    opencode = load_platforms(root=".")["opencode"]
+    monkeypatch.setattr("builtins.input", lambda _: "3")
+    assert _prompt_model("worker", opencode, opencode.default_model) == "deepseek/deepseek-v4-pro"
+    assert "1. zai/glm-5.3" in capsys.readouterr().out
+
+
+def test_free_text_still_goes_through(monkeypatch) -> None:
+    """A list is a shortcut, not a whitelist — new models must not be blocked."""
+    from harness.cli import _prompt_model
+    from harness.setup import load_platforms
+
+    opencode = load_platforms(root=".")["opencode"]
+    monkeypatch.setattr("builtins.input", lambda _: "anthropic/claude-opus-5")
+    assert _prompt_model("worker", opencode, "") == "anthropic/claude-opus-5"
+
+
+def test_out_of_range_numbers_are_taken_literally(monkeypatch) -> None:
+    """`9` is not a choice here, so it is whatever the user meant to type."""
+    from harness.cli import _prompt_model
+    from harness.setup import load_platforms
+
+    opencode = load_platforms(root=".")["opencode"]
+    monkeypatch.setattr("builtins.input", lambda _: "9")
+    assert _prompt_model("worker", opencode, "") == "9"
+
+
+def test_a_platform_without_a_model_list_prompts_plainly(monkeypatch) -> None:
+    from harness.cli import _prompt_model
+    from harness.setup import load_platforms
+
+    custom = load_platforms(root=".")["custom"]
+    assert not custom.models
+    monkeypatch.setattr("builtins.input", lambda _: "")
+    assert _prompt_model("worker", custom, "fallback") == "fallback"

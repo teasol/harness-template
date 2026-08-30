@@ -67,8 +67,15 @@ platforms:
     efforts: [minimal, low, medium, high, max]
     default_effort: low
     model_hint: "provider/model, e.g. anthropic/claude-haiku-4-5-20251001"
-    default_model: ""
-    planner_model: ""
+    # Offered by number at setup; anything else you type is still accepted.
+    # Verified against `opencode models` — an id from memory is how you end up
+    # configured for a model that does not exist.
+    models:
+      - zai/glm-5.3
+      - deepseek/deepseek-v4-flash
+      - deepseek/deepseek-v4-pro
+    default_model: deepseek/deepseek-v4-flash
+    planner_model: zai/glm-5.3
     planner_effort: high
     session_command: 'opencode run -s {session} -m {model} --variant {effort} "$(cat {brief_file})"'
     reads_brief_from: argument

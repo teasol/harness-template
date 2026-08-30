@@ -47,6 +47,11 @@ class Platform:
     default_effort: str = ""
     model_hint: str = ""
     default_model: str = ""
+    #: Models worth offering for this platform. Typing an exact id from memory
+    #: is how you end up configured for a model that does not exist, and the
+    #: failure shows up much later as an agent that never runs. Free text is
+    #: still accepted — this is a shortcut, not a whitelist.
+    models: list[str] = dataclasses.field(default_factory=list)
     planner_model: str = ""
     planner_effort: str = ""
     session_command: str = ""
@@ -93,6 +98,7 @@ def load_platforms(path: str | Path | None = None, root: str | Path = ".") -> di
             default_effort=str(data.get("default_effort", "")),
             model_hint=str(data.get("model_hint", "")),
             default_model=str(data.get("default_model", "")),
+            models=[str(m) for m in data.get("models", []) or []],
             planner_model=str(data.get("planner_model", "")),
             planner_effort=str(data.get("planner_effort", "")),
             session_command=str(data.get("session_command", "")).strip(),

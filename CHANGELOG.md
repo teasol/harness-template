@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A plan now has to be explained before it can be built.** The Planner's
+  workflow went draft → materialize → dispatch, so nothing ever asked it to say
+  what it intended: the question was agreed with the researcher, the plan was
+  not. A valid but unapproved plan is now its own state, `needs agreement`, and
+  the next command it names is the researcher's `plan approve` rather than the
+  Planner's `materialize`. The role contract gained the step, spelling out what
+  the explanation has to cover — what the plan establishes, each module and who
+  builds it, why this decomposition over the obvious alternative, the cost, and
+  what would make it fail.
+- **Self-approval is reported.** Approving is a second party's act; a Planner
+  that runs `plan approve` itself passes the check while removing the reason it
+  exists. The report now says when the approver is the Planner. An unattended
+  Planner correctly stops at the gate instead of talking its way past it, and
+  there is a test for that.
+- **`harness setup` offers models instead of asking you to type one.** A
+  platform can list `models:`, shown as a numbered menu. Free text still goes
+  through — it is a shortcut, not a whitelist. opencode ships `zai/glm-5.3`,
+  `deepseek/deepseek-v4-flash` and `deepseek/deepseek-v4-pro`, all verified
+  against `opencode models`; an exact id typed from memory is how a project ends
+  up configured for a model that does not exist, and that failure surfaces much
+  later as an agent that never runs.
+
 ## [0.3.3] - 2026-08-30
 
 ### Added

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from harness import experiment as exp_mod
+from harness import plan as plan_mod
 from harness import task as task_mod
 from harness.experiment import ExperimentError
 from harness.plan import PlanError, load_plan
@@ -367,6 +368,15 @@ def test_status_walks_the_whole_flow(clone: Path) -> None:
     shutil.copy(DEMO_SPEC, wt / "configs/flow.yaml")
     for stale in (wt / "tasks").glob("*.task.yaml"):
         stale.unlink()
+
+    # A valid plan nobody has agreed to is a proposal, and the state says so —
+    # this is the step where the Planner has to explain what it intends.
+    states = {e.name: e for e in exp_mod.project_status(clone, cwd=clone).experiments}
+    assert states["flow"].state == "needs agreement"
+    assert "plan approve" in states["flow"].next_command
+    assert "the researcher runs this" in states["flow"].next_command
+
+    plan_mod.record_approval(wt / "plans/flow.yaml", by="researcher")
     states = {e.name: e for e in exp_mod.project_status(clone, cwd=clone).experiments}
     assert states["flow"].state == "not materialized"
     assert "materialize" in states["flow"].next_command
@@ -449,6 +459,10 @@ def test_planner_is_driven_until_the_experiment_is_reportable(clone: Path) -> No
     shutil.copy(DEMO_SPEC, wt / "configs/driven.yaml")
     for stale in (wt / "tasks").glob("*.task.yaml"):
         stale.unlink()
+    # The researcher agreed to this plan — standing in for the conversation the
+    # Planner is required to have. Without it the run stops at the gate, which
+    # is asserted separately below.
+    plan_mod.record_approval(wt / "plans/driven.yaml", by="researcher")
 
     # A stub Planner: materializes on the first call, finishes on the second.
     script = wt / "stub-planner.sh"
@@ -755,3 +769,54 @@ def test_reused_evidence_from_another_commit_blocks_the_merge(clone: Path) -> No
     assert not report.merge_ready
     assert any("different commit" in b for b in report.blockers)
     assert any("does not describe this code" in c for c in report.caveats)
+
+
+@needs_git
+def test_an_unattended_planner_stops_at_the_agreement_gate(clone: Path) -> None:
+    """It must not talk its own way past the one check a second party performs.
+
+    A spawned Planner has nobody to explain the plan to, so the correct outcome
+    is to stop and say so — not to run `plan approve` itself, which passes the
+    check while removing the reason it exists.
+    """
+    from harness.worker import AgentConfig
+
+    experiment = exp_mod.start("gated", root=clone, question="does it work?")
+    wt = experiment.path
+    shutil.copy(DEMO_PLAN, wt / "plans/gated.yaml")
+    text = (wt / "plans/gated.yaml").read_text(encoding="utf-8")
+    text = text.replace("name: demo-pipeline", "name: gated", 1)
+    text = text.replace("spec: configs/demo.yaml", "spec: configs/gated.yaml", 1)
+    (wt / "plans/gated.yaml").write_text(text, encoding="utf-8")
+    shutil.copy(DEMO_SPEC, wt / "configs/gated.yaml")
+    for stale in (wt / "tasks").glob("*.task.yaml"):
+        stale.unlink()
+
+    config = AgentConfig(
+        adapter="cli",
+        platform="stub",
+        model="m",
+        command="cat > /dev/null",
+        attempts=2,
+        label="planner",
+    )
+    outcome = exp_mod.run_planner("gated", config, root=clone)
+    assert not outcome.succeeded
+    assert [a.state for a in outcome.attempts][-1] == "needs agreement"
+    assert "researcher should look at it" in outcome.message
+
+
+@needs_git
+def test_a_plan_approved_by_its_own_planner_is_flagged(clone: Path) -> None:
+    """Self-approval passes the check and defeats it, so the report says so."""
+    experiment = _finished_experiment(clone, "selfapproved")
+    plan_mod.record_approval(experiment.plan_path, by="planner")
+    exp_mod.register_planner("selfapproved", "planner", root=clone, model="m", require_model=True)
+
+    report = exp_mod.build_report("selfapproved", root=clone, run_integration=False)
+    assert any("is the Planner itself" in c for c in report.caveats)
+
+    # A different approver is not flagged.
+    plan_mod.record_approval(experiment.plan_path, by="researcher")
+    report = exp_mod.build_report("selfapproved", root=clone, run_integration=False)
+    assert not any("is the Planner itself" in c for c in report.caveats)

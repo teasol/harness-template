@@ -48,11 +48,29 @@ delegated buys no verification.
    - `constraints` — hard rules (allowed deps, style, determinism)
    - `acceptance` — machine-checkable steps+checks proving the contract
    - `deliverables` — file paths the Worker must create
-2. **Validate & materialize.**
+2. **Explain the plan, and get agreement.** Validate it first, then *say what
+   you intend* — in prose, to the researcher, before anything is built:
    ```bash
    python -m harness plan validate plans/<plan>.yaml
+   ```
+   The explanation is not the YAML. Cover, briefly:
+   - **what the plan will establish**, and how that answers the question;
+   - **each module**: what it is, what proves it, and who builds it
+     (`executor: main` = you, `executor: sub` = delegated);
+   - **why this decomposition** rather than an obvious alternative — including
+     anything you deliberately left out;
+   - **what it will cost**: modules, attempt cap, worst-case time, GPU;
+   - **what would make it fail**, and what you would conclude if it did.
+
+   Then the researcher approves — **you do not approve your own plan**:
+   ```bash
+   python -m harness plan approve plans/<plan>.yaml --by <researcher>
    python -m harness plan materialize plans/<plan>.yaml
    ```
+   A plan nobody agreed to is a proposal, and `plan run` refuses to start on
+   one. Approving it yourself gets past that check while defeating its purpose:
+   the point is that a second party saw the plan before the money was spent, and
+   the report records who that was.
 3. **Dispatch.** Let the harness run the loop — retries, caps, verification,
    and the audit trail are tested code, not something you should re-improvise:
    ```bash

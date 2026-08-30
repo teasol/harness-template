@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from harness import adoption as adoption_mod
+from harness import plan as plan_mod
 from harness import planners as planners_mod
 from harness import project as project_mod
 from harness.checks import CheckError, lookup_metric
@@ -532,6 +533,23 @@ def build_report(
     if report.dirty:
         report.caveats.append(
             "worktree has uncommitted changes — the reported commit does not contain them"
+        )
+
+    # The approval gate exists so that somebody other than the author saw the
+    # plan before the budget was spent. A Planner that approves its own plan
+    # passes the check and defeats the purpose, so the report says so.
+    approver = plan_mod.approved_by(experiment.plan_path)
+    planner_label = str((report.tiers.get("planner") or {}).get("planner") or "") or (
+        (planner_of(experiment) or {}).get("planner") or ""
+    )
+    if (
+        approver
+        and planner_label
+        and approver.strip().lower() == str(planner_label).strip().lower()
+    ):
+        report.caveats.append(
+            f"the plan was approved by '{approver}', which is the Planner itself — "
+            "nobody else saw it before the work started"
         )
 
     # A result whose Planner model is unknown cannot be compared with any other
@@ -1060,6 +1078,18 @@ def experiment_state(experiment: Experiment) -> ExperimentState:
         )
         hint = "after replacing every TODO in it" if kind == "scaffold" else "after fixing it"
         return state(kind, detail, f"harness plan validate plans/{name}.yaml   # {hint}")
+
+    # A plan that nobody has agreed to is a proposal, and the state has to say
+    # so — otherwise the Planner reads "materialize" as the next thing to do and
+    # never explains what it intends. Explaining is the step that was missing.
+    approved, why = plan_mod.approval_status(experiment.plan_path)
+    if not approved:
+        return state(
+            "needs agreement",
+            f"{why} — explain it to the researcher, then they approve",
+            f"harness plan approve plans/{name}.yaml --by <researcher>"
+            "   # the researcher runs this, not you",
+        )
 
     board = {t.id: t for t in load_board(get_tasks_dir(experiment.path))}
     module_ids = [m.id for m in plan.modules]

@@ -1449,6 +1449,28 @@ def _prompt(question: str, default: str, choices: list[str] | None = None) -> st
     return answer or default
 
 
+def _prompt_model(tier: str, platform, default: str) -> str:
+    """Offer the platform's known models by number; accept anything typed.
+
+    Exact model ids are long, versioned and easy to get subtly wrong, and a
+    wrong one does not fail at setup — it fails much later as an agent that
+    never runs. A list removes that for the common case without turning into a
+    whitelist: anything typed goes through unchanged.
+    """
+    if not platform.models:
+        return _prompt(f"{tier} model ({platform.model_hint})", default)
+
+    print(f"\n  {tier} model:")
+    for index, name in enumerate(platform.models, 1):
+        marker = "  (default)" if name == default else ""
+        print(f"    {index}. {name}{marker}")
+    print("    or type any model id this platform accepts")
+    answer = _prompt(f"  {tier} model [1-{len(platform.models)} or id]", default)
+    if answer.isdigit() and 1 <= int(answer) <= len(platform.models):
+        return platform.models[int(answer) - 1]
+    return answer
+
+
 def _choose_tier(
     tier: str,
     platforms: dict,
@@ -1486,11 +1508,7 @@ def _choose_tier(
     )
 
     if model is None:
-        model = (
-            _prompt(f"{tier} model ({platform.model_hint})", default_model)
-            if interactive
-            else default_model
-        )
+        model = _prompt_model(tier, platform, default_model) if interactive else default_model
     if effort is None:
         effort = (
             _prompt(f"{tier} reasoning level", default_effort, platform.efforts or None)
@@ -1547,7 +1565,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
             print(f"  {platform.name:<10} {platform.label}")
             if platform.efforts:
                 print(f"  {'':<10} reasoning levels: {', '.join(platform.efforts)}")
-            if platform.model_hint:
+            if platform.models:
+                print(f"  {'':<10} models: {', '.join(platform.models)}")
+            elif platform.model_hint:
                 print(f"  {'':<10} model: {platform.model_hint}")
             if platform.session_command:
                 print(f"  {'':<10} can attach an existing session id")
