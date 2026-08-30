@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-31
+
+**Breaking.** The experiment layer is gone, replaced by branches you talk your
+way into. Commands and the plan schema changed; see *Removed* for the mapping.
+
+### Changed
+
+- **No more "experiments", and no more required "question".** Work is a
+  **branch**: `harness branch <name>` makes the git branch and a worktree under
+  `.worktrees/`, and that is the whole ceremony. The old flow refused to
+  proceed until a research question had been recorded verbatim, which fit one
+  kind of user and was paperwork for everyone else. What it protected — that the
+  work has a stated goal and the report answers to it — is carried by the plan's
+  `goal`, which the Planner writes anyway. `report.question` is removed from the
+  plan schema; reports show the goal.
+- **Branches are named whatever you call them.** No `exp/` prefix. A branch is
+  recognised as the harness's by *having a worktree* under `.worktrees/`, so
+  there is no second naming scheme to remember. `main`, `master`, `head` and
+  `origin` are refused.
+- **`harness setup` configures only the Sub-Worker.** The Planner is the session
+  you are talking to: always manual, never spawned, nothing to choose. The
+  `--planner-*` flags are gone.
+
+### Removed
+
+- `harness exp start|list|report|remove|question` → `harness branch`,
+  `harness branches`, `harness report`, `harness drop`. Recording a question has
+  no replacement; say it to the Planner and let it write the goal.
+- `harness planner run`, which spawned an unattended Planner. With the Planner
+  fixed to manual it could never run, and a command that cannot work is worse
+  than no command.
+
+
 ## [0.3.4] - 2026-08-31
 
 ### Fixed

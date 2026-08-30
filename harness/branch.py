@@ -1,18 +1,23 @@
-"""Experiments — the Tier 1 ↔ Tier 2 boundary.
+"""Branches — one piece of work, isolated, from start to report.
 
-An experiment is one research hypothesis, developed on its own branch in its
-own git worktree. The Planner works there start to finish; the researcher
-reads the resulting report and decides whether to merge. The harness never
-merges: choosing which hypothesis enters the record is the researcher's
-judgement, and the one thing here that is not automated.
+A branch is a piece of work the Planner takes on: its own git branch, its own
+worktree, its own plan. You and the Planner agree what it is by talking; the
+harness does not make you write that down before it will let you start.
 
-Worktrees, not just branches, because several experiments run at once and each
-needs its own files on disk. Within one experiment Workers run sequentially,
-so its task board stays coherent and dependency gates read current state.
+There used to be an "branch" here, and it required a research *question*
+recorded verbatim before anything could proceed. That framing fit one kind of
+user and was ceremony for everyone else, so it is gone. What it was protecting
+— that the work has a stated goal, and that the report answers to it — is
+carried by the plan's `goal`, which the Planner has to write anyway.
 
-A report is deliberately self-contained: it draws only on its own experiment's
-artifacts. Comparing experiments is the researcher's job, done by collecting
-finished reports — not something one experiment may reach across to do.
+Worktrees, not just branches, because several pieces of work run at once and
+each needs its own files on disk. Within one branch Sub-Workers run
+sequentially, so its task board stays coherent and dependency gates read
+current state.
+
+A report is deliberately self-contained: it draws only on its own branch's
+artifacts. Comparing two branches is your job, done by reading finished
+reports — not something one branch may reach across to do.
 """
 
 from __future__ import annotations
@@ -45,18 +50,22 @@ from harness.runner import Runner
 from harness.spec import SpecError, load_spec
 from harness.task import load_board, verify_task
 
-BRANCH_PREFIX = "exp/"
-DEFAULT_WORKTREE_ROOT = ".experiments"
+#: Where worktrees live. A harness branch is identified by *having* a worktree
+#: here, not by a name prefix — the branch is called whatever you called it.
+DEFAULT_WORKTREE_ROOT = ".worktrees"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
+#: Names git or the project already means something by.
+RESERVED_NAMES = frozenset({"main", "master", "head", "origin"})
 
-class ExperimentError(RuntimeError):
-    """Raised when an experiment cannot be created, found, or reported on."""
+
+class BranchError(RuntimeError):
+    """Raised when a branch cannot be created, found, or reported on."""
 
 
 @dataclasses.dataclass
-class Experiment:
-    """One hypothesis under development: a branch, a worktree, a plan."""
+class Branch:
+    """One piece of work: a git branch, a worktree, a plan."""
 
     name: str
     branch: str
@@ -66,17 +75,6 @@ class Experiment:
     @property
     def plan_path(self) -> Path:
         return get_plans_dir(self.path) / f"{self.name}.yaml"
-
-    @property
-    def question_path(self) -> Path:
-        """The researcher's question, verbatim, committed with the experiment."""
-        return self.path / "experiments" / self.name / "question.md"
-
-    @property
-    def question(self) -> str:
-        if self.question_path.is_file():
-            return self.question_path.read_text(encoding="utf-8").strip()
-        return ""
 
 
 @dataclasses.dataclass
@@ -91,12 +89,12 @@ class MetricValue:
 
 
 @dataclasses.dataclass
-class ExperimentReport:
+class BranchReport:
     """What the researcher reads to decide whether to merge."""
 
-    experiment: str
+    name: str
     branch: str
-    question: str
+    goal: str
     merge_ready: bool
     commit: str | None = None
     dirty: bool | None = None
@@ -135,14 +133,25 @@ def _git(root: str | Path, *args: str, check: bool = True) -> str:
         check=False,
     )
     if check and proc.returncode != 0:
-        raise ExperimentError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
+        raise BranchError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
     return proc.stdout.strip()
 
 
-def list_experiments(root: str | Path = ".") -> list[Experiment]:
-    """Every experiment worktree git knows about, sorted by name."""
+def list_branches(
+    root: str | Path = ".", worktree_root: str | Path = DEFAULT_WORKTREE_ROOT
+) -> list[Branch]:
+    """Every harness worktree git knows about, sorted by name.
+
+    Membership is decided by *where the worktree is*, not by a prefix on the
+    branch name. Branches are named whatever you called them, so there is
+    nothing in the name to match on — and a prefix would be a second naming
+    scheme to remember for no gain.
+    """
+    root = Path(root).resolve()
+    base = Path(worktree_root)
+    base = base if base.is_absolute() else root / base
     porcelain = _git(root, "worktree", "list", "--porcelain")
-    experiments: list[Experiment] = []
+    branches: list[Branch] = []
     path: str | None = None
     head = ""
     for line in porcelain.splitlines():
@@ -151,27 +160,22 @@ def list_experiments(root: str | Path = ".") -> list[Experiment]:
         elif line.startswith("HEAD "):
             head = line[len("HEAD ") :]
         elif line.startswith("branch ") and path is not None:
-            ref = line[len("branch ") :]
-            branch = ref.removeprefix("refs/heads/")
-            if branch.startswith(BRANCH_PREFIX):
-                experiments.append(
-                    Experiment(
-                        name=branch[len(BRANCH_PREFIX) :],
-                        branch=branch,
-                        path=Path(path),
-                        head=head,
-                    )
+            name_ref = line[len("branch ") :].removeprefix("refs/heads/")
+            resolved = Path(path).resolve()
+            if resolved.parent == base:
+                branches.append(
+                    Branch(name=resolved.name, branch=name_ref, path=resolved, head=head)
                 )
             path = None
-    return sorted(experiments, key=lambda e: e.name)
+    return sorted(branches, key=lambda b: b.name)
 
 
-def find_experiment(name: str, root: str | Path = ".") -> Experiment:
-    for experiment in list_experiments(root):
-        if experiment.name == name:
-            return experiment
-    known = [e.name for e in list_experiments(root)]
-    raise ExperimentError(f"no experiment '{name}'. known: {known or '(none)'}")
+def find_branch(name: str, root: str | Path = ".") -> Branch:
+    for candidate in list_branches(root):
+        if candidate.name == name:
+            return candidate
+    known = [b.name for b in list_branches(root)]
+    raise BranchError(f"no branch '{name}'. known: {known or '(none)'}")
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +183,7 @@ def find_experiment(name: str, root: str | Path = ".") -> Experiment:
 
 
 PLAN_TEMPLATE = """\
-# Plan for experiment '{name}' — written by the Planner, read by Workers.
+# Plan for branch '{name}' — written by the Planner, read by Workers.
 #
 # TODO(Planner): replace every TODO below, then run:
 #   python -m harness plan validate plans/{name}.yaml
@@ -187,14 +191,13 @@ PLAN_TEMPLATE = """\
 plan:
   name: {name}
   goal: >
-    TODO: one paragraph stating what this experiment is meant to establish.
+    TODO: one paragraph stating what this work is meant to establish. This is
+    what the report answers to, so write it as you would explain it out loud.
 
-  # What the researcher asked to see. Declare WHERE each number lives; the
-  # harness extracts the value from the real artifact. Paths must stay inside
-  # this experiment — a report may not read another experiment's results.
+  # What to report back. Declare WHERE each number lives; the harness extracts
+  # the value from the real artifact. Paths must stay inside this branch — a
+  # report may not read another branch's results.
   report:
-    question: |
-      {question}
     metrics:
       - name: TODO_metric
         source: ${{HARNESS_RESULTS_DIR}}/metrics.json
@@ -231,7 +234,7 @@ _INHERITED_CONFIGS = ("agents.yaml", "agent-platforms.yaml", "project.yaml")
 
 
 def _inherit_agent_configs(root: Path, worktree: Path) -> list[str]:
-    """Copy the project's agent configuration into a new experiment worktree.
+    """Copy the project's agent configuration into a new branch worktree.
 
     Without this the harness finds no ``agents.yaml`` in the worktree and falls
     back to the manual adapter — silently. ``plan run`` then writes briefings
@@ -261,49 +264,34 @@ def start(
     worktree_root: str | Path = DEFAULT_WORKTREE_ROOT,
     base: str = "HEAD",
     scaffold: bool = True,
-    question: str = "",
-) -> Experiment:
-    """Create an experiment: a branch and a worktree to develop it in."""
+) -> Branch:
+    """Create a branch and a worktree to do one piece of work in."""
     if not NAME_RE.match(name):
-        raise ExperimentError(
-            f"invalid experiment name '{name}' — use lowercase letters, digits, and hyphens"
+        raise BranchError(
+            f"invalid branch name '{name}' — use lowercase letters, digits, and hyphens"
         )
+    if name.lower() in RESERVED_NAMES:
+        raise BranchError(f"'{name}' is reserved — pick a name for the work itself")
     root = Path(root).resolve()
-    branch = f"{BRANCH_PREFIX}{name}"
+    branch = name
     worktree_root = Path(worktree_root)
     path = worktree_root if worktree_root.is_absolute() else root / worktree_root
     path = path / name
     if path.exists():
-        raise ExperimentError(f"path already exists: {path}")
+        raise BranchError(f"path already exists: {path}")
     existing = _git(root, "branch", "--list", branch)
     if existing:
-        raise ExperimentError(f"branch '{branch}' already exists — pick another name")
+        raise BranchError(f"branch '{branch}' already exists — pick another name")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     _git(root, "worktree", "add", "-b", branch, str(path), base)
 
-    experiment = Experiment(
-        name=name, branch=branch, path=path, head=_git(path, "rev-parse", "HEAD")
-    )
+    created = Branch(name=name, branch=branch, path=path, head=_git(path, "rev-parse", "HEAD"))
     _inherit_agent_configs(root, path)
-    if question.strip():
-        # An experiment starts from a question. Storing it verbatim means a
-        # Planner spawned later reads what the researcher actually asked,
-        # rather than a paraphrase that passed through someone's summary.
-        experiment.question_path.parent.mkdir(parents=True, exist_ok=True)
-        experiment.question_path.write_text(question.strip() + "\n", encoding="utf-8")
     if scaffold:
-        if not experiment.plan_path.exists():
-            experiment.plan_path.parent.mkdir(parents=True, exist_ok=True)
-            experiment.plan_path.write_text(
-                PLAN_TEMPLATE.format(
-                    name=name,
-                    question=(
-                        question.strip() or "TODO: the researcher's instruction, verbatim."
-                    ).replace("\n", "\n      "),
-                ),
-                encoding="utf-8",
-            )
+        if not created.plan_path.exists():
+            created.plan_path.parent.mkdir(parents=True, exist_ok=True)
+            created.plan_path.write_text(PLAN_TEMPLATE.format(name=name), encoding="utf-8")
         # Scaffold the integration spec the plan points at, so the Planner's
         # first validation error is about the TODOs it must fill in, not about
         # a file the scaffold neglected to create.
@@ -311,49 +299,33 @@ def start(
         if not spec_path.exists():
             spec_path.parent.mkdir(parents=True, exist_ok=True)
             spec_path.write_text(INTEGRATION_TEMPLATE.format(name=name), encoding="utf-8")
-    return experiment
+    return created
 
 
-def set_question(name: str, question: str, root: str | Path = ".") -> Experiment:
-    """Record the question after the fact.
-
-    An experiment often starts before its question is sharp: the researcher
-    opens a Planner and they work out what is actually being asked. That
-    conversation is the point, so the question is recorded when it settles
-    rather than demanded up front.
-    """
-    experiment = find_experiment(name, root)
-    if not question.strip():
-        raise ExperimentError("the question cannot be empty")
-    experiment.question_path.parent.mkdir(parents=True, exist_ok=True)
-    experiment.question_path.write_text(question.strip() + "\n", encoding="utf-8")
-    return experiment
-
-
-def remove(name: str, root: str | Path = ".", force: bool = False) -> Experiment:
-    """Remove an experiment's worktree. The branch is kept — it is the record."""
-    experiment = find_experiment(name, root)
-    args = ["worktree", "remove", str(experiment.path)]
+def remove(name: str, root: str | Path = ".", force: bool = False) -> Branch:
+    """Remove a branch's worktree. The branch is kept — it is the record."""
+    branch = find_branch(name, root)
+    args = ["worktree", "remove", str(branch.path)]
     if force:
         args.append("--force")
     _git(root, *args)
-    return experiment
+    return branch
 
 
 # ---------------------------------------------------------------------------
 # reporting
 
 
-def _resolve_plan(experiment: Experiment) -> Plan:
-    if not experiment.plan_path.is_file():
-        raise ExperimentError(
-            f"experiment '{experiment.name}' has no plan at {experiment.plan_path}. "
+def _resolve_plan(branch: Branch) -> Plan:
+    if not branch.plan_path.is_file():
+        raise BranchError(
+            f"branch '{branch.name}' has no plan at {branch.plan_path}. "
             "The Planner writes it before anything can be reported."
         )
     try:
-        return load_plan(experiment.plan_path)
+        return load_plan(branch.plan_path)
     except PlanError as exc:
-        raise ExperimentError(f"plan for '{experiment.name}' is invalid: {exc}") from exc
+        raise BranchError(f"plan for '{branch.name}' is invalid: {exc}") from exc
 
 
 def _extract_metrics(plan: Plan, run_dir: Path | None) -> list[MetricValue]:
@@ -387,21 +359,21 @@ def build_report(
     root: str | Path = ".",
     run_integration: bool = True,
     check_determinism: bool = False,
-) -> ExperimentReport:
-    """Assemble the researcher's decision aid for one experiment.
+) -> BranchReport:
+    """Assemble the researcher's decision aid for one branch.
 
     The spine — integration result, task acceptance, determinism, the commit
     to merge — is measured here, not narrated by an agent. The requested
     metrics are extracted from the artifacts the run produced.
     """
-    experiment = find_experiment(name, root)
-    plan = _resolve_plan(experiment)
-    exp_root = experiment.path
+    branch = find_branch(name, root)
+    plan = _resolve_plan(branch)
+    exp_root = branch.path
 
-    report = ExperimentReport(
-        experiment=experiment.name,
-        branch=experiment.branch,
-        question=plan.report.question.strip(),
+    report = BranchReport(
+        name=branch.name,
+        branch=branch.branch,
+        goal=plan.goal.strip(),
         merge_ready=False,
         artifacts=list(plan.report.artifacts),
         provenance=collect_provenance(exp_root, seed=None),
@@ -409,14 +381,14 @@ def build_report(
     report.commit = report.provenance.get("git_commit")
     report.dirty = report.provenance.get("git_dirty")
     report.tiers = {
-        "planner": planner_of(experiment) or _agent_tier(exp_root, "planner"),
+        "planner": planner_of(branch) or _agent_tier(exp_root, "planner"),
         "worker": _agent_tier(exp_root, "worker"),
     }
 
     # --- task board: is every module actually finished, and still passing? ---
     # Scoped to *this plan's* modules. A tasks/ directory may hold task files
     # from other plans (the shipped demo, an earlier plan); counting those
-    # would report an experiment as complete when none of its own modules
+    # would report a branch as complete when none of its own modules
     # were built — and that number decides a merge.
     board = {t.id: t for t in load_board(exp_root / "tasks")}
     module_ids = [m.id for m in plan.modules]
@@ -538,9 +510,9 @@ def build_report(
     # The approval gate exists so that somebody other than the author saw the
     # plan before the budget was spent. A Planner that approves its own plan
     # passes the check and defeats the purpose, so the report says so.
-    approver = plan_mod.approved_by(experiment.plan_path)
+    approver = plan_mod.approved_by(branch.plan_path)
     planner_label = str((report.tiers.get("planner") or {}).get("planner") or "") or (
-        (planner_of(experiment) or {}).get("planner") or ""
+        (planner_of(branch) or {}).get("planner") or ""
     )
     if (
         approver
@@ -554,11 +526,11 @@ def build_report(
 
     # A result whose Planner model is unknown cannot be compared with any other
     # result, so the gap is stated rather than left to be noticed.
-    if not ((report.tiers.get("planner") or {}).get("model") or _planner_model(experiment, root)):
+    if not ((report.tiers.get("planner") or {}).get("model") or _planner_model(branch, root)):
         report.caveats.append(
             "Planner model not recorded — this run cannot be compared with another. "
             "Record it on the Planner with `harness planner set <planner> --model <model>`, "
-            f"or on this experiment alone with `harness planner brief {name} "
+            f"or on this branch alone with `harness planner brief {name} "
             "--register <label> --model <model>`."
         )
 
@@ -579,7 +551,7 @@ def build_report(
     if report.dirty:
         blockers.append("uncommitted changes in the worktree")
     if report.determinism == "NOT REPRODUCIBLE":
-        blockers.append("the experiment is not reproducible")
+        blockers.append("the branch is not reproducible")
 
     report.merge_ready = not blockers
     report.blockers = blockers
@@ -597,16 +569,16 @@ class PreviousRun:
 
 
 def _last_run(exp_root: Path, integration: str | None) -> PreviousRun | None:
-    """The most recent completed run of this experiment's integration spec.
+    """The most recent completed run of this branch's integration spec.
 
     Matched on the spec's name, so an unrelated spec's run in the same results
-    directory is never mistaken for this experiment's evidence.
+    directory is never mistaken for this branch's evidence.
     """
     if integration is None:
         return None
     try:
         spec_name = load_spec(_integration_path(exp_root, integration)).name
-    except (SpecError, ExperimentError, OSError):
+    except (SpecError, BranchError, OSError):
         return None
     runs_dir = exp_root / "results" / "runs"
     if not runs_dir.is_dir():
@@ -639,13 +611,13 @@ def _integration_path(exp_root: Path, integration: str) -> Path:
 # rendering
 
 
-def report_markdown(report: ExperimentReport) -> str:
+def report_markdown(report: BranchReport) -> str:
     lines = [
-        f"# Experiment report: {report.experiment}",
+        f"# Branch report: {report.branch}",
         "",
     ]
-    if report.question:
-        lines += ["## Question", "", report.question, ""]
+    if report.goal:
+        lines += ["## Goal", "", report.goal, ""]
 
     verdict = "READY TO MERGE" if report.merge_ready else "NOT READY"
     commit = report.commit or "unknown"
@@ -725,14 +697,14 @@ def report_markdown(report: ExperimentReport) -> str:
     return "\n".join(lines)
 
 
-def write_experiment_report(
-    report: ExperimentReport, exp_root: str | Path, save: bool = False
+def write_branch_report(
+    report: BranchReport, exp_root: str | Path, save: bool = False
 ) -> list[Path]:
     """Write the report under ``results/`` and, with ``save``, into the branch."""
     exp_root = Path(exp_root)
     written: list[Path] = []
 
-    out_dir = exp_root / "results" / "experiments" / report.experiment
+    out_dir = exp_root / "results" / "branches" / report.branch
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / "report.json"
     json_path.write_text(
@@ -743,7 +715,7 @@ def write_experiment_report(
     written += [json_path, md_path]
 
     if save:
-        saved_dir = exp_root / "experiments" / report.experiment
+        saved_dir = exp_root / "branches" / report.branch
         saved_dir.mkdir(parents=True, exist_ok=True)
         saved = saved_dir / "report.md"
         saved.write_text(report_markdown(report), encoding="utf-8")
@@ -756,27 +728,26 @@ def write_experiment_report(
 
 
 def _anything_reported(root: str | Path = ".") -> bool:
-    """True once any experiment here has reached a reportable state.
+    """True once any branch here has reached a reportable state.
 
     The adoption framing is for a project where nothing has been proven yet. Once
-    one experiment has, repeating it in every briefing is noise.
+    one branch has, repeating it in every briefing is noise.
     """
     try:
         return any(
-            e.state == "ready to report"
-            for e in (experiment_state(x) for x in list_experiments(root))
+            e.state == "ready to report" for e in (branch_state(x) for x in list_branches(root))
         )
-    except ExperimentError:
+    except BranchError:
         return False
 
 
-def _planner_model(experiment: Experiment, root: str | Path = ".") -> str:
-    """The model driving this experiment, from the marker or the registry.
+def _planner_model(branch: Branch, root: str | Path = ".") -> str:
+    """The model driving this branch, from the marker or the registry.
 
-    A registered Planner carries its own model, so an experiment linked to one
+    A registered Planner carries its own model, so a branch linked to one
     is never "model not recorded" — the registry answers on its behalf.
     """
-    marker = planner_of(experiment) or {}
+    marker = planner_of(branch) or {}
     if marker.get("model"):
         return str(marker["model"])
     label = marker.get("planner")
@@ -789,9 +760,9 @@ def _planner_model(experiment: Experiment, root: str | Path = ".") -> str:
 
 
 def planner_brief(name: str, root: str | Path = ".") -> str:
-    """The Planner's working briefing: question, state, and the next command.
+    """The Planner's working briefing: the work, the state, and the next command.
 
-    Always the same sections in the same order, whatever the experiment's
+    Always the same sections in the same order, whatever the branch's
     state — only their contents differ. A document that changes shape is a
     document you have to re-read; this one you can re-run and skim.
 
@@ -799,47 +770,50 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
     told to run it and follow the result. Tool-specific shims (a skill, a slash
     command) are thin optional wrappers around this, never a prerequisite.
     """
-    experiment = find_experiment(name, root)
-    exp_root = experiment.path
-    state = experiment_state(experiment)
+    branch = find_branch(name, root)
+    exp_root = branch.path
+    state = branch_state(branch)
 
     lines = [
-        f"# Planner briefing: {experiment.name}",
+        f"# Planner briefing: {branch.name}",
         "",
-        "## Question",
+        "## The work",
         "",
     ]
-    if experiment.question:
+    goal = ""
+    if branch.plan_path.is_file():
+        with contextlib.suppress(PlanError):
+            goal = load_plan(branch.plan_path).goal.strip()
+    if goal:
         lines += [
-            experiment.question,
+            goal,
             "",
-            "Everything you do serves answering exactly this. Do not widen it, and",
-            "do not narrow it; if it is genuinely ambiguous, pick the reading a",
-            "careful colleague would and state the assumption in the plan's goal.",
+            "That is the plan's stated goal, and the report answers to it. If the",
+            "conversation has moved past it, change the goal — do not let the plan",
+            "and what you are actually doing drift apart.",
         ]
     else:
         lines += [
-            "**Not settled yet.** That is normal — a question gets sharper by",
-            "talking it through. Work it out with the researcher first: what is",
-            "being asked, what would count as an answer, what they want reported.",
-            "Plan nothing and spawn no Worker until you agree, then record it",
-            "verbatim so it survives this session and reaches the report.",
+            "No goal written yet. Work out with the user what this branch is for:",
+            "what they want done, what would count as done, what they want to see at",
+            "the end. Then write it as the plan's `goal` — one paragraph, in the",
+            "words you would use out loud — and explain the plan before building it.",
         ]
     lines += [""]
     # A project that predates the harness needs saying so, once, to the Planner
-    # that will do something about it. Dropped as soon as any experiment has
+    # that will do something about it. Dropped as soon as any branch has
     # reached a report: by then the situation speaks for itself.
     adoption = adoption_mod.read(root)
     if adoption is not None and adoption.is_adoption and not _anything_reported(root):
         lines += adoption_mod.brief_lines(adoption, root)
 
     # A Planner with a memory opens with it: everything it learned in earlier
-    # experiments, so the hour spent learning this project is paid once.
-    registered = planner_of(experiment) or {}
+    # branches, so the hour spent learning this project is paid once.
+    registered = planner_of(branch) or {}
     if registered.get("planner"):
         with contextlib.suppress(planners_mod.PlannerError):
             lines += planners_mod.brief_lines(
-                planners_mod.load(registered["planner"], root), experiment.name
+                planners_mod.load(registered["planner"], root), branch.name
             )
 
     # Before the state and long before any plan: what this project already
@@ -852,9 +826,9 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
 
     lines += ["## State", "", f"**{state.state}** — {state.detail}", ""]
 
-    if experiment.plan_path.is_file() and experiment.question:
+    if branch.plan_path.is_file():
         try:
-            plan = load_plan(experiment.plan_path)
+            plan = load_plan(branch.plan_path)
         except PlanError:
             pass
         else:
@@ -874,13 +848,13 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
                 lines.append(f"| `{module_id}` | {status} | {worker} | {deps} |")
             lines.append("")
 
-    if not _planner_model(experiment, root):
+    if not _planner_model(branch, root):
         # A hand-appointed Planner is the one agent the harness cannot inspect.
         # If it does not say what it is, the report cannot either.
         lines += [
             "## Register yourself first",
             "",
-            "This experiment has no Planner model on record, so its report cannot be",
+            "This branch has no Planner model on record, so its report cannot be",
             "compared with any other. You were opened by a person; say what you are:",
             "",
             "```bash",
@@ -900,8 +874,8 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "",
         "## Your role",
         "",
-        "Read agents/planner.md and follow it. You own this experiment end to end:",
-        "settle the question, agree the plan with the researcher, get each module",
+        "Read agents/planner.md and follow it. You own this branch end to end:",
+        "agree what the work is, agree the plan, get each module",
         "built, verify, and report back.",
         "",
         "**You are also the Main Worker, so building a module yourself is a normal",
@@ -914,19 +888,20 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "You never merge — that is the researcher's decision.",
         "",
         f"- Worktree: {exp_root}",
-        f"- Branch:   {experiment.branch}",
-        f"- Plan:     {experiment.plan_path}",
+        f"- Branch:   {branch.branch}",
+        f"- Plan:     {branch.plan_path}",
         f"- Contract: {exp_root / 'agents' / 'planner.md'}",
         "",
         "## The whole sequence",
         "",
         "```bash",
-        f'python -m harness exp question {experiment.name} --set "..."  # once agreed',
-        f"python -m harness plan validate plans/{experiment.name}.yaml",
-        f"python -m harness plan materialize plans/{experiment.name}.yaml",
+        f"python -m harness plan validate plans/{branch.name}.yaml",
+        f"python -m harness plan approve plans/{branch.name}.yaml --by <user>"
+        "   # they run this, after you explain it",
+        f"python -m harness plan materialize plans/{branch.name}.yaml",
         "python -m harness task list                 # what is ready",
-        f"python -m harness plan run plans/{experiment.name}.yaml       # Workers build it",
-        f"python -m harness exp report {experiment.name} --determinism --save",
+        f"python -m harness plan run plans/{branch.name}.yaml       # Sub-Workers build it",
+        f"python -m harness report {branch.name} --save",
         "```",
         "",
         "`plan run` invokes the configured Worker per module, verifies acceptance",
@@ -939,8 +914,8 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "",
         "## When you are done",
         "",
-        f"Run `harness exp report {experiment.name}`. It exits non-zero until the",
-        "experiment is genuinely merge-ready. Then stop and hand back to the",
+        f"Run `harness report {branch.name}`. It exits non-zero until the",
+        "branch is genuinely merge-ready. Then stop and hand back to the",
         "researcher — do not merge.",
         "",
     ]
@@ -955,7 +930,7 @@ def register_planner(
     effort: str = "",
     require_model: bool = False,
 ) -> Path:
-    """Record who is driving an experiment, and on what.
+    """Record who is driving a branch, and on what.
 
     The harness cannot choose the Planner's model — that session was opened by
     a person — but recording it makes the tier split auditable: a report can
@@ -969,18 +944,18 @@ def register_planner(
     gap instead of refusing.
     """
     if require_model and not str(model).strip():
-        raise ExperimentError(
+        raise BranchError(
             "registering a Planner requires --model: a run whose Planner model is "
             "unknown cannot be compared with any other run. Pass the model the "
             "session is actually running on."
         )
-    experiment = find_experiment(name, root)
-    marker = experiment.path / "results" / "experiments" / experiment.name / "planner.json"
+    branch = find_branch(name, root)
+    marker = branch.path / "results" / "branches" / branch.name / "planner.json"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(
         json.dumps(
             {
-                "experiment": experiment.name,
+                "branch": branch.name,
                 "planner": label,
                 "model": model,
                 "effort": effort,
@@ -993,9 +968,9 @@ def register_planner(
     return marker
 
 
-def planner_of(experiment: Experiment) -> dict[str, Any] | None:
-    """The registered Planner for an experiment, with its declared tier."""
-    marker = experiment.path / "results" / "experiments" / experiment.name / "planner.json"
+def planner_of(branch: Branch) -> dict[str, Any] | None:
+    """The registered Planner for a branch, with its declared tier."""
+    marker = branch.path / "results" / "branches" / branch.name / "planner.json"
     if not marker.is_file():
         return None
     try:
@@ -1005,7 +980,7 @@ def planner_of(experiment: Experiment) -> dict[str, Any] | None:
 
 
 INTEGRATION_TEMPLATE = """\
-# Integration spec for experiment '{name}' — verifies the ASSEMBLED whole once
+# Integration spec for branch '{name}' — verifies the ASSEMBLED whole once
 # every module is done. TODO(Planner): replace the placeholder step.
 name: {name}
 description: Integration check for {name}
@@ -1024,8 +999,8 @@ steps:
 
 
 @dataclasses.dataclass
-class ExperimentState:
-    """One experiment's position in the flow, derived from files alone."""
+class BranchState:
+    """One branch's position in the flow, derived from files alone."""
 
     name: str
     branch: str
@@ -1044,7 +1019,7 @@ class ProjectStatus:
     worker_adapter: str = "manual"
     worker_tier: dict[str, Any] = dataclasses.field(default_factory=dict)
     planner_tier: dict[str, Any] = dataclasses.field(default_factory=dict)
-    experiments: list[ExperimentState] = dataclasses.field(default_factory=list)
+    branches: list[BranchState] = dataclasses.field(default_factory=list)
     here: str | None = None
     headline: str = ""
     next_steps: list[str] = dataclasses.field(default_factory=list)
@@ -1054,31 +1029,25 @@ class ProjectStatus:
     agents_config_path: str = ""
 
 
-def experiment_state(experiment: Experiment) -> ExperimentState:
-    """Classify an experiment without running anything.
+def branch_state(item: Branch) -> BranchState:
+    """Classify a branch without running anything.
 
     Cheap on purpose: orientation must be instant, so this reads the plan and
     the board and never executes a spec.
     """
-    name, branch = experiment.name, experiment.branch
+    name, ref = item.name, item.branch
 
-    def state(kind: str, detail: str, command: str) -> ExperimentState:
-        return ExperimentState(name, branch, kind, detail, command)
+    def state(kind: str, detail: str, command: str) -> BranchState:
+        return BranchState(name, ref, kind, detail, command)
 
-    if not experiment.question:
-        return state(
-            "question unsettled",
-            "the question has not been agreed with the researcher yet",
-            f'harness exp question {name} --set "<their question, verbatim>"',
-        )
-    if not experiment.plan_path.is_file():
+    if not item.plan_path.is_file():
         return state(
             "no plan",
             "the Planner has not written a plan yet",
             f"harness plan validate plans/{name}.yaml   # after writing it",
         )
     try:
-        plan = load_plan(experiment.plan_path)
+        plan = load_plan(item.plan_path)
     except PlanError as exc:
         kind = "scaffold" if "still the scaffold" in str(exc) else "invalid plan"
         detail = (
@@ -1090,7 +1059,7 @@ def experiment_state(experiment: Experiment) -> ExperimentState:
     # A plan that nobody has agreed to is a proposal, and the state has to say
     # so — otherwise the Planner reads "materialize" as the next thing to do and
     # never explains what it intends. Explaining is the step that was missing.
-    approved, why = plan_mod.approval_status(experiment.plan_path)
+    approved, why = plan_mod.approval_status(item.plan_path)
     if not approved:
         return state(
             "needs agreement",
@@ -1099,7 +1068,7 @@ def experiment_state(experiment: Experiment) -> ExperimentState:
             "   # the researcher runs this, not you",
         )
 
-    board = {t.id: t for t in load_board(get_tasks_dir(experiment.path))}
+    board = {t.id: t for t in load_board(get_tasks_dir(item.path))}
     module_ids = [m.id for m in plan.modules]
     present = [i for i in module_ids if i in board]
     if len(present) < len(module_ids):
@@ -1128,7 +1097,7 @@ def experiment_state(experiment: Experiment) -> ExperimentState:
     return state(
         "ready to report",
         "every module is done",
-        f"harness exp report {name} --determinism --save",
+        f"harness report {name} --determinism --save",
     )
 
 
@@ -1146,13 +1115,13 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
     demo_present = (get_plans_dir(root) / "demo-pipeline.yaml").is_file()
 
     try:
-        experiments = [experiment_state(e) for e in list_experiments(root)]
-    except ExperimentError:
-        experiments = []
+        branches = [branch_state(e) for e in list_branches(root)]
+    except BranchError:
+        branches = []
 
     here = None
     current = Path(cwd or Path.cwd()).resolve()
-    for candidate in list_experiments(root) if experiments else []:
+    for candidate in list_branches(root) if branches else []:
         if current == candidate.path or candidate.path in current.parents:
             here = candidate.name
             break
@@ -1161,7 +1130,7 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         instantiated=instantiated,
         project_name=project_name,
         demo_present=demo_present,
-        experiments=experiments,
+        branches=branches,
         here=here,
         worker_adapter=_worker_adapter(root),
         worker_tier=_agent_tier(root, "worker"),
@@ -1177,10 +1146,10 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         ]
         return status
 
-    if not experiments:
-        status.headline = f"'{project_name}' is set up, with no experiments yet."
-        # A Planner comes before the experiment it owns: registering one first
-        # means the experiment inherits its model — so the report is never
+    if not branches:
+        status.headline = f"'{project_name}' is set up, with no branches yet."
+        # A Planner comes before the branch it owns: registering one first
+        # means the branch inherits its model — so the report is never
         # "model not recorded" — and everything that Planner has already
         # learned here. Registering afterwards works, but by then the first
         # briefing has already been written without any of it.
@@ -1189,22 +1158,22 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         known = [p.name for p in planners_mod.list_planners(root)]
         if known:
             status.next_steps = [
-                f"harness exp start <hypothesis> --planner {known[0]}"
-                "   # a branch + worktree for one question",
+                f"harness branch <name> --planner {known[0]}"
+                "   # a branch + worktree for one piece of work",
             ]
         else:
             status.next_steps = [
-                "harness create -n <name> --model <model>   # a Planner outlives one experiment",
-                "harness exp start <hypothesis> --planner <name>   # then the experiment it owns",
+                "harness create -n <name> --model <model>   # a Planner outlives one branch",
+                "harness branch <name> --planner <name>   # then the branch it owns",
             ]
         return status
 
-    unfinished = [e for e in experiments if e.state != "ready to report"]
-    focus = next((e for e in experiments if e.name == status.here), None) or (
-        unfinished[0] if unfinished else experiments[0]
+    unfinished = [e for e in branches if e.state != "ready to report"]
+    focus = next((e for e in branches if e.name == status.here), None) or (
+        unfinished[0] if unfinished else branches[0]
     )
-    where = f"in experiment '{status.here}'" if status.here else "at the project root"
-    status.headline = f"You are {where}; {len(experiments)} experiment(s) in flight."
+    where = f"in branch '{status.here}'" if status.here else "at the project root"
+    status.headline = f"You are {where}; {len(branches)} branch(s) in flight."
     status.next_steps = [focus.next_command]
     if focus.state == "ready to report":
         status.next_steps.append(f"git merge {focus.branch}    # only after you read the report")
@@ -1240,136 +1209,3 @@ def _worker_adapter(root: Path) -> str:
 
 # ---------------------------------------------------------------------------
 # Spawning a Planner (Tier 1 -> Tier 2)
-
-
-@dataclasses.dataclass
-class PlannerAttempt:
-    number: int
-    exit_code: int | None = None
-    duration_s: float = 0.0
-    state: str = ""
-    detail: str = ""
-
-
-@dataclasses.dataclass
-class PlannerOutcome:
-    """The result of driving one experiment's Planner to a reportable state."""
-
-    experiment: str
-    adapter: str
-    status: str = "pending"  # ready | incomplete | needs_human | error
-    platform: str = ""
-    model: str = ""
-    effort: str = ""
-    attempts: list[PlannerAttempt] = dataclasses.field(default_factory=list)
-    brief_path: str | None = None
-    message: str = ""
-
-    @property
-    def succeeded(self) -> bool:
-        return self.status == "ready"
-
-
-def run_planner(
-    name: str,
-    config: Any | None = None,
-    root: str | Path = ".",
-) -> PlannerOutcome:
-    """Invoke a Planner on an experiment until it is reportable, or give up.
-
-    A Worker's definition of done is its acceptance; a Planner's is the
-    experiment reaching "ready to report" — every module built and passing.
-    Same loop, one altitude up, and the same reason for it: the loop belongs in
-    tested code, not in whatever agent happens to be driving.
-    """
-    import time
-
-    from harness.worker import AgentConfig, invoke_agent
-
-    config = config or AgentConfig(label="planner")
-    experiment = find_experiment(name, root)
-    outcome = PlannerOutcome(
-        experiment=experiment.name,
-        adapter=config.adapter,
-        platform=config.platform,
-        model=config.model,
-        effort=config.effort,
-    )
-
-    brief_dir = experiment.path / "results" / "experiments" / experiment.name
-    brief_dir.mkdir(parents=True, exist_ok=True)
-    brief_path = brief_dir / "planner-brief.md"
-    brief_path.write_text(planner_brief(name, root), encoding="utf-8")
-    outcome.brief_path = str(brief_path)
-
-    if config.adapter == "manual":
-        outcome.status = "needs_human"
-        outcome.message = (
-            f"briefing written to {brief_path}. Open a session, tell it to run "
-            f"`harness planner brief {name} --register <label>`, and follow it."
-        )
-        return outcome
-
-    if not experiment.question:
-        # A spawned Planner cannot ask what is wanted; it would invent a goal
-        # and build something nobody requested. Interactively that conversation
-        # is exactly the right move, so point there instead of guessing.
-        outcome.status = "needs_human"
-        outcome.message = (
-            f"experiment '{name}' has no recorded question, so there is nothing "
-            "to spawn a Planner for. Either record one:\n"
-            f'    harness exp question {name} --set "..."\n'
-            "or drive it interactively — open a session and tell it to run "
-            f"`harness planner brief {name} --register <label>`, agree on the "
-            "question together, and it will record it for you."
-        )
-        return outcome
-
-    register_planner(name, config.label, root, model=config.model, effort=config.effort)
-
-    for number in range(1, config.attempts + 1):
-        attempt = PlannerAttempt(number=number)
-        started = time.monotonic()
-        prompt = planner_brief(name, root)
-        brief_path.write_text(prompt, encoding="utf-8")
-        try:
-            proc = invoke_agent(
-                config,
-                experiment.path,
-                prompt,
-                brief_path,
-                first_attempt=number == 1,
-                experiment=experiment.name,
-            )
-            attempt.exit_code = proc.returncode
-            (brief_dir / f"planner-attempt-{number:02d}.log").write_text(
-                f"exit={proc.returncode}\n\n## stdout\n{proc.stdout}\n\n## stderr\n{proc.stderr}\n",
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            attempt.duration_s = time.monotonic() - started
-            attempt.detail = f"could not invoke planner: {exc}"
-            outcome.attempts.append(attempt)
-            outcome.status = "error"
-            outcome.message = attempt.detail
-            return outcome
-        except Exception as exc:  # timeout and friends
-            attempt.detail = f"planner invocation failed: {exc}"
-        attempt.duration_s = time.monotonic() - started
-
-        state = experiment_state(find_experiment(name, root))
-        attempt.state = state.state
-        attempt.detail = attempt.detail or state.detail
-        outcome.attempts.append(attempt)
-        if state.state == "ready to report":
-            outcome.status = "ready"
-            outcome.message = f"experiment '{name}' is ready to report"
-            return outcome
-
-    outcome.status = "incomplete"
-    last = outcome.attempts[-1].state if outcome.attempts else "unknown"
-    outcome.message = (
-        f"experiment '{name}' is still '{last}' after {config.attempts} attempt(s) — "
-        "a researcher should look at it"
-    )
-    return outcome

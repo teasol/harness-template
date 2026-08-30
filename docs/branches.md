@@ -1,8 +1,8 @@
-# Experiments reference (Tier 1 ↔ Tier 2)
+# Branches reference (Tier 1 ↔ Tier 2)
 
 > New here? Start with the walkthrough at the top of [README.md](../README.md).
 
-An **experiment** is one research hypothesis, developed on its own branch in
+An **branch** is one research hypothesis, developed on its own branch in
 its own git worktree. The Planner works there from start to finish; the
 researcher reads the resulting report and decides whether to merge.
 
@@ -12,53 +12,49 @@ automated.
 
 ```mermaid
 flowchart TD
-    R["Researcher (Tier 1)"] -->|"instruction"| E["harness exp start<br/>branch + worktree"]
+    R["Researcher (Tier 1)"] -->|"instruction"| E["harness branch<br/>branch + worktree"]
     E --> P["Planner = Main Worker (Tier 2)<br/>writes plans/&lt;name&gt;.yaml"]
     P -->|"materialize"| T["tasks/*.task.yaml"]
     T -->|"executor: main"| P
     T -->|"executor: sub — one at a time"| W["Sub-Workers"]
     W -->|"acceptance + deliverables"| T
     T -->|"all done"| I["integration spec"]
-    I --> RPT["harness exp report"]
+    I --> RPT["harness report"]
     RPT -->|"verdict + metrics"| R
-    R -->|"researcher's call"| M["git merge exp/&lt;name&gt;"]
+    R -->|"researcher's call"| M["git merge &lt;name&gt;"]
 ```
 
 ## The question
 
-An experiment answers one question, and the question is stored with it
-(`experiments/<name>/question.md`, committed) and placed at the top of the
+An branch answers one question, and the question is stored with it
+(`branches/<name>/question.md`, committed) and placed at the top of the
 Planner's briefing. It is the Planner's only route to knowing what is being
 asked: the question's permanent home is the plan's `report.question`, and the
 plan is the thing the Planner has not written yet.
 
 **It is not required up front.** A question usually gets sharper by talking it
-through, so an experiment can open without one:
+through, so an branch can open without one:
 
 ```bash
-harness exp start <name>                          # no question yet
-harness exp question <name>                       # show it (or say there is none)
-harness exp question <name> --set "..."           # record it when it settles
-harness exp start <name> --question "..."         # or state it up front
+harness branch <name>                          # no question yet
+ <name>                       # show it (or say there is none)
+ <name> --set "..."           # record it when it settles
+harness branch <name> --question "..."         # or state it up front
 ```
 
 With no question recorded, the Planner's briefing says so and instructs it to
 establish the question with the researcher **before planning or spawning any
-Worker**, then record it with `exp question --set`. That conversation is the
-point, not an obstacle to it.
-
-`planner run` is the exception: a spawned Planner has nobody to ask, so it
 refuses to start without a recorded question rather than inventing a goal and
 building something nobody requested. It points at both ways to proceed.
 
 ## Why worktrees
 
 A worktree is a second working directory backed by the same repository. Several
-experiments can therefore exist on disk simultaneously, each on its own branch,
+branches can therefore exist on disk simultaneously, each on its own branch,
 without checking out and stashing between them.
 
-Isolation is applied at the **experiment** level, not the Worker level. Inside
-one experiment, Workers run **sequentially**. That is a deliberate choice:
+Isolation is applied at the **branch** level, not the Worker level. Inside
+one branch, Workers run **sequentially**. That is a deliberate choice:
 
 - A plan's DAG is usually close to a chain (loader → model → train → eval), so
   concurrent Workers would save little wall-clock time.
@@ -76,15 +72,15 @@ together; the door stays open.
 
 | Command | Purpose |
 | --- | --- |
-| `harness exp start <name> [--question "..."] [--base main]` | Create branch `exp/<name>` + worktree, scaffold `plans/<name>.yaml` and its integration spec. The question is optional |
-| `harness exp question <name> [--set "..."]` | Show the question, or record one agreed on in conversation |
-| `harness exp list` | Every experiment worktree git knows about |
-| `harness exp report <name> [--no-run] [--determinism] [--save]` | Build the researcher's decision aid; exits non-zero unless merge-ready |
-| `harness exp remove <name> [--force]` | Remove the worktree; **the branch is kept** — it is the record of the attempt |
-| `harness planner run <name>` | Spawn a Planner and drive the experiment until it is reportable |
+| `harness branch <name> [--question "..."] [--base main]` | Create branch `<name>` + worktree, scaffold `plans/<name>.yaml` and its integration spec. The question is optional |
+| ` <name> [--set "..."]` | Show the question, or record one agreed on in conversation |
+| `harness branches` | Every branch worktree git knows about |
+| `harness report <name> [--no-run] [--determinism] [--save]` | Build the researcher's decision aid; exits non-zero unless merge-ready |
+| `harness drop <name> [--force]` | Remove the worktree; **the branch is kept** — it is the record of the attempt |
+| ` <name>` | Spawn a Planner and drive the branch until it is reportable |
 
-Worktrees default to `.experiments/<name>` inside the repo and are gitignored.
-Removing a worktree never deletes the branch, so a rejected experiment remains
+Worktrees default to `.worktrees/<name>` inside the repo and are gitignored.
+Removing a worktree never deletes the branch, so a rejected branch remains
 inspectable.
 
 ## Adopting an existing project
@@ -95,13 +91,13 @@ Most projects do not start empty. The order that works:
 pip install research-harness
 harness init .                                  # notices the code already here
 harness project init                            # what a Planner must know
-harness create -n <name> --model <model>        # a Planner outlives this experiment
-harness exp start <name> --planner <name>       # the Planner plans the rest
+harness create -n <name> --model <model>        # a Planner outlives this branch
+harness branch <name> --planner <name>       # the Planner plans the rest
 ```
 
 `harness init` records how the harness arrived — the commit and how many source
 files predate it — so "unverified" has a boundary instead of being a feeling.
-Every Planner briefing then opens with that, until some experiment here reaches
+Every Planner briefing then opens with that, until some branch here reaches
 a report.
 
 **The harness does not prescribe how to modularize an existing codebase, and
@@ -138,7 +134,7 @@ project:
     - "No t-tests on deterministic arms."
 ```
 
-Every Planner briefing opens with this, and `exp start` copies it into the new
+Every Planner briefing opens with this, and `harness branch` copies it into the new
 worktree. `project show` exits non-zero when a declared path is missing —
 pointing a Planner at a moved file is worse than pointing it at nothing,
 because it is told where the truth lives and finds none.
@@ -155,25 +151,25 @@ interpreter is running the harness, typically a bare `python3` with none of the
 project's dependencies. Steps that need the project's packages must use
 `${PROJECT_PYTHON}`.
 
-## Planners that outlive one experiment
+## Planners that outlive one branch
 
 A Planner spends its first hour learning the project. Discarding that at the
-end of every experiment means paying the hour again — and repeating the same
+end of every branch means paying the hour again — and repeating the same
 first-time mistakes, because what would have prevented them was never written
 down.
 
 ```bash
 python -m harness create -n icf --model claude-opus-5 --effort high
-python -m harness exp start baseline --planner icf     # inherits model + memory
-python -m harness planner note icf --experiment baseline \
+python -m harness branch baseline --planner icf     # inherits model + memory
+python -m harness planner note icf --branch baseline \
   --add "ICF_CKPT is empty on this node; that is correct for a training-free arm."
 python -m harness planner show icf
 ```
 
-An experiment started under a registered Planner inherits its model (so it is
+An branch started under a registered Planner inherits its model (so it is
 never "model not recorded") and opens its briefing with everything that Planner
 has learned. The registry lives in the **main** repository, not in a worktree,
-so every experiment under one Planner appends to the same memory.
+so every branch under one Planner appends to the same memory.
 
 Notes are that Planner's operational findings, carried forward with an explicit
 warning that they may have gone stale. Durable project policy belongs in
@@ -185,16 +181,16 @@ other is the rules.
 A Planner can be spawned rather than opened by hand:
 
 ```bash
-harness planner run <name>
+ <name>
 ```
 
 That invokes the configured planner tier with its briefing and repeats until
-the experiment reaches *ready to report* or the attempt cap is hit — a Worker's
-definition of done is its acceptance, a Planner's is the experiment. Useful
+the branch reaches *ready to report* or the attempt cap is hit — a Worker's
+definition of done is its acceptance, a Planner's is the branch. Useful
 when a researcher (or a Tier 1 agent acting for them) is driving several
-experiments and does not want to sit inside each one.
+branches and does not want to sit inside each one.
 
-One experiment has exactly one Planner, so `exp start` creates both: it prints
+One branch has exactly one Planner, so `harness branch` creates both: it prints
 the Planner's briefing directly, and registers it. There is no separate
 activation step.
 
@@ -206,7 +202,7 @@ python -m harness planner brief <name>
 ```
 
 It always has the same sections — **Question**, **State**, **Next**, **Your
-role**, **The whole sequence** — whatever the experiment's state; only their
+role**, **The whole sequence** — whatever the branch's state; only their
 contents change. `Next` always names one real command, never the briefing
 itself. A document that changes shape is one you have to re-read; this one you
 re-run and skim.
@@ -217,7 +213,7 @@ state. A pasted briefing is a snapshot that goes stale as soon as a Worker
 finishes; the command always returns the board as it is now.
 
 `--register` re-records the label (and `--model`/`--effort`) if the Planner
-changes; `exp start` does it once for you.
+changes; `harness branch` does it once for you.
 
 This is a plain command producing plain text on purpose. Tool-specific shims
 (a slash command, a skill, a saved prompt) are thin optional wrappers around it
@@ -281,7 +277,7 @@ Both tiers are recorded: `harness planner brief --register <label> --model <m>
 --effort <e>` notes what the Planner session runs on (the harness cannot set
 it — a person opened that session — but it can record it), and every Worker
 invocation writes its platform, model, and effort to the task log and the
-worker report. `exp report` shows both under **Tiers**, so which model built
+worker report. `harness report` shows both under **Tiers**, so which model built
 what is auditable rather than merely intended.
 
 Because the default is `manual`, automatic Workers are off until you turn them
@@ -296,7 +292,7 @@ command two ways, so any tool fits: on **stdin**, and as a file via the
 substituted).
 
 A Worker edits files unattended, so it runs with permission prompts relaxed.
-An experiment worktree is the right place for that: it is isolated, and its
+An branch worktree is the right place for that: it is isolated, and its
 branch is disposable.
 
 ### On cost
@@ -313,7 +309,7 @@ The report has two layers, and the split is the point.
 **The spine is measured, not narrated.** Integration result, per-task
 acceptance re-verification, determinism, the exact commit to merge, and a
 `Not verified` section — all produced by the harness. An agent cannot assert
-that its experiment worked; the harness decides.
+that its branch worked; the harness decides.
 
 **The payload is what the researcher asked for.** The researcher states what
 they want to see when instructing the Planner. The Planner records *where each
@@ -322,7 +318,7 @@ actually produced. The Planner chooses the mapping and never supplies a value.
 
 ```yaml
 plan:
-  name: my-experiment
+  name: my-branch
   report:
     question: |
       The researcher's instruction, verbatim.
@@ -336,35 +332,35 @@ plan:
 
 ### Self-containment is enforced
 
-A report may only draw on **its own** experiment's artifacts. `source` and
+A report may only draw on **its own** branch's artifacts. `source` and
 `artifacts` paths may not be absolute and may not escape via `..`;
 `plan validate` rejects them:
 
 ```
-error: report metric 'acc' source must stay inside the experiment:
+error: report metric 'acc' source must stay inside the branch:
 '../exp-baseline/results/stats.json' escapes via '..'.
-Comparing experiments is the researcher's job, not the plan's.
+Comparing branches is the researcher's job, not the plan's.
 ```
 
-Comparing experiments belongs to Tier 1: the researcher collects finished
-reports and weighs them. An experiment that reaches into another cannot be
+Comparing branches belongs to Tier 1: the researcher collects finished
+reports and weighs them. An branch that reaches into another cannot be
 judged on its own terms, so the harness refuses to produce one. Every report is
 also written as `report.json`, which makes that collection straightforward.
 
 ### Merge readiness
 
-`exp report` exits `0` only when integration passed, every module is `done`,
+`harness report` exits `0` only when integration passed, every module is `done`,
 every task's acceptance still passes, the worktree is clean, and determinism
 (if checked) held. Anything short of that prints `NOT READY` and exits `1`,
 and **every** blocker is stated under `Why not ready` — a verdict the
 researcher cannot explain is not a decision aid.
 
 Progress is counted against the plan's own modules. A `tasks/` directory can
-hold task files from other plans; counting those would report an experiment
+hold task files from other plans; counting those would report an branch
 complete when none of its modules were built, and that number decides a merge.
 Foreign task files are ignored and listed as a caveat.
 
-`--save` also writes the report to `experiments/<name>/report.md` inside the
+`--save` also writes the report to `branches/<name>/report.md` inside the
 branch, so merging carries the evidence into the record. Without it the report
 lives only under `results/` and is gitignored.
 
@@ -372,11 +368,11 @@ lives only under `results/` and is gitignored.
 
 ```bash
 # Researcher
-python -m harness exp start sparse-attn --question "does top-k attention keep the mass?"
+python -m harness branch sparse-attn --question "does top-k attention keep the mass?"
 python -m harness planner brief sparse-attn --register session-01
 
-# Planner, inside .experiments/sparse-attn/
-# (exp start scaffolds plans/<name>.yaml and configs/<name>.yaml; fill in the
+# Planner, inside .worktrees/sparse-attn/
+# (harness branch scaffolds plans/<name>.yaml and configs/<name>.yaml; fill in the
 #  TODOs first — plan validate refuses a scaffold)
 python -m harness plan validate plans/sparse-attn.yaml
 python -m harness plan materialize plans/sparse-attn.yaml
@@ -385,15 +381,15 @@ python -m harness plan materialize plans/sparse-attn.yaml
 python -m harness plan run plans/sparse-attn.yaml
 
 # Planner closes the loop, then hands back
-python -m harness exp report sparse-attn --determinism --save
+python -m harness report sparse-attn --determinism --save
 
 # Researcher decides
-git merge exp/sparse-attn
+git merge sparse-attn
 ```
 
 ## Code in a worktree
 
 The runner puts the tree being verified at the front of `PYTHONPATH` (its root
-and `src/`), so a step run inside an experiment worktree imports **that**
-experiment's code. Without it an editable install would point every worktree at
-the main checkout, and experiments would silently verify the wrong source.
+and `src/`), so a step run inside an branch worktree imports **that**
+branch's code. Without it an editable install would point every worktree at
+the main checkout, and branches would silently verify the wrong source.

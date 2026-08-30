@@ -35,7 +35,7 @@ flagged, because they cannot be reconstructed from a commit.
 ```python
 from harness.reproducibility import set_all_seeds
 
-set_all_seeds(config.experiment.seed)
+set_all_seeds(config.branch.seed)
 ```
 
 ## 2. Hash stability

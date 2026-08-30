@@ -13,18 +13,18 @@ wherever your tool keeps such things; skip the rest.
 The substance lives in the harness, not in a shim:
 
 ```bash
-python -m harness planner brief <experiment> --register <your-label>
+python -m harness planner brief <branch> --register <your-label>
 ```
 
-That prints everything a session needs to act as that experiment's Planner:
+That prints everything a session needs to act as that branch's Planner:
 the role contract to read, the worktree and branch it owns, the plan's current
 state, the module board, the exact commands to run, and how to hand back. A
 session becomes the Planner by running it and following it.
 
 So the entire shim, for any tool, is:
 
-> Run `python -m harness planner brief <experiment> --register <label>` in
-> `<project path>` and follow the output. You are that experiment's Planner
+> Run `python -m harness planner brief <branch> --register <label>` in
+> `<project path>` and follow the output. You are that branch's Planner
 > until told otherwise.
 
 ### As a plain prompt
@@ -33,9 +33,9 @@ Say this to a fresh session — the agent runs the command itself, so there is
 nothing to copy back and forth:
 
 ```
-You are the Planner for the <experiment> experiment in <absolute project path>.
+You are the Planner for the <branch> branch in <absolute project path>.
 
-Run `python -m harness planner brief <experiment> --register <your-label>`
+Run `python -m harness planner brief <branch> --register <your-label>`
 and follow it exactly. Re-run it whenever you need current state.
 
 You are the Main Worker as well as the Planner: implement modules yourself
@@ -54,7 +54,7 @@ repository ships none of them by default: adding one would bind this template
 to a single vendor, which is exactly what the harness avoids.
 
 To make one, put the prompt above in whatever file your tool expects, with the
-experiment name as its argument. Two or three lines is the whole thing.
+branch name as its argument. Two or three lines is the whole thing.
 
 ## Configuring Workers
 

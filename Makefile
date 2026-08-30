@@ -7,7 +7,7 @@ SPEC ?= configs/demo.yaml
 PLAN ?= plans/plan.yaml
 
 .DEFAULT_GOAL := help
-.PHONY: help status setup agents-setup lint format test verify plan tasks run reproduce drift audit experiments clean
+.PHONY: help status setup agents-setup lint format test verify plan tasks run reproduce drift audit branches clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -15,11 +15,11 @@ help: ## Show this help
 status: ## Where am I and what do I do next (start here)
 	@$(PYTHON) -m harness status
 
-setup: ## Editable install + dev tools + configure agent tiering
+setup: ## Editable install + dev tools + configure the Sub-Worker
 	$(PYTHON) -m pip install -e ".[dev]"
 	$(PYTHON) -m harness setup
 
-agents-setup: ## Choose the platform / model / reasoning level for both tiers
+agents-setup: ## Choose the Sub-Worker platform / model / reasoning level
 	$(PYTHON) -m harness setup
 
 lint: ## Run ruff checks (lint + format check)
@@ -54,11 +54,11 @@ drift: ## Validate every plan and fail on task/plan drift
 audit: ## Re-verify every task marked done (acceptance + deliverables)
 	$(PYTHON) -m harness task verify --all --status done --results-dir $(RESULTS_DIR)/audit
 
-run: ## Run every ready task through a Worker (see configs/agents.yaml)
+run: ## Run every ready task through a Sub-Worker (see configs/agents.yaml)
 	$(PYTHON) -m harness plan run $(PLAN)
 
-experiments: ## List experiment branches/worktrees
-	$(PYTHON) -m harness exp list
+branches: ## List the branches in flight
+	$(PYTHON) -m harness branches
 
 clean: ## Remove generated artifacts
 	rm -rf $(RESULTS_DIR) .pytest_cache .ruff_cache build dist *.egg-info

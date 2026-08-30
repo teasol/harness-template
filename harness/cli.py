@@ -21,14 +21,13 @@ Usage::
     python -m harness task run --id <id> [--attempts N]   # invoke a Worker + verify
     python -m harness task done --id <id> [--by <agent>] [--tasks-dir tasks]
 
-    # Experiments (researcher <-> Planner): one hypothesis per branch+worktree
-    python -m harness exp start <name> [--question "..."]   # creates + briefs the Planner
-    python -m harness exp question <name> [--set "..."]   # record it later
-    python -m harness exp list
-    python -m harness exp report <name> [--no-run] [--determinism] [--save]
-    python -m harness exp remove <name> [--force]
+    # Work (you <-> Planner): one branch + worktree per piece of work
+    python -m harness create -n <planner> [--model M]  # a Planner, once per project
+    python -m harness branch <name> --planner <planner>
+    python -m harness branches
+    python -m harness report <name> [--no-run] [--determinism] [--save]
+    python -m harness drop <name> [--force]
     python -m harness planner brief <name>            # current state, re-run anytime
-    python -m harness planner run <name>               # spawn a Planner (Tier 1 -> 2)
 
 """
 
@@ -40,13 +39,13 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from harness import adoption as adoption_mod
-from harness import experiment as exp_mod
+from harness import branch as branch_mod
 from harness import heartbeat
 from harness import plan as plan_mod
 from harness import planners as planners_mod
 from harness import project as project_mod
 from harness import task as task_mod
-from harness.experiment import ExperimentError
+from harness.branch import BranchError
 from harness.paths import (
     get_configs_dir,
     get_plans_dir,
@@ -583,55 +582,42 @@ def build_parser() -> argparse.ArgumentParser:
             )
         parser_i.set_defaults(func=func)
 
-    exp_cmd = sub.add_parser("exp", help="Experiment commands (researcher <-> Planner)")
-    exp_sub = exp_cmd.add_subparsers(dest="exp_command", required=True)
-
-    exp_start = exp_sub.add_parser("start", help="Create an experiment branch + worktree")
-    exp_start.add_argument("name", help="Experiment name (lowercase, hyphens)")
-    exp_start.add_argument("--base", default="HEAD", help="Commit/branch to branch from")
-    exp_start.add_argument(
-        "--question",
-        default=None,
-        help="The research question, verbatim. Optional — settle it with the Planner instead",
+    branch_cmd = sub.add_parser("branch", help="Start a piece of work on its own branch")
+    branch_cmd.add_argument("name", help="Branch name (lowercase, digits, hyphens)")
+    branch_cmd.add_argument("--base", default="HEAD", help="Commit/branch to branch from")
+    branch_cmd.add_argument(
+        "--planner", default="planner", help="Label recorded as this branch's Planner"
     )
-    exp_start.add_argument(
-        "--planner", default="planner", help="Label recorded for this experiment's Planner"
-    )
-    exp_start.add_argument("--model", default=None, help="Model this Planner runs on (recorded)")
-    exp_start.add_argument("--effort", default=None, help="Reasoning level of the Planner")
-    exp_start.add_argument(
+    branch_cmd.add_argument("--model", default=None, help="Model this Planner runs on (recorded)")
+    branch_cmd.add_argument("--effort", default=None, help="Reasoning level of the Planner")
+    branch_cmd.add_argument(
         "--path",
-        default=exp_mod.DEFAULT_WORKTREE_ROOT,
-        help="Directory holding experiment worktrees",
+        default=branch_mod.DEFAULT_WORKTREE_ROOT,
+        help="Directory holding worktrees",
     )
-    exp_start.set_defaults(func=cmd_exp_start)
+    branch_cmd.set_defaults(func=cmd_branch_start)
 
-    exp_list = exp_sub.add_parser("list", help="List experiments")
-    exp_list.set_defaults(func=cmd_exp_list)
+    branches_cmd = sub.add_parser("branches", help="List the branches the harness is working on")
+    branches_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    branches_cmd.set_defaults(func=cmd_branch_list)
 
-    exp_report = exp_sub.add_parser("report", help="Build the researcher's merge decision aid")
-    exp_report.add_argument("name", help="Experiment name")
-    exp_report.add_argument("--no-run", action="store_true", help="Do not run the integration spec")
-    exp_report.add_argument(
+    report_cmd = sub.add_parser("report", help="Build the decision aid for one branch")
+    report_cmd.add_argument("name", help="Branch name")
+    report_cmd.add_argument("--no-run", action="store_true", help="Do not run the integration spec")
+    report_cmd.add_argument(
         "--determinism", action="store_true", help="Also run the determinism gate"
     )
-    exp_report.add_argument(
-        "--save", action="store_true", help="Also write the report into the experiment branch"
-    )
-    exp_report.set_defaults(func=cmd_exp_report)
+    report_cmd.add_argument("--save", action="store_true", help="Also write the report into it")
+    report_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    report_cmd.set_defaults(func=cmd_branch_report)
 
-    exp_question = exp_sub.add_parser("question", help="Show or record the experiment's question")
-    exp_question.add_argument("name", help="Experiment name")
-    exp_question.add_argument("--set", default=None, help="Record this as the question (verbatim)")
-    exp_question.set_defaults(func=cmd_exp_question)
+    drop_cmd = sub.add_parser("drop", help="Remove a worktree (the branch itself is kept)")
+    drop_cmd.add_argument("name", help="Branch name")
+    drop_cmd.add_argument("--force", action="store_true", help="Remove even if dirty")
+    drop_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    drop_cmd.set_defaults(func=cmd_branch_drop)
 
-    exp_remove = exp_sub.add_parser("remove", help="Remove an experiment worktree (keeps branch)")
-    exp_remove.add_argument("name", help="Experiment name")
-    exp_remove.add_argument("--force", action="store_true", help="Remove even if dirty")
-    exp_remove.set_defaults(func=cmd_exp_remove)
-
-    for exp_parser in (exp_start, exp_list, exp_report, exp_remove, exp_question):
-        exp_parser.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    branch_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
 
     status_cmd = sub.add_parser("status", help="Where am I and what do I do next? (start here)")
     status_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
@@ -640,19 +626,17 @@ def build_parser() -> argparse.ArgumentParser:
     setup_cmd = sub.add_parser(
         "setup", help="Choose the Worker platform, model, and reasoning level"
     )
-    for tier, default_attempts in (("planner", 3), ("worker", 6)):
-        setup_cmd.add_argument(f"--{tier}-platform", default=None, help=f"{tier} platform")
-        setup_cmd.add_argument(f"--{tier}-model", default=None, help=f"{tier} model")
-        setup_cmd.add_argument(f"--{tier}-effort", default=None, help=f"{tier} reasoning level")
-        setup_cmd.add_argument(
-            f"--{tier}-command", default=None, help=f"override the {tier} command"
-        )
-        setup_cmd.add_argument(
-            f"--{tier}-session", default=None, help=f"attach {tier} to an existing session id"
-        )
-        setup_cmd.add_argument(
-            f"--{tier}-attempts", type=int, default=default_attempts, help=f"{tier} retry cap"
-        )
+    # Only the Sub-Worker tier is configurable: the Planner is the session you
+    # are talking to, always manual, never spawned.
+    setup_cmd.add_argument("--worker-platform", default=None, help="Sub-Worker platform")
+    setup_cmd.add_argument("--worker-model", default=None, help="Sub-Worker model")
+    setup_cmd.add_argument("--worker-effort", default=None, help="Sub-Worker reasoning level")
+    setup_cmd.add_argument("--worker-command", default=None, help="override the command")
+    setup_cmd.add_argument(
+        "--worker-session", default=None, help="attach to an existing session id"
+    )
+    setup_cmd.add_argument("--worker-attempts", type=int, default=6, help="Sub-Worker retry cap")
+    setup_cmd.add_argument("--planner-attempts", type=int, default=3, help=argparse.SUPPRESS)
     setup_cmd.add_argument(
         "--check",
         action="store_true",
@@ -714,7 +698,7 @@ def build_parser() -> argparse.ArgumentParser:
     planner_cmd = sub.add_parser("planner", help="Planner registration")
     planner_sub = planner_cmd.add_subparsers(dest="planner_command", required=True)
     planner_create = planner_sub.add_parser(
-        "create", help="Register a Planner that outlives one experiment"
+        "create", help="Register a Planner that outlives any one branch"
     )
     planner_create.add_argument("name", help="Planner name (lowercase, digits, hyphens)")
     planner_create.add_argument("--model", required=True, help="Model this Planner runs on")
@@ -745,16 +729,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     planner_note.add_argument("name", help="Planner name")
     planner_note.add_argument("--add", required=True, help="The finding, in one sentence")
-    planner_note.add_argument("--experiment", default=None, help="Where it was learned")
+    planner_note.add_argument("--branch", default=None, help="Where it was learned")
     planner_note.add_argument("--root", default=".", help="Repo root (default: cwd)")
     planner_note.set_defaults(func=cmd_planner_note)
 
     planner_brief = planner_sub.add_parser(
-        "brief", help="Print everything a session needs to act as this experiment's Planner"
+        "brief", help="Print everything a session needs to act as this branch's Planner"
     )
     planner_brief.add_argument("name", help="Experiment name")
     planner_brief.add_argument(
-        "--register", default=None, help="Record this label as the experiment's Planner"
+        "--register", default=None, help="Record this label as this branch's Planner"
     )
     planner_brief.add_argument(
         "--model", default=None, help="Model this Planner session runs on (recorded, not set)"
@@ -768,15 +752,6 @@ def build_parser() -> argparse.ArgumentParser:
     planner_brief.add_argument("--root", default=".", help="Repo root (default: cwd)")
     planner_brief.set_defaults(func=cmd_planner_brief)
 
-    planner_run = planner_sub.add_parser(
-        "run", help="Spawn a Planner and drive the experiment to a reportable state"
-    )
-    planner_run.add_argument("name", help="Experiment name")
-    planner_run.add_argument("--attempts", type=int, default=None, help="Override the attempt cap")
-    planner_run.add_argument("--config", default=None, help="Agent config YAML")
-    planner_run.add_argument("--root", default=".", help="Repo root (default: cwd)")
-    planner_run.set_defaults(func=cmd_planner_run)
-
     return parser
 
 
@@ -787,25 +762,24 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Experiments (researcher <-> Planner)
+# Branches (user <-> Planner)
 
 
-def cmd_exp_start(args: argparse.Namespace) -> int:
-    """Create an experiment and brief its Planner — one experiment, one Planner."""
+def cmd_branch_start(args: argparse.Namespace) -> int:
+    """Start a piece of work on its own branch, and brief the Planner for it."""
     try:
-        experiment = exp_mod.start(
+        created = branch_mod.start(
             args.name,
             root=args.root,
             worktree_root=args.path,
             base=args.base,
-            question=args.question or "",
         )
         # A registered Planner already knows what it runs on and what it has
-        # learned, so starting an experiment under one carries both across
-        # instead of beginning from nothing.
+        # learned, so starting a branch under one carries both across instead
+        # of beginning from nothing.
         model, effort = (args.model or ""), (args.effort or "")
         if planners_mod.exists(args.planner, args.root):
-            planner = planners_mod.link_experiment(args.planner, args.name, root=args.root)
+            planner = planners_mod.link_branch(args.planner, args.name, root=args.root)
             model = model or planner.model
             effort = effort or planner.effort
 
@@ -814,19 +788,19 @@ def cmd_exp_start(args: argparse.Namespace) -> int:
         # blank. The briefing then opens by asking the session to say what it
         # is — a placeholder would just look like an answer.
         if model.strip():
-            exp_mod.register_planner(
+            branch_mod.register_planner(
                 args.name,
                 args.planner,
                 root=args.root,
                 model=model,
                 effort=effort,
             )
-        brief = exp_mod.planner_brief(args.name, root=args.root)
-    except ExperimentError as exc:
+        brief = branch_mod.planner_brief(args.name, root=args.root)
+    except BranchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    print(f"Experiment '{experiment.name}' created on {experiment.branch}.")
+    print(f"Branch '{created.branch}' created, worktree at {created.path}.")
     print(f"Its Planner is '{args.planner}'. Everything below is that Planner's briefing —")
     print("follow it, or hand this session to whoever will.\n")
     if not planners_mod.exists(args.planner, args.root):
@@ -834,9 +808,9 @@ def cmd_exp_start(args: argparse.Namespace) -> int:
         # briefing below is about to be written without any model on record and
         # without whatever an earlier Planner learned in this project.
         print(
-            f"note: '{args.planner}' is a label, not a registered Planner. This experiment\n"
+            f"note: '{args.planner}' is a label, not a registered Planner. This branch\n"
             "      therefore carries no Planner model, and its report will say so. Register\n"
-            "      one and future experiments inherit its model and its notes:\n"
+            "      one and future branches inherit its model and its notes:\n"
             f"        harness create -n {args.planner} --model <model>\n"
         )
     print("=" * 70)
@@ -844,33 +818,33 @@ def cmd_exp_start(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_exp_list(args: argparse.Namespace) -> int:
-    experiments = exp_mod.list_experiments(args.root)
-    if not experiments:
-        print("(no experiments)")
+def cmd_branch_list(args: argparse.Namespace) -> int:
+    branches = branch_mod.list_branches(args.root)
+    if not branches:
+        print("(no branches in flight)")
         return 0
     print("  NAME              BRANCH                 WORKTREE")
-    for experiment in experiments:
-        print(f"  {experiment.name:<17} {experiment.branch:<22} {experiment.path}")
+    for item in branches:
+        print(f"  {item.name:<17} {item.branch:<22} {item.path}")
     return 0
 
 
-def cmd_exp_report(args: argparse.Namespace) -> int:
+def cmd_branch_report(args: argparse.Namespace) -> int:
     try:
-        report = exp_mod.build_report(
+        report = branch_mod.build_report(
             args.name,
             root=args.root,
             run_integration=not args.no_run,
             check_determinism=args.determinism,
         )
-        experiment = exp_mod.find_experiment(args.name, args.root)
-    except ExperimentError as exc:
+        branch = branch_mod.find_branch(args.name, args.root)
+    except BranchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    written = exp_mod.write_experiment_report(report, experiment.path, save=args.save)
+    written = branch_mod.write_branch_report(report, branch.path, save=args.save)
     verdict = "READY TO MERGE" if report.merge_ready else "NOT READY"
-    print(f"[{report.experiment}] {verdict}")
+    print(f"[{report.branch}] {verdict}")
     print(f"  integration: {report.integration}")
     print(f"  tasks:       {report.tasks_done}/{report.tasks_total} done")
     print(f"  determinism: {report.determinism}")
@@ -886,13 +860,13 @@ def cmd_exp_report(args: argparse.Namespace) -> int:
     return 0 if report.merge_ready else 1
 
 
-def cmd_exp_remove(args: argparse.Namespace) -> int:
+def cmd_branch_drop(args: argparse.Namespace) -> int:
     try:
-        experiment = exp_mod.remove(args.name, root=args.root, force=args.force)
-    except ExperimentError as exc:
+        branch = branch_mod.remove(args.name, root=args.root, force=args.force)
+    except BranchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(f"removed worktree {experiment.path} (branch {experiment.branch} kept)")
+    print(f"removed worktree {branch.path} (branch {branch.branch} kept)")
     return 0
 
 
@@ -1194,7 +1168,7 @@ def cmd_project_show(args: argparse.Namespace) -> int:
 
 def _planner_tier_is_manual(root: str) -> bool:
     """True when nobody spawns the Planner — a person opens that session."""
-    from harness.worker import WorkerError, load_agent_config
+    from harness.worker import WorkerError
 
     try:
         return load_agent_config("planner", root=root).adapter == "manual"
@@ -1208,7 +1182,7 @@ def _configured_planner_tier(root: str) -> tuple[str, str]:
     A manual tier has neither: that session is opened by a person, so there is
     nothing configured to inherit.
     """
-    from harness.worker import WorkerError, load_agent_config
+    from harness.worker import WorkerError
 
     try:
         config = load_agent_config("planner", root=root)
@@ -1251,8 +1225,8 @@ def cmd_create(args: argparse.Namespace) -> int:
             "another."
         )
     print(
-        f"\nStart experiments under it, and they inherit its model and its notes:\n"
-        f"  harness exp start <name> --planner {planner.name}"
+        f"\nStart branches under it, and they inherit its model and its notes:\n"
+        f"  harness branch <name> --planner {planner.name}"
     )
 
     # A manual Planner is opened by hand, so the harness cannot brief it the way
@@ -1288,8 +1262,8 @@ def cmd_planner_create(args: argparse.Namespace) -> int:
     )
     print(f"  record: {planner.path}")
     print(
-        f"\nStart experiments under it, and they share its memory:\n"
-        f"  python -m harness exp start <name> --planner {planner.name}"
+        f"\nStart branches under it, and they share its memory:\n"
+        f"  python -m harness branch <name> --planner {planner.name}"
     )
     return 0
 
@@ -1300,11 +1274,11 @@ def cmd_planner_list(args: argparse.Namespace) -> int:
         print("No planners registered.")
         print("  create one: python -m harness planner create <name> --model <model>")
         return 1
-    print(f"  {'NAME':<16} {'MODEL':<28} {'EFFORT':<8} EXPERIMENTS  NOTES")
+    print(f"  {'NAME':<16} {'MODEL':<28} {'EFFORT':<8} BRANCHES  NOTES")
     for planner in planners:
         print(
             f"  {planner.name:<16} {planner.model:<28} {planner.effort or '-':<8} "
-            f"{len(planner.experiments):<12} {len(planner.notes)}"
+            f"{len(planner.branches):<12} {len(planner.notes)}"
         )
     return 0
 
@@ -1318,11 +1292,11 @@ def cmd_planner_show(args: argparse.Namespace) -> int:
     print(f"Planner: {planner.name}")
     print(f"  model:   {planner.model}" + (f" (effort {planner.effort})" if planner.effort else ""))
     print(f"  created: {planner.created_at}")
-    print(f"  drove:   {', '.join(planner.experiments) or '(none yet)'}")
+    print(f"  drove:   {', '.join(planner.branches) or '(none yet)'}")
     if planner.notes:
         print(f"\n  Carried forward ({len(planner.notes)}):")
         for note in planner.notes:
-            where = f" [{note.experiment}]" if note.experiment else ""
+            where = f" [{note.branch}]" if note.branch else ""
             print(f"    - {note.text}{where}")
             print(f"      {note.at}")
     else:
@@ -1333,7 +1307,7 @@ def cmd_planner_show(args: argparse.Namespace) -> int:
 def cmd_planner_note(args: argparse.Namespace) -> int:
     try:
         planner = planners_mod.add_note(
-            args.name, args.add, experiment=args.experiment or "", root=args.root
+            args.name, args.add, branch=args.branch or "", root=args.root
         )
     except planners_mod.PlannerError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -1345,7 +1319,7 @@ def cmd_planner_note(args: argparse.Namespace) -> int:
 def cmd_planner_brief(args: argparse.Namespace) -> int:
     try:
         if args.register:
-            exp_mod.register_planner(
+            branch_mod.register_planner(
                 args.name,
                 args.register,
                 root=args.root,
@@ -1353,8 +1327,8 @@ def cmd_planner_brief(args: argparse.Namespace) -> int:
                 effort=args.effort or "",
                 require_model=True,
             )
-        print(exp_mod.planner_brief(args.name, root=args.root))
-    except ExperimentError as exc:
+        print(branch_mod.planner_brief(args.name, root=args.root))
+    except BranchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return 0
@@ -1365,7 +1339,7 @@ def cmd_planner_brief(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    status = exp_mod.project_status(args.root)
+    status = branch_mod.project_status(args.root)
     print(f"Project: {status.project_name}\n")
 
     # What is happening *now* outranks what the board says, and is the one
@@ -1377,10 +1351,10 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     print(status.headline)
 
-    if status.experiments:
+    if status.branches:
         print()
-        print("  EXPERIMENT        STATE              DETAIL")
-        for exp in status.experiments:
+        print("  BRANCH            STATE              DETAIL")
+        for exp in status.branches:
             marker = "*" if exp.name == status.here else " "
             print(f" {marker}{exp.name:<17} {exp.state:<18} {exp.detail}")
 
@@ -1405,7 +1379,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print()
         for line in tier_lines:
             print(line)
-    if status.worker_adapter == "manual" and status.experiments:
+    if status.worker_adapter == "manual" and status.branches:
         print()
         if status.agents_config_found:
             print(
@@ -1429,7 +1403,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     for step in status.next_steps:
         print(f"  {step}")
     print()
-    print("New here? README.md walks through a whole experiment, start to finish.")
+    print("New here? README.md walks through a whole branch, start to finish.")
     return 0
 
 
@@ -1576,27 +1550,21 @@ def cmd_setup(args: argparse.Namespace) -> int:
             print()
         return 0
 
-    interactive = not any(
-        [args.planner_platform, args.worker_platform, args.planner_model, args.worker_model]
-    )
+    interactive = not any([args.worker_platform, args.worker_model])
     if interactive:
-        print("Two tiers to configure.\n")
-        print("  planner  decomposes the goal and judges the whole — the reasoning is here")
-        print("  worker   builds one fully-specified module against machine-checked acceptance")
-        print("\nA Worker's task is bounded, so a small fast model usually suffices; the")
-        print("expensive one belongs in planning. That difference is the point of tiering.")
+        print("One tier to configure: the Sub-Worker.\n")
+        print("  The Planner is the session you are talking to. It is always manual —")
+        print("  you open it, you work with it, nothing spawns it. So there is nothing")
+        print("  to configure for it.\n")
+        print("  A Sub-Worker's task is bounded and fully specified, so a small fast")
+        print("  model usually suffices. That is the point of splitting the two.")
 
     try:
-        p_platform, p_model, p_effort, p_command, p_session = _choose_tier(
-            "planner",
-            platforms,
-            args.planner_platform,
-            args.planner_model,
-            args.planner_effort,
-            args.planner_command,
-            args.planner_session,
-            interactive,
-        )
+        # The Planner is whoever you are talking to, so it cannot be spawned and
+        # has nothing to configure. Pinning it here keeps the config honest
+        # instead of offering a choice that does not exist.
+        p_platform = platforms["manual"]
+        p_model = p_effort = p_command = p_session = ""
         w_platform, w_model, w_effort, w_command, w_session = _choose_tier(
             "worker",
             platforms,
@@ -1643,54 +1611,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     docs = {p_platform.docs, w_platform.docs} - {""}
     if docs:
         print("\nFlags change between releases — verify with: " + "; ".join(sorted(docs)))
-    print("\n  harness planner run <experiment>    spawns the Planner")
-    print("  harness plan run <plan>            Workers build each module")
-    return 0
-
-
-def cmd_planner_run(args: argparse.Namespace) -> int:
-    try:
-        config = load_agent_config("planner", args.config, root=args.root)
-        if args.attempts is not None:
-            config.attempts = args.attempts
-        outcome = exp_mod.run_planner(args.name, config=config, root=args.root)
-    except (ExperimentError, WorkerError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    print(f"[{outcome.experiment}] {outcome.status.upper()}")
-    for attempt in outcome.attempts:
-        print(f"  attempt {attempt.number} ({attempt.duration_s:.1f}s): {attempt.state}")
-    tier = " · ".join(x for x in (outcome.platform, outcome.model, outcome.effort) if x)
-    print(f"  planner: {tier or outcome.adapter}")
-    if outcome.brief_path:
-        print(f"  brief:   {outcome.brief_path}")
-    if outcome.message:
-        print(f"  {outcome.message}")
-    if outcome.succeeded:
-        print(f"\n  harness exp report {outcome.experiment} --determinism --save")
-    return 0 if outcome.succeeded else 1
-
-
-def cmd_exp_question(args: argparse.Namespace) -> int:
-    try:
-        if args.set:
-            experiment = exp_mod.set_question(args.name, args.set, root=args.root)
-            print(f"recorded for '{experiment.name}':\n")
-            print(experiment.question)
-            print(f"\n  {experiment.question_path}")
-            print("  Commit it — the question belongs with the experiment.")
-            return 0
-        experiment = exp_mod.find_experiment(args.name, args.root)
-    except ExperimentError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    if not experiment.question:
-        print(
-            f"experiment '{experiment.name}' has no question recorded yet.\n"
-            f'  harness exp question {experiment.name} --set "..."'
-        )
-        return 1
-    print(experiment.question)
+    print("\n  harness plan run <plan>    Sub-Workers build each module")
     return 0
 
 
@@ -1784,7 +1705,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     print("\nNext steps:")
     if adoption is None:
         print("  1. Create a Planner:     harness create -n <name> --model <model>")
-        print("  2. Start an experiment:  harness exp start <name> --planner <name>")
+        print("  2. Start a branch:  harness branch <name> --planner <name>")
         print(
             "\n  (smoke-test the harness itself any time: harness verify --spec configs/demo.yaml)"
         )

@@ -165,9 +165,9 @@ def next_steps(root: str | Path = ".") -> list[str]:
             )
     if not planners_mod.list_planners(root):
         steps.append(
-            "harness create -n <name> --model <model>        # a Planner outlives this experiment"
+            "harness create -n <name> --model <model>        # a Planner outlives this branch"
         )
-    steps.append("harness exp start <name> --planner <name>       # and plan the adoption there")
+    steps.append("harness branch <name> --planner <name>       # and plan the adoption there")
     return steps
 
 
@@ -198,7 +198,7 @@ BOUNDARY_CONDITIONS = [
     (
         "It changes at its own rate",
         "things that always change together should stay together, or every "
-        "experiment touches two modules to make one change.",
+        "branch touches two modules to make one change.",
     ),
     (
         "You can observe its boundary today",

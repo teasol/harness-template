@@ -1,20 +1,20 @@
-"""Planners that outlive one experiment.
+"""Planners that outlive one branch.
 
 A Planner spends its first hour learning the project: where the numbers of
 record live, which interpreter has the dependencies, which arms are already
 closed, that an empty checkpoint path is correct here rather than a bug. Then
-the experiment ends and all of it is discarded, and the next Planner pays the
+the branch ends and all of it is discarded, and the next Planner pays the
 same hour — and makes the same first-time mistakes, because the knowledge that
 would have prevented them was never written anywhere.
 
-So a Planner is a thing with a name and a memory, and experiments hang off it:
+So a Planner is a thing with a name and a memory, and branches hang off it:
 
     harness create -n icf --model claude-opus-5 --effort high
-    harness exp start baseline --planner icf
+    harness branch baseline --planner icf
     harness planner note icf --add "ICF_CKPT is empty on this node; that is correct."
 
-The registry lives in the *main* repository, not in an experiment worktree, so
-every experiment under a Planner reads and appends to the same memory. Notes
+The registry lives in the *main* repository, not in a branch worktree, so
+every branch under a Planner reads and appends to the same memory. Notes
 are the Planner's own operational findings; durable facts about the project
 belong in ``project.yaml`` (see :mod:`harness.project`), which the researcher
 owns. The split matters: one is a lab notebook, the other is policy.
@@ -44,7 +44,7 @@ class Note:
 
     at: str
     text: str
-    experiment: str = ""
+    branch: str = ""
 
 
 @dataclasses.dataclass
@@ -55,7 +55,7 @@ class Planner:
     model: str = ""
     effort: str = ""
     created_at: str = ""
-    experiments: list[str] = dataclasses.field(default_factory=list)
+    branches: list[str] = dataclasses.field(default_factory=list)
     notes: list[Note] = dataclasses.field(default_factory=list)
     path: Path | None = None
 
@@ -65,10 +65,10 @@ def _now() -> str:
 
 
 def main_repo_root(root: str | Path = ".") -> Path:
-    """The main working tree, even when called from inside an experiment worktree.
+    """The main working tree, even when called from inside a branch worktree.
 
     A worktree has its own directory but shares the repository. The Planner
-    registry belongs to the repository, so every experiment under one Planner
+    registry belongs to the repository, so every branch under one Planner
     appends to the same memory rather than to a copy that dies with the branch.
     """
     root = Path(root).resolve()
@@ -123,7 +123,7 @@ def _from_dict(data: dict, path: Path) -> Planner:
                 Note(
                     at=str(raw.get("at", "")),
                     text=str(raw["text"]),
-                    experiment=str(raw.get("experiment", "")),
+                    branch=str(raw.get("branch", "")),
                 )
             )
     return Planner(
@@ -131,7 +131,7 @@ def _from_dict(data: dict, path: Path) -> Planner:
         model=str(entry.get("model", "") or ""),
         effort=str(entry.get("effort", "") or ""),
         created_at=str(entry.get("created_at", "") or ""),
-        experiments=[str(e) for e in entry.get("experiments", []) or []],
+        branches=[str(e) for e in entry.get("branches", []) or []],
         notes=notes,
         path=path,
     )
@@ -149,7 +149,7 @@ def save(planner: Planner) -> Path:
                     "model": planner.model,
                     "effort": planner.effort,
                     "created_at": planner.created_at,
-                    "experiments": list(planner.experiments),
+                    "branches": list(planner.branches),
                     "notes": [dataclasses.asdict(n) for n in planner.notes],
                 }
             },
@@ -183,7 +183,7 @@ def create(name: str, model: str = "", effort: str = "", root: str | Path = ".")
     where it is unknowable.
 
     Knowing the model still matters — two runs planned by different models are
-    not the same experiment — but the place to insist on it is the report, which
+    not the same branch — but the place to insist on it is the report, which
     already refuses to call a run comparable when the model is missing. Record
     it whenever it becomes known with :func:`set_model`.
     """
@@ -215,25 +215,25 @@ def set_model(name: str, model: str, effort: str | None = None, root: str | Path
     return planner
 
 
-def add_note(name: str, text: str, experiment: str = "", root: str | Path = ".") -> Planner:
+def add_note(name: str, text: str, branch: str = "", root: str | Path = ".") -> Planner:
     """Append something this Planner learned, so the next one starts with it."""
     if not text.strip():
         raise PlannerError("a note needs text")
     planner = load(name, root)
-    planner.notes.append(Note(at=_now(), text=text.strip(), experiment=experiment))
+    planner.notes.append(Note(at=_now(), text=text.strip(), branch=branch))
     save(planner)
     return planner
 
 
-def link_experiment(name: str, experiment: str, root: str | Path = ".") -> Planner:
+def link_branch(name: str, branch: str, root: str | Path = ".") -> Planner:
     planner = load(name, root)
-    if experiment not in planner.experiments:
-        planner.experiments.append(experiment)
+    if branch not in planner.branches:
+        planner.branches.append(branch)
         save(planner)
     return planner
 
 
-def brief_lines(planner: Planner | None, experiment: str = "") -> list[str]:
+def brief_lines(planner: Planner | None, branch: str = "") -> list[str]:
     """The 'what this Planner already knows' section of a briefing."""
     if planner is None:
         return []
@@ -242,14 +242,14 @@ def brief_lines(planner: Planner | None, experiment: str = "") -> list[str]:
         "",
         f"You are **{planner.name}** ({planner.model}"
         + (f", effort {planner.effort}" if planner.effort else "")
-        + f"). You have driven {len(planner.experiments)} experiment(s) in this project"
-        + (f": {', '.join(planner.experiments)}." if planner.experiments else "."),
+        + f"). You have driven {len(planner.branches)} branch(s) in this project"
+        + (f": {', '.join(planner.branches)}." if planner.branches else "."),
         "",
     ]
     if planner.notes:
         lines += ["Carried forward from those runs — treat as findings, not gospel:", ""]
         for note in planner.notes:
-            where = f" [{note.experiment}]" if note.experiment else ""
+            where = f" [{note.branch}]" if note.branch else ""
             lines.append(f"- {note.text}{where}")
         lines += [
             "",
@@ -264,7 +264,7 @@ def brief_lines(planner: Planner | None, experiment: str = "") -> list[str]:
         "",
         "```bash",
         f"python -m harness planner note {planner.name} "
-        + (f"--experiment {experiment} " if experiment else "")
+        + (f"--branch {branch} " if branch else "")
         + '--add "..."',
         "```",
         "",

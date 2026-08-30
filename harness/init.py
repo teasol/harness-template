@@ -81,7 +81,7 @@ def init_project(
         harness_dir / "configs",
         harness_dir / "agents",
         harness_dir / "scripts",
-        target / ".experiments",
+        target / ".worktrees",
         target / "results",
     ]
     for d in dirs:

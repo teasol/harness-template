@@ -6,7 +6,7 @@ machine-checkable acceptance criteria. Plans are materialized into
 self-contained task files (see :mod:`harness.task`) that Worker agents
 execute one at a time, each in isolation.
 
-A plan also declares what the experiment *reports* back to the researcher
+A plan also declares what the branch *reports* back to the researcher
 (``report:``). The researcher states what they want to see when instructing
 the Planner; the Planner records **where** each number comes from, and the
 harness extracts the values from real run artifacts. An agent never narrates
@@ -116,15 +116,14 @@ class MetricRef:
 
 @dataclasses.dataclass
 class Report:
-    """What this experiment reports back to the researcher.
+    """What this branch reports back to the researcher.
 
     Free-form by design: the researcher says what they want when they give
     the instruction. Self-contained by rule: a report may only draw on this
-    experiment's own artifacts, never another experiment's, so it can be
+    branch's own artifacts, never another branch's, so it can be
     judged on its own terms.
     """
 
-    question: str = ""
     metrics: list[MetricRef] = dataclasses.field(default_factory=list)
     artifacts: list[str] = dataclasses.field(default_factory=list)
 
@@ -141,28 +140,27 @@ class Report:
         for artifact in artifacts:
             _require_self_contained(artifact, "report artifact")
         return cls(
-            question=str(data.get("question", "")),
             metrics=[MetricRef.from_dict(m) for m in data.get("metrics", [])],
             artifacts=artifacts,
         )
 
 
 def _require_self_contained(path: str, where: str) -> None:
-    """Reject a report path that could reach outside this experiment.
+    """Reject a report path that could reach outside this branch.
 
-    Cross-experiment comparison is the researcher's job (Tier 1), performed by
-    collecting finished reports. An experiment that reads another experiment's
+    Comparing branches is the user's job, done by
+    collecting finished reports. An branch that reads another branch's
     files cannot be judged on its own, so the harness refuses to produce one.
     """
     if path.startswith(("/", "~")):
         raise PlanError(
-            f"{where} must stay inside the experiment: absolute path '{path}'. "
-            "Reports may only draw on this experiment's own artifacts."
+            f"{where} must stay inside the branch: absolute path '{path}'. "
+            "Reports may only draw on this branch's own artifacts."
         )
     if ".." in Path(path).parts:
         raise PlanError(
-            f"{where} must stay inside the experiment: '{path}' escapes via '..'. "
-            "Comparing experiments is the researcher's job, not the plan's."
+            f"{where} must stay inside the branch: '{path}' escapes via '..'. "
+            "Comparing branches is the user's job, not the plan's."
         )
 
 
@@ -248,7 +246,7 @@ def _validate_steps(module_id: str, steps: list[Step]) -> None:
                 )
 
 
-#: Marker written into scaffolded plans by ``harness exp start``. A scaffold
+#: Marker written into scaffolded plans by ``harness branch``. A scaffold
 #: is structurally valid but says nothing, so validating one must fail — or the
 #: Planner is told its placeholder is a plan.
 SCAFFOLD_MARKER = "TODO(Planner)"
@@ -409,7 +407,7 @@ def plan_fingerprint(path: str | Path) -> str:
 def approval_path(plan_path: str | Path) -> Path:
     """Where a plan's approval record lives — beside the plan, not in results.
 
-    Approval is part of the experiment's record, so it belongs with the plan on
+    Approval is part of the branch's record, so it belongs with the plan on
     the branch rather than in a gitignored results directory.
     """
     plan_path = Path(plan_path)

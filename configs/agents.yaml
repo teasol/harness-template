@@ -13,7 +13,7 @@
 # adapter:
 #   manual — you open that session yourself; the harness writes a briefing
 #            and stops. The default, so the template needs no API key.
-#   cli    — the harness spawns it: `harness planner run` for the Planner,
+#   cli    — the harness spawns it for Sub-Workers,
 #            `harness plan run` for Workers.
 #
 # session: attach an already-open session instead of starting a fresh one —

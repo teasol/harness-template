@@ -367,20 +367,14 @@ def test_setup_lists_platforms(capsys) -> None:
     assert "claude" in out and "reasoning levels" in out
 
 
-def test_setup_writes_both_tiers(tmp_path: Path, capsys) -> None:
-    """Planner and Worker are configured together, so the split is deliberate."""
+def test_setup_writes_the_worker_tier(tmp_path: Path, capsys) -> None:
+    """Only the Sub-Worker is configurable — the Planner is the session you are in."""
     shutil.copytree("configs", tmp_path / "configs")
     code = main(
         [
             "setup",
             "--root",
             str(tmp_path),
-            "--planner-platform",
-            "claude",
-            "--planner-model",
-            "opus",
-            "--planner-effort",
-            "high",
             "--worker-platform",
             "claude",
             "--worker-model",
@@ -391,24 +385,24 @@ def test_setup_writes_both_tiers(tmp_path: Path, capsys) -> None:
     )
     assert code == 0
     out = capsys.readouterr().out
-    assert "planner  claude · opus · high" in out
     assert "worker   claude · haiku · low" in out
+    # The Planner is never spawned, so it is pinned to manual and asks nothing.
+    assert "planner  manual" in out
 
     from harness.worker import load_agent_config
 
-    assert load_agent_config("planner", root=tmp_path).model == "opus"
+    planner = load_agent_config("planner", root=tmp_path)
+    assert planner.adapter == "manual" and not planner.model
     assert load_agent_config("worker", root=tmp_path).model == "haiku"
 
 
-def test_setup_writes_manual_tiers(tmp_path: Path, capsys) -> None:
+def test_setup_defaults_to_manual(tmp_path: Path, capsys) -> None:
     shutil.copytree("configs", tmp_path / "configs")
     code = main(
         [
             "setup",
             "--root",
             str(tmp_path),
-            "--planner-platform",
-            "manual",
             "--worker-platform",
             "manual",
         ]
@@ -425,26 +419,25 @@ def test_setup_writes_manual_tiers(tmp_path: Path, capsys) -> None:
 
 
 def test_setup_can_attach_a_session(tmp_path: Path, capsys) -> None:
+    """Attaching to an already-open session is a Sub-Worker option now.
+
+    It used to be demonstrated on the Planner tier, which no longer exists as a
+    choice: the Planner is the session you are already talking to.
+    """
     shutil.copytree("configs", tmp_path / "configs")
     code = main(
         [
             "setup",
             "--root",
             str(tmp_path),
-            "--planner-platform",
-            "claude",
-            "--planner-model",
-            "opus",
-            "--planner-effort",
-            "high",
-            "--planner-session",
-            "sess-42",
             "--worker-platform",
             "claude",
             "--worker-model",
             "haiku",
             "--worker-effort",
             "low",
+            "--worker-session",
+            "sess-42",
         ]
     )
     assert code == 0
@@ -452,8 +445,8 @@ def test_setup_can_attach_a_session(tmp_path: Path, capsys) -> None:
 
     from harness.worker import load_agent_config
 
-    planner = load_agent_config("planner", root=tmp_path)
-    assert planner.session == "sess-42" and "{session}" in planner.command
+    worker = load_agent_config("worker", root=tmp_path)
+    assert worker.session == "sess-42" and "{session}" in worker.command
 
 
 def test_setup_rejects_an_unknown_platform(tmp_path: Path, capsys) -> None:
@@ -480,25 +473,3 @@ def test_setup_rejects_an_unknown_reasoning_level(tmp_path: Path, capsys) -> Non
     )
     assert code == 2
     assert "not a reasoning level" in capsys.readouterr().err
-
-
-def test_exp_question_records_and_reads_back(tmp_path: Path, capsys) -> None:
-    """The conversational path: open first, agree on the question, record it."""
-    import subprocess
-
-    clone = tmp_path / "repo"
-    subprocess.run(["git", "clone", "--quiet", ".", str(clone)], check=True)
-    subprocess.run(["git", "-C", str(clone), "config", "user.email", "t@e.invalid"], check=True)
-    subprocess.run(["git", "-C", str(clone), "config", "user.name", "t"], check=True)
-
-    assert main(["exp", "start", "conv", "--root", str(clone)]) == 0
-    capsys.readouterr()
-
-    # Nothing recorded yet — and the command says so rather than printing blank.
-    assert main(["exp", "question", "conv", "--root", str(clone)]) == 1
-    assert "no question recorded yet" in capsys.readouterr().out
-
-    assert main(["exp", "question", "conv", "--set", "Is it faster?", "--root", str(clone)]) == 0
-    capsys.readouterr()
-    assert main(["exp", "question", "conv", "--root", str(clone)]) == 0
-    assert "Is it faster?" in capsys.readouterr().out

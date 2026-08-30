@@ -326,7 +326,7 @@ def test_the_two_tier_model_is_stated_where_agents_read_it() -> None:
     assert "Never implement modules yourself" not in planner
     assert "Main Worker" in planner
     assert "executor: main" in planner and "executor: sub" in planner
-    assert "many experiments" in planner
+    assert "many branches" in planner
     assert "Sub-Worker" in worker
     assert "two tiers" in agents_md
     assert "Tier 3" not in agents_md
@@ -351,7 +351,7 @@ def test_nothing_tells_the_planner_it_may_not_implement() -> None:
         "harness/templates/agents/planner.md",
         "AGENTS.md",
         "harness/templates/AGENTS.md",
-        "harness/experiment.py",
+        "harness/branch.py",
         "integrations/README.md",
         "README.md",
     ]

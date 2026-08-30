@@ -17,8 +17,8 @@ htmlcov/
 # Secrets & environments
 .env
 
-# Experiment worktrees (harness exp start) — the branches are the record
-.experiments/
+# Worktrees (harness branch <name>) — the branches themselves are the record
+.worktrees/
 
 # Research artifacts (keep the READMEs only)
 data/*

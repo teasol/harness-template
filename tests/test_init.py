@@ -23,12 +23,12 @@ def test_init_fresh_directory(tmp_path: Path) -> None:
     assert (project_dir / ".gitignore").is_file()
 
     gitignore_text = (project_dir / ".gitignore").read_text(encoding="utf-8")
-    assert ".experiments/" in gitignore_text
+    assert ".worktrees/" in gitignore_text
     assert "results/*" in gitignore_text
 
     assert (project_dir / ".harness" / "plans").is_dir()
     assert (project_dir / ".harness" / "tasks").is_dir()
-    assert (project_dir / ".experiments").is_dir()
+    assert (project_dir / ".worktrees").is_dir()
     assert (project_dir / "results").is_dir()
 
 

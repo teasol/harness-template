@@ -111,7 +111,7 @@ def test_init_names_the_adoption_path(existing_project: Path, capsys) -> None:
     # It points at a Planner rather than at a procedure.
     assert "harness create -n" in out
     assert "harness project init" in out
-    assert "exp start" in out
+    assert "harness branch" in out
 
 
 def test_init_on_an_empty_project_keeps_the_greenfield_path(tmp_path: Path, capsys) -> None:
@@ -140,7 +140,7 @@ def test_next_steps_drop_what_is_already_done(existing_project: Path) -> None:
     steps = adoption.next_steps(existing_project)
     assert not any("project init" in s for s in steps)
     assert not any("harness create -n" in s for s in steps)
-    assert any("exp start" in s for s in steps)
+    assert any("harness branch" in s for s in steps)
 
 
 # ---------------------------------------------------------------------------
