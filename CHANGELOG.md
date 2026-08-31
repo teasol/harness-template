@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what is actually affected — delegated modules — rather than implying nothing
   gets built at all.
 
+### Documentation
+
+- **The README's walkthrough reads as a template again.** Everything you
+  substitute is now written the same way — `<my-project>`, `<planner-name>`,
+  `<plan-name>`, `<module-id>` — instead of mixing invented names (`my-planner`,
+  `fix-loader`) with placeholders, and the sample output uses the same names as
+  the commands above it. Its `plan` commands still passed `plans/<name>.yaml`
+  paths, which 0.5.0 replaced with plan names. **Adopting an existing project**
+  moved out of the quickstart into step 1, where the Planner is registered.
+
 ### Fixed
 
 - **CI's lifecycle step called commands removed in 0.4.0.** `verify.yml` still

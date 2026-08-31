@@ -9,10 +9,9 @@ whatever comes out of either.
 You and the Planner talk about what you want done. It writes a plan, explains
 it, and — once you agree — **builds it itself**, module by module, handing a
 Sub-Worker the occasional chunk that is routine bulk. Each plan lives on its own
-git branch. When it
-is finished you get a report — did integration pass, which modules were built,
-does it reproduce, and the numbers you asked for — and **you** decide whether to
-merge. The harness measures; it never decides.
+git branch. When it is finished you get a report — did integration pass, which
+modules were built, does it reproduce, and the numbers you asked for — and
+**you** decide whether to merge. The harness measures; it never decides.
 
 Lost at any point:
 
@@ -27,11 +26,11 @@ python -m harness status     # reads the real state, names the next command
 pip install git+https://github.com/teasol/harness-template.git
 
 # 2. Initialize in your project:
-cd my-project
+cd <my-project>
 harness init                                   # scaffolds AGENTS.md, agents/, configs/
 
 # 3. Create the Planner you will work with:
-harness create -n my-planner                   # --model / --effort optional
+harness create -n <planner-name>               # --model / --effort optional
 ```
 
 **Using uv?** Add the harness to the project you are about to initialize (which
@@ -39,10 +38,10 @@ needs a `pyproject.toml` — run `uv init` first if it has none), and run every
 harness command through `uv run`:
 
 ```bash
-cd my-project
+cd <my-project>
 uv add git+https://github.com/teasol/harness-template.git
 uv run harness init                            # scaffolds AGENTS.md, agents/, configs/
-uv run harness create -n my-planner            # --model / --effort optional
+uv run harness create -n <planner-name>        # --model / --effort optional
 ```
 
 Every `python -m harness ...` below is then `uv run harness ...` — same
@@ -58,60 +57,37 @@ instead.
 (`configs/`), and asks which agent runs your **Sub-Workers**. The Planner is not
 configured, because the Planner is the session you are already talking to.
 
-**Adopting an existing project?** That is the normal case, and `harness init`
-notices: it records how the harness arrived — the commit, and how many source
-files predate it, so "not verified yet" has a boundary instead of being a
-feeling — and prints the order that works.
-
-```bash
-harness create -n <planner-name>                # the Planner you will talk to
-harness project init                            # what it must know here — it can write this
-```
-
-Then tell that Planner what you want done. It agrees the work with you and
-starts the plan itself — `harness plan new` is its command, not yours.
-
-**The Planner comes first, even here.** Registering one is the only step that is
-always yours to run; writing down what the project expects is work the Planner
-does once it is open and reading its own briefing.
-
-The first Planner's briefing opens with the situation: none of this code is
-covered by a contract or an acceptance check yet, and making it verifiable is
-its first job. **The harness does not prescribe how to modularize an existing
-codebase** — deciding the decomposition is the Planner's work, and a pipeline
-baked into the tool would be wrong for the next project anyway. See
-[docs/plans.md](docs/plans.md#adopting-an-existing-project).
-
 ### 1. Create a Planner, and let it start the plan
 
-**The Planner comes first, and it outlives any one plan.**
+**The Planner comes first, and it outlives any one plan.** Registering one is
+the only step here that is always yours to run.
 
 ```bash
-python -m harness create -n my-planner --model <model> --effort high
+python -m harness create -n <planner-name>      # --model / --effort optional
 ```
+
+`--model` is optional: it defaults to whatever the Planner tier records, and a
+Planner you drive by hand legitimately has none until its session says what it
+is (`harness planner set <planner-name> --model <model>`). Until then every
+report under it notes that the run cannot be compared with another.
 
 You then talk to that Planner, and *it* starts the plan once you agree what the
 work is:
 
 ```bash
-python -m harness plan new fix-loader --planner my-planner   # the Planner runs this
+python -m harness plan new <plan-name> --planner <planner-name>   # the Planner runs this
 ```
-
-`--model` is optional: it defaults to whatever the Planner tier records, and a
-Planner you drive by hand legitimately has none until its session says what it
-is (`harness planner set <name> --model <model>`). Until then every report under
-it notes that the run cannot be compared with another.
 
 Starting a plan creates the git branch, an isolated working directory (a git
 *worktree*) under `.worktrees/`, a plan skeleton, and prints the briefing:
 
 ```text
-Plan 'fix-loader' created, worktree at /path/to/project/.worktrees/fix-loader.
-Its Planner is 'my-planner'. Everything below is that Planner's briefing —
+Plan '<plan-name>' created, worktree at <my-project>/.worktrees/<plan-name>.
+Its Planner is '<planner-name>'. Everything below is that Planner's briefing —
 follow it, or hand this session to whoever will.
 
 ======================================================================
-# Planner briefing: fix-loader
+# Planner briefing: <plan-name>
 
 ## The work
 
@@ -125,10 +101,31 @@ words you would use out loud — and explain the plan before building it.
 **There is no question to record and no form to fill in.** You talk; the Planner
 writes what you agreed as the plan's `goal`, and the report answers to that.
 
+**Adopting an existing project?** That is the normal case, and `harness init`
+notices: it records how the harness arrived — the commit, and how many source
+files predate it, so "not verified yet" has a boundary instead of being a
+feeling — and prints the order that works, which is the same order, plus one
+step:
+
+```bash
+python -m harness create -n <planner-name>      # the Planner you will talk to
+python -m harness project init                  # what it must know here — it can write this
+```
+
+Writing down what the project expects is work the Planner can do itself once it
+is open and reading its own briefing, so it does not hold up the conversation.
+
+That first briefing opens with the situation: none of this code is covered by a
+contract or an acceptance check yet, and making it verifiable is its first job.
+**The harness does not prescribe how to modularize an existing codebase** —
+deciding the decomposition is the Planner's work, and a pipeline baked into the
+tool would be wrong for the next project anyway. See
+[docs/plans.md](docs/plans.md#adopting-an-existing-project).
+
 ### 2. Stay oriented
 
 ```bash
-python -m harness planner brief fix-loader
+python -m harness planner brief <plan-name>
 ```
 
 The same briefing, re-read from current state. It always has the same sections
@@ -142,10 +139,10 @@ will establish, each module and who builds it, why this decomposition rather
 than the obvious alternative, what it will cost, and what would make it fail.
 
 ```bash
-python -m harness plan validate plans/fix-loader.yaml
-python -m harness plan approve plans/fix-loader.yaml --by you   # you run this
-python -m harness plan materialize plans/fix-loader.yaml
-python -m harness plan run plans/fix-loader.yaml
+python -m harness plan validate <plan-name>
+python -m harness plan approve <plan-name> --by <you>   # you run this
+python -m harness plan materialize <plan-name>
+python -m harness plan run <plan-name>
 ```
 
 **A plan is a proposal until you approve it, and `plan run` refuses to start on
@@ -170,13 +167,13 @@ next module is the Planner's** — saying which module, and how to hand it back:
 ```text
 1 task(s) delegated this pass; 1/3 module(s) done
 
-module 'train-loop' (2/3) is yours to build — nothing was spawned for it.
+module '<module-id>' (2/3) is yours to build — nothing was spawned for it.
 Build it, then hand it back to the loop:
 
-  python -m harness task show --id train-loop            # its brief, contract and acceptance
-  python -m harness task verify --id train-loop          # when you think it is done
-  python -m harness task done --id train-loop --by planner
-  python -m harness plan run fix-loader                  # continues from here
+  python -m harness task show --id <module-id>            # its brief, contract and acceptance
+  python -m harness task verify --id <module-id>          # when you think it is done
+  python -m harness task done --id <module-id> --by planner
+  python -m harness plan run <plan-name>                  # continues from here
 ```
 
 For a delegated module the harness checks acceptance **and** declared
@@ -196,7 +193,7 @@ python -m harness progress --watch
 ```
 
 ```text
-worker fix-loader-parse (module 1/2 · attempt 2/6) · running 12m30s · 17m30s before the cap
+worker <module-id> (module 1/2 · attempt 2/6) · running 12m30s · 17m30s before the cap
 ```
 
 A heartbeat that stopped ticking is reported as **dead**, not slow — the
@@ -205,11 +202,11 @@ distinction you actually need during a long wait.
 ### 4. Read the report and decide
 
 ```bash
-python -m harness report fix-loader --determinism --save
+python -m harness report <plan-name> --determinism --save
 ```
 
 ```text
-[fix-loader] READY TO MERGE
+[<plan-name>] READY TO MERGE
   integration: PASSED
   tasks:       2/2 done
   determinism: REPRODUCIBLE
@@ -224,7 +221,7 @@ what is missing.
 Then, if you want it:
 
 ```bash
-git merge fix-loader
+git merge <plan-name>
 ```
 
 Nothing merges on your behalf. Decide against a plan and simply don't merge —
@@ -233,8 +230,8 @@ its git branch remains, so the attempt stays on the record.
 ### Running several at once
 
 ```bash
-python -m harness plan new fix-loader --planner my-planner
-python -m harness plan new new-metric --planner my-planner
+python -m harness plan new <plan-name> --planner <planner-name>
+python -m harness plan new <other-plan> --planner <planner-name>
 python -m harness plans
 ```
 
@@ -249,7 +246,7 @@ job, done by reading the finished reports.
 | --- | --- |
 | The briefing says **no goal written yet** | Talk it through, then write it as the plan's `goal`. |
 | `plan validate` says "still the scaffold" | The TODOs have not been filled in yet. |
-| `plan run` says **this plan has never been approved** | Read it, then `harness plan approve <plan> --by <you>`. Editing a plan lapses its approval. |
+| `plan run` says **this plan has never been approved** | Read it, then `harness plan approve <plan-name> --by <you>`. Editing a plan lapses its approval. |
 | A task is `blocked` | A Sub-Worker used up its attempts. Fix the brief, or take the module over with `executor: main`. |
 | A task stopped after **3 attempts changed no deliverable** | The Sub-Worker is wedged, not slow. The brief or the acceptance is wrong. |
 | A Sub-Worker exited in **under 5 seconds** | A misconfigured command, not a coding problem. `harness setup --check`. |
@@ -297,7 +294,7 @@ flowchart TD
 
     subgraph T2 ["Tier 2 · serial execution"]
         direction TB
-        subgraph BR ["🌿 one plan — fix-loader"]
+        subgraph BR ["🌿 one plan — &lt;plan-name&gt;"]
             direction TB
             MW["🤖 Main Worker — the Planner itself<br/>plans, and builds the modules"]
             subgraph EX ["serial execution, module by module"]
@@ -330,18 +327,18 @@ it is checked.
 ### Tier 1 — plans and the merge decision
 
 ```bash
-python -m harness create -n <planner> --model <model>   # a Planner, once
-python -m harness plan new <name> --planner <planner>   # git branch + worktree
-python -m harness planner brief <name>                  # current state, any time
-python -m harness plans                                 # what is in flight
-python -m harness report <name> --determinism --save
-git merge <name>                                        # only you do this
+python -m harness create -n <planner-name>                        # a Planner, once
+python -m harness plan new <plan-name> --planner <planner-name>   # git branch + worktree
+python -m harness planner brief <plan-name>                       # current state, any time
+python -m harness plans                                           # what is in flight
+python -m harness report <plan-name> --determinism --save
+git merge <plan-name>                                             # only you do this
 ```
 
 A Planner made with `harness create` outlives one plan: it carries its model —
 so a report is never "model not recorded" — and the notes it wrote in earlier
 runs, which is the hour it spent learning the project not being paid twice.
-`harness planner note <name> --add "..."` records something the next run should
+`harness planner note <planner-name> --add "..."` records something the next run should
 not have to rediscover. Durable project policy belongs in
 `configs/project.yaml` instead, which you own: one is a lab notebook, the other
 is the rules.
@@ -527,8 +524,8 @@ harness-template/
 **Option B — GitHub CLI:**
 
 ```bash
-gh repo create <owner>/<new-project> --template teasol/harness-template --clone
-cd <new-project>
+gh repo create <owner>/<my-project> --template teasol/harness-template --clone
+cd <my-project>
 python -m harness status
 ```
 
