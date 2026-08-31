@@ -18,7 +18,7 @@ Usage::
     python -m harness task claim --id <id> --by <agent> [--force] [--tasks-dir tasks]
     python -m harness task block --id <id> --reason "..." [--tasks-dir tasks]
     python -m harness task verify (--id <id> | --all) [--status S] [--tasks-dir tasks]
-    python -m harness task run --id <id> [--attempts N]   # invoke a Worker + verify
+    python -m harness task run --id <id> [--attempts N]   # delegate one module + verify
     python -m harness task done --id <id> [--by <agent>] [--tasks-dir tasks]
 
     # Work (you <-> Planner): one plan + worktree per piece of work
@@ -543,7 +543,10 @@ def build_parser() -> argparse.ArgumentParser:
     plan_check.add_argument("--tasks-dir", default="tasks")
     plan_check.set_defaults(func=cmd_plan_check)
 
-    plan_run = plan_sub.add_parser("run", help="Run every ready task through a Worker")
+    plan_run = plan_sub.add_parser(
+        "run",
+        help="Work through the plan in order: delegate where you said to, stop where it is yours",
+    )
     plan_run.add_argument("plan", help="Plan name, or a path to its YAML file")
     plan_run.add_argument("--tasks-dir", default="tasks")
     plan_run.add_argument("--root", default=".", help="Repo root (default: cwd)")
@@ -567,7 +570,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_approve.add_argument("--worker-config", default=None, help="Worker config YAML")
     plan_approve.set_defaults(func=cmd_plan_approve)
 
-    task_cmd = sub.add_parser("task", help="Worker task commands")
+    task_cmd = sub.add_parser("task", help="Module task commands (yours and delegated)")
     task_sub = task_cmd.add_subparsers(dest="task_command", required=True)
 
     for name, help_text, func in [
@@ -593,7 +596,7 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "list":
             parser_i.add_argument("--plan", default=None, help="Only tasks from this plan")
         if name == "claim":
-            parser_i.add_argument("--by", required=True, help="Worker/agent name")
+            parser_i.add_argument("--by", required=True, help="Who is doing it")
             parser_i.add_argument(
                 "--force",
                 action="store_true",
@@ -1020,23 +1023,34 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
 
     if config.adapter == "manual":
         print(
-            "worker adapter is 'manual': each task writes a briefing and stops.\n"
-            "Set `adapter: cli` in configs/worker.yaml to have Workers built here.\n"
+            "Sub-Worker adapter is 'manual': a delegated module writes a briefing and\n"
+            "stops. Your own modules are unaffected — set `adapter: cli` in\n"
+            "configs/worker.yaml to have the delegated ones built here.\n"
         )
 
     completed = 0
+    yours: str | None = None
+    order = plan.topological_order()
     while True:
         board = task_mod.load_board(tasks_dir)
         by_id = {t.id: t for t in board}
-        # Modules the Main Worker kept are not the drain loop's to run; skipping
-        # them lets the delegated queue finish instead of halting on the first.
-        ready = [t for t in task_mod.ready_task_ids(board) if by_id[t].executor != "main"]
+        # Dependency order, including the Main Worker's own modules. This loop is
+        # the Main Worker's: it works through the plan and spawns a Sub-Worker
+        # only where the plan says to delegate one. It used to filter those
+        # modules out and drain the delegated queue instead, which put the
+        # Sub-Workers at the centre of a flow that is not theirs.
+        ready = sorted(task_mod.ready_task_ids(board), key=order.index)
         if not ready:
             break
         task_id = ready[0]
+        if by_id[task_id].executor == "main":
+            # Not a failure and not a skip: the next module in order is the
+            # Planner's to build, so the loop hands back and waits.
+            yours = task_id
+            break
         total_modules = len(plan.modules)
-        module_index = plan.topological_order().index(task_id) + 1
-        print(f"--- running task '{task_id}' (module {module_index}/{total_modules}) ---")
+        module_index = order.index(task_id) + 1
+        print(f"--- delegating task '{task_id}' (module {module_index}/{total_modules}) ---")
         sys.stdout.flush()
         try:
             outcome = run_task(
@@ -1061,7 +1075,23 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
 
     board = task_mod.load_board(args.tasks_dir)
     done = sum(1 for t in board if t.is_done)
-    print(f"\n{completed} task(s) run this pass; {done}/{len(plan.modules)} module(s) done")
+    print(f"\n{completed} task(s) delegated this pass; {done}/{len(plan.modules)} module(s) done")
+    if yours is not None:
+        module_index = order.index(yours) + 1
+        print(
+            f"\nmodule '{yours}' ({module_index}/{len(plan.modules)}) is yours to build — "
+            "nothing was spawned for it.\nBuild it, then hand it back to the loop:\n"
+        )
+        for step in invocation.steps(
+            [
+                (f"task show --id {yours}", "its brief, contract and acceptance"),
+                (f"task verify --id {yours}", "when you think it is done"),
+                (f"task done --id {yours} --by planner", ""),
+                (f"plan run {plan.name}", "continues from here"),
+            ]
+        ):
+            print(f"  {step}")
+        return 1
     if done < len(plan.modules):
         # "no ready tasks left" on its own is the least useful sentence the
         # harness can print: it is identical whether a task is blocked, waiting
@@ -1405,17 +1435,19 @@ def cmd_status(args: argparse.Namespace) -> int:
         print()
         if status.agents_config_found:
             print(
-                "  Agents are MANUAL: the harness writes a briefing and stops rather\n"
-                "  than spawning anything. Run `harness setup` to pick the platform,\n"
-                "  model, and reasoning level for each tier."
+                "  Sub-Workers are MANUAL: a delegated module writes a briefing and\n"
+                "  stops rather than spawning anything. Modules you build yourself are\n"
+                "  unaffected. Run `harness setup` to pick the platform, model, and\n"
+                "  reasoning level for the Sub-Worker tier."
             )
         else:
             # Chosen-manual and fallen-back-to-manual used to look identical,
             # so a worktree that never inherited its agent config looked like a
             # working setup that simply had nothing to do.
             print(
-                "  WARNING: no agent configuration found here, so agents fell back\n"
-                "  to MANUAL — `plan run` will write briefings and spawn nothing.\n"
+                "  WARNING: no agent configuration found here, so Sub-Workers fell\n"
+                "  back to MANUAL — a delegated module will write a briefing and spawn\n"
+                "  nothing.\n"
                 f"  Expected: {status.agents_config_path}\n"
                 "  Copy it from the parent project, or run `harness setup`."
             )

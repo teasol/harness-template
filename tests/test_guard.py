@@ -43,6 +43,7 @@ task:
       checks:
       - type: file_exists
         path: src/widget.py
+  executor: sub
   status: todo
   worker: null
   log: []
@@ -320,7 +321,7 @@ def test_repo_changes_outside_git_is_empty(tmp_path: Path) -> None:
 # executor: planner — some work should never go through a Worker
 
 
-MAIN_TASK_YAML = TASK_YAML.replace("  status: todo", "  executor: main\n  status: todo")
+MAIN_TASK_YAML = TASK_YAML.replace("  executor: sub", "  executor: main")
 
 
 def test_main_worker_modules_are_never_delegated(tmp_path: Path) -> None:

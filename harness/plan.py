@@ -171,13 +171,15 @@ class Module:
     id: str
     title: str
     brief: str
-    #: Who builds this. ``sub`` delegates to a Sub-Worker spawned against the
-    #: brief; ``main`` means the Main Worker — the Planner itself — does it
-    #: directly. Delegation is for routine bulk: long mechanical coding, log
-    #: parsing, anything where writing the brief costs less than doing the work
-    #: twice. Core logic, planning and orchestration stay with the Main Worker.
+    #: Who builds this, defaulting to the Main Worker — the Planner itself.
+    #: That is the normal case: the Planner works through the modules in order,
+    #: and ``sub`` is the exception it opts into for one module, spawning a
+    #: Sub-Worker against the brief. Delegation is for routine bulk: long
+    #: mechanical coding, log parsing, anything where writing the brief costs
+    #: less than doing the work twice. Defaulting the other way read as "the
+    #: Planner does not code", which is backwards.
     #: ``planner``/``worker`` are accepted as the older names for ``main``/``sub``.
-    executor: str = "sub"
+    executor: str = "main"
     depends_on: list[str] = dataclasses.field(default_factory=list)
     deliverables: list[str] = dataclasses.field(default_factory=list)
     constraints: list[str] = dataclasses.field(default_factory=list)
@@ -339,7 +341,7 @@ def _module_from_dict(entry: Any) -> Module:
     except SpecError as exc:
         raise PlanError(f"module '{module_id}': invalid acceptance: {exc}") from exc
 
-    executor = normalize_executor(str(entry.get("executor", "sub")))
+    executor = normalize_executor(str(entry.get("executor", "main")))
     if executor is None:
         raise PlanError(
             f"module '{module_id}': unknown executor '{entry.get('executor')}'. "

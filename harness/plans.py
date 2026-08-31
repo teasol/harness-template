@@ -225,17 +225,23 @@ plan:
   integration:
     spec: configs/{name}.yaml
 
+  # You build these, in order. `executor` defaults to `main` — the Main Worker,
+  # which is you — so a module says nothing unless you decide to delegate it.
+  # Set `executor: sub` on a module that is routine bulk a brief can specify
+  # completely, and `plan run` spawns a Sub-Worker for that one and hands back.
   modules:
     - id: TODO-module
       title: TODO
+      executor: main
       depends_on: []
       deliverables: [src/TODO.py]
       contract:
         inputs: []
         outputs: []
       brief: |
-        TODO: complete instructions for one Worker, assuming it reads nothing
-        but this task file and the repository.
+        TODO: what this module has to do, completely enough that it could be
+        handed to someone who reads nothing but this task file and the
+        repository — which is exactly what happens if you set `executor: sub`.
       constraints: []
       acceptance:
         steps:
@@ -894,15 +900,17 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "## Your role",
         "",
         "Read agents/planner.md and follow it. You own this plan end to end:",
-        "agree what the work is, agree the plan, get each module",
-        "built, verify, and report back.",
+        "agree what the work is, agree the plan, build the modules, verify,",
+        "and report back.",
         "",
-        "**You are also the Main Worker, so building a module yourself is a normal",
-        "move, not a fallback.** Delegate to a Sub-Worker when the work is routine",
-        "bulk a brief can specify completely; do it yourself when writing that brief",
-        "would cost more than the work, and when a Sub-Worker has already failed on",
-        "it. Either way the module keeps its contract and its acceptance — what",
-        "changes is who writes the code, never whether it is checked.",
+        "**You are the Main Worker, so building the modules is your job, not a",
+        "fallback.** `executor` defaults to `main`, and `plan run` walks the plan in",
+        "order and hands back whenever the next module is yours. Delegating is the",
+        "exception you opt into per module (`executor: sub`): routine bulk a brief",
+        "can specify completely, where writing that brief costs less than doing the",
+        "work. A Sub-Worker does that one module and returns, and you carry on with",
+        "the next. Either way the module keeps its contract and its acceptance —",
+        "what changes is who writes the code, never whether it is checked.",
         "",
         "You never merge — that is the researcher's decision.",
         "",
@@ -923,7 +931,7 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
                 ),
                 (f"plan materialize {work.name}", ""),
                 ("task list", "what is ready"),
-                (f"plan run {work.name}", "Sub-Workers build it"),
+                (f"plan run {work.name}", "build in order; delegates where you said so"),
                 (f"report {work.name} --save", ""),
             ]
         ),

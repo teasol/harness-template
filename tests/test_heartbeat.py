@@ -44,6 +44,7 @@ task:
       checks:
       - type: file_exists
         path: src/widget.py
+  executor: sub
   status: todo
   worker: null
   log: []

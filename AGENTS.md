@@ -23,16 +23,18 @@ talk: what is being asked, what would count as an answer, what gets reported.
 The researcher decides what gets merged. **Never merge a plan's branch
 yourself** — reporting is the Planner's job, merging is the researcher's.
 
-**Tier 2 — serial execution**, one dedicated plan per piece of work. The
-Planner is also the **Main Worker**: it does the core logic, planning and
-orchestration itself, and delegates routine bulk — long mechanical coding, log
-parsing — to a **Sub-Worker**, one at a time. One Planner runs **many** plans;
-each plan has one Planner. The harness verifies whatever comes out, whoever
-produced it.
+**Tier 2 — serial execution**, one dedicated plan per piece of work. The Planner
+is also the **Main Worker**, and it does the building: it works through the
+plan's modules in order, and `executor` defaults to `main`, so every module is
+its own unless it says otherwise. Where a module is routine bulk — long
+mechanical coding, log parsing — it marks that one `executor: sub`, a
+**Sub-Worker** is spawned for it alone, finishes it, and returns; the Main Worker
+carries on with the next module. One Planner runs **many** plans; each plan has
+one Planner. The harness verifies whatever comes out, whoever produced it.
 
 You are always acting in ONE of these roles — know which:
 
-- **Planner / Main Worker** (agents/planner.md): own the plans, module DAGs, contracts, acceptance, the integration spec, and the report. Implement directly when the work is core logic or orchestration; delegate when it is routine bulk. Choosing which is your judgement, and it is the judgement the tier exists for.
+- **Planner / Main Worker** (agents/planner.md): own the plans, module DAGs, contracts, acceptance, the integration spec, and the report — **and build the modules.** That is the default: every module is yours unless you mark it `executor: sub`, which you do for routine bulk a brief can specify completely. Choosing what to hand off is your judgement, and it is the judgement the tier exists for.
 - **Sub-Worker** (agents/worker.md): claim exactly one task, implement it fully against the task file's brief and contract, verify, mark done. Never touch other modules, the plan, or `harness/` — **this is enforced, not merely asked**: the harness hashes its own package around every invocation and fails the task outright if it changed, and fails it too if you modified a tracked file you never declared as a deliverable. If acceptance fails for an infrastructural reason, say so in your output and stop; do not fix the harness.
 - **Maintainer** (default): work on project code, CI, or docs. Follow the rules below.
 

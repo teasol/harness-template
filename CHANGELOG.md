@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A module belongs to the Main Worker unless you say otherwise.** `executor`
+  defaulted to `sub`, so a plan that said nothing handed every module to a
+  Sub-Worker — the harness read as "the Planner plans, Workers code", which is
+  the opposite of the role. It defaults to `main` now, in the plan schema and in
+  materialized task files, and the scaffolded plan writes `executor: main` with a
+  comment saying `sub` is the per-module opt-in.
+- **`plan run` is the Main Worker's loop.** It used to filter the Planner's own
+  modules out and drain the delegated queue, listing what it skipped at the end;
+  the flow it described had the Sub-Workers at its centre. It now walks the plan
+  in dependency order, spawns a Sub-Worker where the plan says to, and **stops
+  when the next module is the Planner's** — naming that module and the three
+  commands that hand it back (`task show` / `task verify` / `task done`), plus
+  `plan run` to continue. Nothing later in the plan is started ahead of it.
+  Exit code is unchanged: non-zero while the plan is unfinished.
+- **The contracts and docs say who builds.** `agents/planner.md` led with
+  "decide whether to do the work yourself or delegate it" and its step 3 was
+  called *Dispatch*; it now opens with "you build the modules" and step 3 is
+  building, with delegation as the exception. `AGENTS.md`, the README (Tier 2,
+  the flow diagram, the `executor` block), `docs/orchestration.md` (whose
+  `executor` table recommended the old default and still used the pre-0.4.0
+  spellings) and `docs/plans.md` follow. The "manual adapter" warnings now say
+  what is actually affected — delegated modules — rather than implying nothing
+  gets built at all.
+
+### Fixed
+
+- **CI's lifecycle step called commands removed in 0.4.0.** `verify.yml` still
+  ran `harness exp start|list|remove`, so that job could only fail. It runs the
+  plan lifecycle (`plan new` / `plans` / `plan drop`) now.
+
+
 ## [0.5.0] - 2026-08-31
 
 **Breaking.** "Branches" are gone as a concept: a **plan** is the unit of work,

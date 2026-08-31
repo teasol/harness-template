@@ -54,7 +54,7 @@ drift: ## Validate every plan and fail on task/plan drift
 audit: ## Re-verify every task marked done (acceptance + deliverables)
 	$(PYTHON) -m harness task verify --all --status done --results-dir $(RESULTS_DIR)/audit
 
-run: ## Run every ready task through a Sub-Worker (see configs/agents.yaml)
+run: ## Work through the plan: delegate the `sub` modules, stop where it is yours
 	$(PYTHON) -m harness plan run $(PLAN)
 
 plans: ## List the plans in flight

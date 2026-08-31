@@ -7,8 +7,9 @@ whatever comes out of either.
 ## Getting started
 
 You and the Planner talk about what you want done. It writes a plan, explains
-it, and — once you agree — builds it: some modules itself, the routine bulk
-handed to Sub-Workers. Each plan lives on its own git branch. When it
+it, and — once you agree — **builds it itself**, module by module, handing a
+Sub-Worker the occasional chunk that is routine bulk. Each plan lives on its own
+git branch. When it
 is finished you get a report — did integration pass, which modules were built,
 does it reproduce, and the numbers you asked for — and **you** decide whether to
 merge. The harness measures; it never decides.
@@ -155,21 +156,37 @@ against the plan's contents, so editing it lapses the approval. If the Planner
 approves its own plan the report says so, because the point of the gate is that
 somebody else saw it.
 
-Each module says who builds it:
+**The Planner builds the modules. Delegation is per-module and opt-in:**
 
 ```yaml
-executor: main   # the Planner does it — core logic, planning, orchestration
-executor: sub    # a Sub-Worker does it — routine bulk a brief can fully specify
+executor: main   # the default — the Planner does it
+executor: sub    # this one goes to a Sub-Worker — routine bulk a brief can fully specify
 ```
 
-`plan run` hands `sub` modules to a Sub-Worker in dependency order, checks
-acceptance **and** declared deliverables, and retries with the real failure
-output. It stops early when it stops making progress: three attempts in a row
-that change no deliverable hand back to the Planner rather than spend the rest
-of the cap repeating one failure. A module that fails is `blocked`, and the
-Planner has two real moves — fix the brief, or **take it over** (`executor:
-main`, re-materialize with `--force`, build it itself). Either way the module
-keeps its contract and its acceptance, so taking it over costs no verification.
+`plan run` is the Main Worker's own loop: it walks the modules in dependency
+order, spawns a Sub-Worker for each one marked `sub`, and **stops as soon as the
+next module is the Planner's** — saying which module, and how to hand it back:
+
+```text
+1 task(s) delegated this pass; 1/3 module(s) done
+
+module 'train-loop' (2/3) is yours to build — nothing was spawned for it.
+Build it, then hand it back to the loop:
+
+  python -m harness task show --id train-loop            # its brief, contract and acceptance
+  python -m harness task verify --id train-loop          # when you think it is done
+  python -m harness task done --id train-loop --by planner
+  python -m harness plan run fix-loader                  # continues from here
+```
+
+For a delegated module the harness checks acceptance **and** declared
+deliverables, and retries with the real failure output. It stops early when it
+stops making progress: three attempts in a row that change no deliverable hand
+back to the Planner rather than spend the rest of the cap repeating one failure.
+A module that fails is `blocked`, and the Planner has two real moves — fix the
+brief, or **take it back** (`executor: main`, re-materialize with `--force`,
+build it itself). Either way the module keeps its contract and its acceptance,
+so taking it back costs no verification.
 
 **Watching a long run.** Steps and Sub-Worker attempts buffer their output until
 they exit, so from a second terminal:
@@ -282,15 +299,15 @@ flowchart TD
         direction TB
         subgraph BR ["🌿 one plan — fix-loader"]
             direction TB
-            MW["🤖 Main Worker — the Planner itself<br/>core logic · planning · orchestration"]
-            subgraph EX ["serial execution"]
+            MW["🤖 Main Worker — the Planner itself<br/>plans, and builds the modules"]
+            subgraph EX ["serial execution, module by module"]
                 direction TB
-                SELF["executor: main<br/>direct implementation"]
-                SUB["⚙️ Sub-Worker<br/>executor: sub — long coding, log parsing"]
+                SELF["executor: main — the default<br/>the Planner implements it"]
+                SUB["⚙️ Sub-Worker<br/>executor: sub — the bulk it handed off"]
             end
-            MW -->|"does it itself"| SELF
-            MW -->|"spawns, one at a time"| SUB
-            SUB -->|"returns output"| MW
+            MW ==>|"builds most modules itself"| SELF
+            MW -->|"spawns for one module"| SUB
+            SUB -->|"done — control returns"| MW
         end
         H["⚙️ Harness<br/>integration · module acceptance<br/>reproducibility · metric extraction"]
     end
@@ -336,15 +353,15 @@ artifacts.
 
 Full reference: [docs/plans.md](docs/plans.md).
 
-### Tier 2 — plans, tasks, and Sub-Workers
+### Tier 2 — modules, and the ones you hand off
 
 ```mermaid
 flowchart TD
     P["Planner"] -->|"writes"| PL["plans/*.yaml<br/>goal · DAG · contracts · report"]
     PL -->|"you approve"| A["plan approve"]
     A -->|"materialize"| T["tasks/*.task.yaml<br/>self-contained work orders"]
-    T -->|"executor: main"| P
-    T -->|"executor: sub"| W["Sub-Workers"]
+    T -->|"executor: main — the default"| P
+    T -->|"executor: sub — opt in per module"| W["Sub-Workers"]
     W -->|"implement"| S["src/… deliverables"]
     P -->|"implements"| S
     S -->|"acceptance + deliverables"| H["Runner + checks"]
@@ -352,16 +369,22 @@ flowchart TD
     T -->|"all done"| I["integration spec"]
 ```
 
-Sub-Workers run **one at a time** within a plan. Isolation belongs at the plan
-level: a plan's DAG is near-linear so concurrency buys little, while per-Worker
-branches would fracture the task board and make dependency gates read
-stale state.
+`executor` defaults to `main`, so the arrow that matters here is
+`T -->|executor: main| P`: the Planner is the one building, and a Sub-Worker is
+what it reaches for when a module is bulk. Sub-Workers run **one at a time**
+within a plan, and only while the Main Worker waits for that one module.
+Isolation belongs at the plan level: a plan's DAG is near-linear so concurrency
+buys little, while per-Worker branches would fracture the task board and make
+dependency gates read stale state.
 
 - **Planner / Main Worker contract**: [agents/planner.md](agents/planner.md)
 - **Sub-Worker contract**: [agents/worker.md](agents/worker.md)
 - **Full reference**: [docs/orchestration.md](docs/orchestration.md)
 
 ### Choosing the Sub-Worker
+
+You only need this configured for the modules you delegate; a Planner that
+builds everything itself never spawns one.
 
 ```bash
 python -m harness setup --list      # platforms available

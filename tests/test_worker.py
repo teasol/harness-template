@@ -42,6 +42,7 @@ task:
       checks:
       - type: file_exists
         path: src/widget.py
+  executor: sub
   status: todo
   worker: null
   log: []
@@ -195,7 +196,7 @@ def test_deliverables_are_still_enforced(project: Path) -> None:
     task_file.write_text(
         TASK_YAML.split("  acceptance:")[0]
         + "  acceptance:\n    steps:\n    - id: check\n      run: 'true'\n"
-        + "  status: todo\n  worker: null\n  log: []\n",
+        + "  executor: sub\n  status: todo\n  worker: null\n  log: []\n",
         encoding="utf-8",
     )
     outcome = run_task(

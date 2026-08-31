@@ -17,10 +17,10 @@ judgement — it is the one thing here that is deliberately not automated.
 ```mermaid
 flowchart TD
     R["Researcher (Tier 1)"] -->|"instruction"| E["harness plan new<br/>git branch + worktree"]
-    E --> P["Planner = Main Worker (Tier 2)<br/>writes plans/&lt;name&gt;.yaml"]
+    E --> P["Planner = Main Worker (Tier 2)<br/>writes plans/&lt;name&gt;.yaml, then builds it"]
     P -->|"materialize"| T["tasks/*.task.yaml"]
-    T -->|"executor: main"| P
-    T -->|"executor: sub — one at a time"| W["Sub-Workers"]
+    T -->|"executor: main — the default"| P
+    T -->|"executor: sub — the bulk it hands off"| W["Sub-Worker"]
     W -->|"acceptance + deliverables"| T
     T -->|"all done"| I["integration spec"]
     I --> RPT["harness report"]
@@ -220,16 +220,24 @@ This is a plain command producing plain text on purpose. Tool-specific shims
 vendor's feature would make the template unusable for anyone with a different
 tool.
 
-## Running Workers
+## Building the modules, and delegating some of them
 
-The Planner decides *which* task to run; the harness runs it. `task run`
-invokes the configured Worker, verifies acceptance **and** deliverables, and
-retries with the real failure output until the attempt cap:
+The Main Worker builds the plan. `executor` defaults to `main`, so it works
+through the modules in dependency order, and for each one of its own it does the
+work and then closes it out with `task verify` and `task done --by planner`.
+
+`plan run` drives that same walk and takes the delegated modules off its hands:
 
 ```bash
-python -m harness task run --id <id>     # one module
-python -m harness plan run <plan>        # drain the ready queue in order
+python -m harness plan run <plan>        # in order; stops when the next is yours
+python -m harness task run --id <id>     # delegate one module right now
 ```
+
+Where it reaches a module marked `executor: sub`, it invokes the configured
+Sub-Worker, verifies acceptance **and** deliverables, and retries with the real
+failure output until the attempt cap. Where the next module is `main`, it stops
+and says so — nothing is spawned, and nothing later in the plan is started ahead
+of it. Re-run it after `task done` and it continues.
 
 Retries keep the same worker and hand it the failing checks and step logs,
 rather than starting over: a coding agent given its own failing test usually

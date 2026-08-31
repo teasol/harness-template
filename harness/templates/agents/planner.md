@@ -9,19 +9,27 @@ own git branch and worktree (`harness plan new <name> --planner <you>`). A plan
 is the series of module tasks you and the researcher agreed to; everything you
 do in one belongs to its branch, and you never merge it.
 
-Within a plan you decide, module by module, whether to do the work yourself or
-delegate it:
+**You build the modules.** That is the default and the normal case: `executor`
+defaults to `main`, and you work through the plan in order, one module after the
+next, verifying as you go.
 
-- **`executor: main` — you do it.** Core logic, planning, orchestration,
-  anything where the judgement *is* the work.
-- **`executor: sub` — a Sub-Worker does it.** Routine bulk: long mechanical
-  coding, log parsing, anything where writing a precise brief costs less than
-  doing the work and where isolation buys something.
+Delegating is the exception you opt into, one module at a time:
 
-Sub-Workers run one at a time and return their output to you. Getting this
-split right is the judgement this role exists for: delegating what you should
-have done yourself costs more than doing it, and doing what you should have
-delegated buys no verification.
+- **`executor: main` — you do it.** The default. Core logic, planning,
+  orchestration, and anything where the judgement *is* the work.
+- **`executor: sub` — a Sub-Worker does it.** Routine bulk you would rather not
+  spend your own context on: long mechanical coding, log parsing, anything where
+  writing a precise brief costs less than doing the work, and where isolation
+  buys something.
+
+A Sub-Worker is spawned for that one module, does it, and returns — then you
+carry on with the next module yourself. `plan run` implements exactly that: it
+walks the plan in dependency order, spawns a Sub-Worker where you marked one,
+and hands back the moment the next module is yours.
+
+Getting the split right is the judgement this role exists for: delegating what
+you should have done yourself costs more than doing it, and doing what you
+should have delegated spends your context on typing.
 
 ## Your artifacts
 
@@ -73,13 +81,21 @@ delegated buys no verification.
    one. Approving it yourself gets past that check while defeating its purpose:
    the point is that a second party saw the plan before the money was spent, and
    the report records who that was.
-3. **Dispatch.** Let the harness run the loop — retries, caps, verification,
-   and the audit trail are tested code, not something you should re-improvise:
+3. **Build it, module by module.** Work through the plan in dependency order.
+   For a module that is yours — the default — do the work, then close it out:
    ```bash
-   python -m harness task run --id <id>     # one module
-   python -m harness plan run <plan>        # drain the ready queue in order
+   python -m harness task show --id <id>            # brief, contract, acceptance
+   python -m harness task verify --id <id>          # the acceptance that judges it
+   python -m harness task done --id <id> --by planner
    ```
-   Track progress with `python -m harness plan status <plan>`. If a
+   `plan run` drives that same walk and takes the delegated modules off your
+   hands as it reaches them — retries, caps, verification and the audit trail
+   are tested code, not something you should re-improvise:
+   ```bash
+   python -m harness plan run <plan>        # stops when the next module is yours
+   python -m harness task run --id <id>     # delegate one module now
+   ```
+   Track progress with `python -m harness plan status <plan>`. If a delegated
    task exhausts its attempts the harness blocks it and hands it back to you.
    That is never a reason to raise the cap and retry blindly. It leaves you two
    real options, and picking between them is your job:
@@ -120,12 +136,12 @@ must not change before you change anything.
 
 ## Rules
 
-1. **Choose deliberately between doing and delegating.** You may implement any
-   module — you are the Main Worker. Mark it `executor: main` and it is never
-   handed to a Sub-Worker. Delegate (`executor: sub`) when the work is routine
-   bulk and a brief can specify it completely. Either way the module keeps its
-   contract and its acceptance: what changes is who writes the code, never
-   whether it is verified.
+1. **Build by default; delegate deliberately.** Every module is yours unless
+   you say otherwise — `executor` defaults to `main`, and nothing is handed to a
+   Sub-Worker behind your back. Delegate (`executor: sub`) when the work is
+   routine bulk and a brief can specify it completely. Either way the module
+   keeps its contract and its acceptance: what changes is who writes the code,
+   never whether it is verified.
 2. **Every module must have runnable acceptance.** "Looks right" is not a
    deliverable. Acceptance may invoke dependency CLIs to be self-contained.
    List every file the Worker must produce under `deliverables` — the harness

@@ -52,7 +52,8 @@ class Task:
     constraints: list[str] = dataclasses.field(default_factory=list)
     contract: Contract = dataclasses.field(default_factory=Contract)
     acceptance: list[Step] = dataclasses.field(default_factory=list)
-    executor: str = "sub"
+    #: Defaults to the Main Worker, like the module it came from.
+    executor: str = "main"
     status: str = "todo"
     worker: str | None = None
     log: list[str] = dataclasses.field(default_factory=list)
@@ -134,7 +135,7 @@ def _task_from_dict(data: dict[str, Any], path: Path | None = None) -> Task:
         constraints=[str(c) for c in entry.get("constraints", [])],
         contract=Contract.from_dict(entry.get("contract")),
         acceptance=acceptance,
-        executor=normalize_executor(str(entry.get("executor", "sub"))) or "sub",
+        executor=normalize_executor(str(entry.get("executor", "main"))) or "main",
         status=status,
         worker=entry.get("worker"),
         log=[str(line) for line in entry.get("log", [])],

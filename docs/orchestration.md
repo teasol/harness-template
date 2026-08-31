@@ -6,24 +6,26 @@ This document covers Tier 2 — what happens inside one plan. Tier 1 — the
 dialogue with the researcher, and the report they read to decide a merge — is in
 [plans.md](plans.md).
 
-The Planner is also the **Main Worker**: it implements modules marked
-`executor: main` itself and delegates `executor: sub` modules to Sub-Workers,
-one at a time. Both kinds carry the same contract and the same acceptance.
+The Planner is also the **Main Worker**, and it does the building: `executor`
+defaults to `main`, so it implements the modules itself, in dependency order.
+Where it marked a module `executor: sub`, one Sub-Worker is spawned for that
+module alone, finishes it, and returns — and the Main Worker carries on. Both
+kinds carry the same contract and the same acceptance.
 
-This template implements a **two-tier agent harness**: a Planner agent owns
-the direction and the module DAG; Sub-Worker agents each own one module, built in
-isolation against a self-contained spec. The harness is the contract between
-them — everything machine-checkable is enforced, everything else is written
-down.
+This template implements a **two-tier agent harness**: a Planner agent owns the
+direction, the module DAG *and* the implementation; a Sub-Worker owns one
+delegated module, built in isolation against a self-contained spec. The harness
+is the contract between them — everything machine-checkable is enforced,
+everything else is written down.
 
 ```mermaid
 flowchart TD
     P["Planner agent<br/>(agents/planner.md)"] -->|"writes"| PL["plans/*.yaml<br/>goal · DAG · contracts · briefs · acceptance"]
     PL -->|"harness plan materialize"| T["tasks/*.task.yaml<br/>self-contained work orders"]
-    T -->|"harness task claim"| W1["Worker A<br/>(agents/worker.md)"]
-    T -->|"harness task claim"| W2["Worker B"]
-    W1 -->|"implements"| S1["src/... deliverables"]
-    W2 -->|"implements"| S2["src/... deliverables"]
+    T -->|"executor: main — the default"| P
+    T -->|"executor: sub"| W1["Sub-Worker<br/>(agents/worker.md)"]
+    P -->|"implements"| S1["src/... deliverables"]
+    W1 -->|"implements"| S2["src/... deliverables"]
     S1 -->|"harness task verify/done"| H["Runner + checks<br/>(existing harness)"]
     S2 --> H
     H -->|"status/log"| T
@@ -76,15 +78,16 @@ plan:
   modules:                 # required, non-empty; forms a DAG
     - id: module-a         # unique
       title: ...           # human label
-      executor: worker     # worker (default) | planner — see below
+      executor: main       # main (default, = the Planner) | sub — see below
       depends_on: []       # ids of modules whose outputs this consumes
       deliverables: [src/x/a.py]
       contract:
         inputs:  [{name: seed, type: int, description: ...}]
         outputs: [{name: dataset, type: path, description: ...}]
-      brief: |             # the Worker's complete instructions
+      brief: |             # what this module has to do — and the whole brief
+                           # a Sub-Worker gets if you delegate it
         ...
-      constraints: [...]   # hard rules for the Worker
+      constraints: [...]   # hard rules for whoever builds it
       acceptance:          # mini verification spec (same schema as configs/)
         steps:
           - id: check-a
@@ -99,26 +102,32 @@ owned by exactly one module, report paths that stay inside the plan, and
 
 ### Who builds a module: `executor`
 
-`worker` (the default) spawns an agent against the brief. `planner` means the
-Planner does the work itself — no Worker, no retry loop — while the module
-keeps its contract, deliverables and acceptance exactly as before.
+`main` is the default and means the Main Worker — the Planner itself — builds it:
+no spawn, no retry loop, and the module keeps its contract, deliverables and
+acceptance exactly as before. `sub` is the opt-in: it spawns one Sub-Worker
+against the brief for that module only.
 
-Choose `planner` when the module does not write new code:
+So the question is never "who should build this?" but "is this one worth handing
+off?":
 
 | The module mainly... | executor |
 | --- | --- |
-| runs a plan, drives a job, orchestrates existing scripts | `planner` |
-| reads logs and interprets results | `planner` |
-| implements something new, with tests | `worker` |
+| is where the judgement is — core logic, planning, orchestration | `main` |
+| runs a job, drives an existing script, reads logs and interprets results | `main` |
+| is long mechanical coding a brief can specify completely | `sub` |
+| is bulk you would rather not spend the Main Worker's context on | `sub` |
 
-The isolation a Worker buys is only worth its price when new code is being
-written. Briefing an agent to run a job you could run yourself costs more than
-running it — in one real plan a wrapper script that called an existing
-evaluation script consumed 45 minutes of Worker time against 21 minutes of
-actual evaluation.
+The isolation a Sub-Worker buys is only worth its price when the brief is
+cheaper to write than the work is to do. Briefing an agent to run a job you
+could run yourself costs more than running it — in one real plan a wrapper
+script that called an existing evaluation script consumed 45 minutes of
+Sub-Worker time against 21 minutes of actual evaluation.
 
-`plan run` skips `planner` modules and names them; you run them, then
-`task verify` and `task done --by planner` as usual.
+`plan run` walks the modules in dependency order, spawns a Sub-Worker for each
+`sub` module it reaches, and **stops when the next module is `main`** — naming
+it, and naming `task verify` / `task done --by planner` as the way to hand it
+back. Re-run `plan run` and it continues from there. (The older spellings
+`planner` and `worker` still load as `main` and `sub`.)
 
 ## Watching a run that has not finished
 

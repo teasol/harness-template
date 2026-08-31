@@ -244,9 +244,14 @@ def test_cost_estimate_counts_only_delegated_modules(tmp_path: Path) -> None:
     from harness.plan import estimate_cost
 
     plan = load_plan(write_plan(tmp_path, VALID_PLAN))
-    plan.modules[0].executor = "main"
+    # Both modules default to the Main Worker, so an unmodified plan costs no
+    # Sub-Worker time at all.
+    assert estimate_cost(plan, attempts=6, timeout=1800)["worst_case_s"] == 0
+
+    plan.modules[1].executor = "sub"
     cost = estimate_cost(plan, attempts=6, timeout=1800)
     assert cost["planner_modules"] == 1
+    assert cost["worker_modules"] == 1
     assert cost["worst_case_s"] == cost["worker_modules"] * 6 * 1800
 
 
@@ -370,3 +375,55 @@ def test_nothing_tells_the_planner_it_may_not_implement() -> None:
     assert "executor: main" in contract
     worker_src = (root / "harness" / "worker.py").read_text(encoding="utf-8")
     assert "set `executor: main`" in worker_src
+
+
+# ---------------------------------------------------------------------------
+# who does the work by default
+
+
+def test_a_module_with_no_executor_stays_with_the_main_worker(tmp_path: Path) -> None:
+    """The Planner works through the plan; delegation is the exception it opts into.
+
+    This defaulted to `sub`, so a plan that said nothing handed every module to a
+    Sub-Worker — which reads as "the Planner does not code", the opposite of the
+    Main Worker role.
+    """
+    from harness.task import load_task, materialize
+
+    plan = load_plan(write_plan(tmp_path, VALID_PLAN))
+    assert [m.executor for m in plan.modules] == ["main", "main"]
+
+    # And the task files materialized from it agree.
+    materialize(plan, tmp_path / "tasks")
+    assert load_task(tmp_path / "tasks", "a").executor == "main"
+
+
+def test_plan_run_stops_at_the_module_that_is_yours(tmp_path: Path, capsys) -> None:
+    """`plan run` is the Main Worker's loop, not a queue of Sub-Worker jobs.
+
+    It used to filter the Main Worker's modules out and drain the delegated ones,
+    so the flow it described had the Sub-Workers at the centre. Now it walks the
+    plan in dependency order and hands back when the next module is the
+    Planner's — nothing is spawned, and nothing later is started ahead of it.
+    """
+    from harness.cli import main
+    from harness.plan import record_approval
+    from harness.task import load_task, materialize
+
+    body = VALID_PLAN.replace("      brief: build b", "      executor: sub\n      brief: build b")
+    path = write_plan(tmp_path, body)
+    plan = load_plan(path)
+    materialize(plan, tmp_path / "tasks")
+    record_approval(path, by="researcher")
+
+    rc = main(
+        ["plan", "run", str(path), "--tasks-dir", str(tmp_path / "tasks"), "--root", str(tmp_path)]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1, "the plan is not finished, and the exit code has to say so"
+    assert "module 'a' (1/2) is yours to build" in out
+    assert "nothing was spawned for it" in out
+    assert "task done --id a --by planner" in out
+    # The delegated module depends on 'a', and even an independent one would not
+    # be started ahead of it: the loop stopped.
+    assert load_task(tmp_path / "tasks", "b").status == "todo"
