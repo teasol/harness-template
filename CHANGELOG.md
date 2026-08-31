@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-31
+
+**Behaviour change.** A module with no `executor` now belongs to the Main Worker
+instead of being delegated, and `plan run` walks the plan for the Main Worker
+rather than draining a Sub-Worker queue. Plans that relied on the old default
+delegate nothing until they say `executor: sub`.
+
 ### Changed
 
 - **A module belongs to the Main Worker unless you say otherwise.** `executor`
