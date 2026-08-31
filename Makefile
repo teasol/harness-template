@@ -7,7 +7,7 @@ SPEC ?= configs/demo.yaml
 PLAN ?= plans/plan.yaml
 
 .DEFAULT_GOAL := help
-.PHONY: help status setup agents-setup lint format test verify plan tasks run reproduce drift audit branches clean
+.PHONY: help status setup agents-setup lint format test verify plan tasks run reproduce drift audit plans clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -57,8 +57,8 @@ audit: ## Re-verify every task marked done (acceptance + deliverables)
 run: ## Run every ready task through a Sub-Worker (see configs/agents.yaml)
 	$(PYTHON) -m harness plan run $(PLAN)
 
-branches: ## List the branches in flight
-	$(PYTHON) -m harness branches
+plans: ## List the plans in flight
+	$(PYTHON) -m harness plans
 
 clean: ## Remove generated artifacts
 	rm -rf $(RESULTS_DIR) .pytest_cache .ruff_cache build dist *.egg-info

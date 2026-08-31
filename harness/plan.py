@@ -6,7 +6,7 @@ machine-checkable acceptance criteria. Plans are materialized into
 self-contained task files (see :mod:`harness.task`) that Worker agents
 execute one at a time, each in isolation.
 
-A plan also declares what the branch *reports* back to the researcher
+A plan also declares what it *reports* back to the researcher
 (``report:``). The researcher states what they want to see when instructing
 the Planner; the Planner records **where** each number comes from, and the
 harness extracts the values from real run artifacts. An agent never narrates
@@ -116,11 +116,11 @@ class MetricRef:
 
 @dataclasses.dataclass
 class Report:
-    """What this branch reports back to the researcher.
+    """What this plan reports back to the researcher.
 
     Free-form by design: the researcher says what they want when they give
     the instruction. Self-contained by rule: a report may only draw on this
-    branch's own artifacts, never another branch's, so it can be
+    plan's own artifacts, never another plan's, so it can be
     judged on its own terms.
     """
 
@@ -146,21 +146,21 @@ class Report:
 
 
 def _require_self_contained(path: str, where: str) -> None:
-    """Reject a report path that could reach outside this branch.
+    """Reject a report path that could reach outside this plan.
 
-    Comparing branches is the user's job, done by
-    collecting finished reports. An branch that reads another branch's
+    Comparing plans is the user's job, done by
+    collecting finished reports. A plan that reads another plan's
     files cannot be judged on its own, so the harness refuses to produce one.
     """
     if path.startswith(("/", "~")):
         raise PlanError(
-            f"{where} must stay inside the branch: absolute path '{path}'. "
-            "Reports may only draw on this branch's own artifacts."
+            f"{where} must stay inside the plan: absolute path '{path}'. "
+            "Reports may only draw on this plan's own artifacts."
         )
     if ".." in Path(path).parts:
         raise PlanError(
-            f"{where} must stay inside the branch: '{path}' escapes via '..'. "
-            "Comparing branches is the user's job, not the plan's."
+            f"{where} must stay inside the plan: '{path}' escapes via '..'. "
+            "Comparing plans is the user's job, not the plan's."
         )
 
 
@@ -246,7 +246,7 @@ def _validate_steps(module_id: str, steps: list[Step]) -> None:
                 )
 
 
-#: Marker written into scaffolded plans by ``harness branch``. A scaffold
+#: Marker written into scaffolded plans by ``harness plan new``. A scaffold
 #: is structurally valid but says nothing, so validating one must fail — or the
 #: Planner is told its placeholder is a plan.
 SCAFFOLD_MARKER = "TODO(Planner)"
@@ -407,8 +407,8 @@ def plan_fingerprint(path: str | Path) -> str:
 def approval_path(plan_path: str | Path) -> Path:
     """Where a plan's approval record lives — beside the plan, not in results.
 
-    Approval is part of the branch's record, so it belongs with the plan on
-    the branch rather than in a gitignored results directory.
+    Approval is part of the plan's record, so it belongs with the plan on
+    its git branch rather than in a gitignored results directory.
     """
     plan_path = Path(plan_path)
     return plan_path.with_suffix(plan_path.suffix + ".approved")

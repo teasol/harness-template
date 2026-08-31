@@ -17,7 +17,7 @@
 # writing a correct plan and then stopping to ask permission — which is exactly
 # what happened the first time these presets were used. Run agents where you
 # are willing to let them execute: an experiment worktree is isolated and its
-# branch is disposable, which is the point.
+# worktree is disposable, which is the point.
 
 platforms:
   manual:

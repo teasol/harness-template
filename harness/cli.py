@@ -21,10 +21,10 @@ Usage::
     python -m harness task run --id <id> [--attempts N]   # invoke a Worker + verify
     python -m harness task done --id <id> [--by <agent>] [--tasks-dir tasks]
 
-    # Work (you <-> Planner): one branch + worktree per piece of work
+    # Work (you <-> Planner): one plan + worktree per piece of work
     python -m harness create -n <planner> [--model M]  # a Planner, once per project
-    python -m harness branch <name> --planner <planner>
-    python -m harness branches
+    python -m harness plan new <name> --planner <planner>
+    python -m harness plans
     python -m harness report <name> [--no-run] [--determinism] [--save]
     python -m harness drop <name> [--force]
     python -m harness planner brief <name>            # current state, re-run anytime
@@ -39,19 +39,19 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from harness import adoption as adoption_mod
-from harness import branch as branch_mod
-from harness import heartbeat
+from harness import heartbeat, invocation
 from harness import plan as plan_mod
 from harness import planners as planners_mod
+from harness import plans as plans_mod
 from harness import project as project_mod
 from harness import task as task_mod
-from harness.branch import BranchError
 from harness.paths import (
     get_configs_dir,
     get_plans_dir,
     get_tasks_dir,
 )
 from harness.plan import PlanError, load_plan
+from harness.plans import WorkPlanError
 from harness.report import write_reports
 from harness.reproduce import (
     ReproduceError,
@@ -476,15 +476,50 @@ def build_parser() -> argparse.ArgumentParser:
     hash_cmd.add_argument("paths", nargs="+", help="File path(s)")
     hash_cmd.set_defaults(func=cmd_hash)
 
-    plan_cmd = sub.add_parser("plan", help="Plan (orchestration) commands")
+    plan_cmd = sub.add_parser(
+        "plan", help="Plans: one piece of work, from starting it to reporting on it"
+    )
     plan_sub = plan_cmd.add_subparsers(dest="plan_command", required=True)
 
+    # `plan new` is the Planner's own command: it starts the git branch and the
+    # worktree the plan is built in. The plan and the branch it lives on used to
+    # be two named things sharing one lifetime, which read as two.
+    plan_new = plan_sub.add_parser(
+        "new", help="Start a plan: its git branch, worktree and skeleton"
+    )
+    plan_new.add_argument("name", help="Plan name (lowercase, digits, hyphens)")
+    plan_new.add_argument("--base", default="HEAD", help="Commit/branch to branch from")
+    plan_new.add_argument(
+        "--planner", default="planner", help="Label recorded as this plan's Planner"
+    )
+    plan_new.add_argument("--model", default=None, help="Model this Planner runs on (recorded)")
+    plan_new.add_argument("--effort", default=None, help="Reasoning level of the Planner")
+    plan_new.add_argument(
+        "--path",
+        default=plans_mod.DEFAULT_WORKTREE_ROOT,
+        help="Directory holding worktrees",
+    )
+    plan_new.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    plan_new.set_defaults(func=cmd_plan_new)
+
+    plan_list = plan_sub.add_parser("list", help="Every plan in flight (same as `harness plans`)")
+    plan_list.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    plan_list.set_defaults(func=cmd_plan_list)
+
+    plan_drop = plan_sub.add_parser(
+        "drop", help="Remove a plan's worktree (its git branch is kept)"
+    )
+    plan_drop.add_argument("name", help="Plan name")
+    plan_drop.add_argument("--force", action="store_true", help="Remove even if dirty")
+    plan_drop.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    plan_drop.set_defaults(func=cmd_plan_drop)
+
     plan_validate = plan_sub.add_parser("validate", help="Validate a plan file")
-    plan_validate.add_argument("plan", help="Path to the plan YAML file")
+    plan_validate.add_argument("plan", help="Plan name, or a path to its YAML file")
     plan_validate.set_defaults(func=cmd_plan_validate)
 
     plan_materialize = plan_sub.add_parser("materialize", help="Write task files from a plan")
-    plan_materialize.add_argument("plan", help="Path to the plan YAML file")
+    plan_materialize.add_argument("plan", help="Plan name, or a path to its YAML file")
     plan_materialize.add_argument("--tasks-dir", default="tasks")
     plan_materialize.add_argument(
         "--force", action="store_true", help="Overwrite existing task files"
@@ -492,7 +527,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_materialize.set_defaults(func=cmd_plan_materialize)
 
     plan_status = plan_sub.add_parser("status", help="Show module progress for a plan")
-    plan_status.add_argument("plan", help="Path to the plan YAML file")
+    plan_status.add_argument("plan", help="Plan name, or a path to its YAML file")
     plan_status.add_argument("--tasks-dir", default="tasks")
     plan_status.add_argument(
         "--check",
@@ -509,7 +544,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_check.set_defaults(func=cmd_plan_check)
 
     plan_run = plan_sub.add_parser("run", help="Run every ready task through a Worker")
-    plan_run.add_argument("plan", help="Path to the plan YAML file")
+    plan_run.add_argument("plan", help="Plan name, or a path to its YAML file")
     plan_run.add_argument("--tasks-dir", default="tasks")
     plan_run.add_argument("--root", default=".", help="Repo root (default: cwd)")
     plan_run.add_argument("--results-dir", default="results")
@@ -525,7 +560,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_approve = plan_sub.add_parser(
         "approve", help="Record agreement to run this plan, and show what it will cost"
     )
-    plan_approve.add_argument("plan", help="Path to the plan YAML file")
+    plan_approve.add_argument("plan", help="Plan name, or a path to its YAML file")
     plan_approve.add_argument("--by", required=True, help="Who is approving")
     plan_approve.add_argument("--note", default="", help="Why, or what was changed first")
     plan_approve.add_argument("--root", default=".", help="Repo root (default: cwd)")
@@ -582,42 +617,19 @@ def build_parser() -> argparse.ArgumentParser:
             )
         parser_i.set_defaults(func=func)
 
-    branch_cmd = sub.add_parser("branch", help="Start a piece of work on its own branch")
-    branch_cmd.add_argument("name", help="Branch name (lowercase, digits, hyphens)")
-    branch_cmd.add_argument("--base", default="HEAD", help="Commit/branch to branch from")
-    branch_cmd.add_argument(
-        "--planner", default="planner", help="Label recorded as this branch's Planner"
-    )
-    branch_cmd.add_argument("--model", default=None, help="Model this Planner runs on (recorded)")
-    branch_cmd.add_argument("--effort", default=None, help="Reasoning level of the Planner")
-    branch_cmd.add_argument(
-        "--path",
-        default=branch_mod.DEFAULT_WORKTREE_ROOT,
-        help="Directory holding worktrees",
-    )
-    branch_cmd.set_defaults(func=cmd_branch_start)
+    plans_cmd = sub.add_parser("plans", help="List the plans the harness is working on")
+    plans_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    plans_cmd.set_defaults(func=cmd_plan_list)
 
-    branches_cmd = sub.add_parser("branches", help="List the branches the harness is working on")
-    branches_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
-    branches_cmd.set_defaults(func=cmd_branch_list)
-
-    report_cmd = sub.add_parser("report", help="Build the decision aid for one branch")
-    report_cmd.add_argument("name", help="Branch name")
+    report_cmd = sub.add_parser("report", help="Build the decision aid for one plan")
+    report_cmd.add_argument("name", help="Plan name")
     report_cmd.add_argument("--no-run", action="store_true", help="Do not run the integration spec")
     report_cmd.add_argument(
         "--determinism", action="store_true", help="Also run the determinism gate"
     )
     report_cmd.add_argument("--save", action="store_true", help="Also write the report into it")
     report_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
-    report_cmd.set_defaults(func=cmd_branch_report)
-
-    drop_cmd = sub.add_parser("drop", help="Remove a worktree (the branch itself is kept)")
-    drop_cmd.add_argument("name", help="Branch name")
-    drop_cmd.add_argument("--force", action="store_true", help="Remove even if dirty")
-    drop_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
-    drop_cmd.set_defaults(func=cmd_branch_drop)
-
-    branch_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    report_cmd.set_defaults(func=cmd_plan_report)
 
     status_cmd = sub.add_parser("status", help="Where am I and what do I do next? (start here)")
     status_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
@@ -698,7 +710,7 @@ def build_parser() -> argparse.ArgumentParser:
     planner_cmd = sub.add_parser("planner", help="Planner registration")
     planner_sub = planner_cmd.add_subparsers(dest="planner_command", required=True)
     planner_create = planner_sub.add_parser(
-        "create", help="Register a Planner that outlives any one branch"
+        "create", help="Register a Planner that outlives any one plan"
     )
     planner_create.add_argument("name", help="Planner name (lowercase, digits, hyphens)")
     planner_create.add_argument("--model", required=True, help="Model this Planner runs on")
@@ -729,16 +741,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     planner_note.add_argument("name", help="Planner name")
     planner_note.add_argument("--add", required=True, help="The finding, in one sentence")
-    planner_note.add_argument("--branch", default=None, help="Where it was learned")
+    planner_note.add_argument("--plan", default=None, help="Which plan it was learned in")
     planner_note.add_argument("--root", default=".", help="Repo root (default: cwd)")
     planner_note.set_defaults(func=cmd_planner_note)
 
     planner_brief = planner_sub.add_parser(
-        "brief", help="Print everything a session needs to act as this branch's Planner"
+        "brief", help="Print everything a session needs to act as this plan's Planner"
     )
     planner_brief.add_argument("name", help="Experiment name")
     planner_brief.add_argument(
-        "--register", default=None, help="Record this label as this branch's Planner"
+        "--register", default=None, help="Record this label as this plan's Planner"
     )
     planner_brief.add_argument(
         "--model", default=None, help="Model this Planner session runs on (recorded, not set)"
@@ -758,28 +770,34 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    # Plan verbs are typed by hand and by agents; both should be able to say the
+    # plan's name rather than work out where its file lives. Scoped to the `plan`
+    # namespace on purpose: `task list --plan <name>` is a filter on a name, not
+    # a file to open, and resolving it to a path broke the filter.
+    if getattr(args, "plan_command", None) and isinstance(getattr(args, "plan", None), str):
+        args.plan = str(plans_mod.resolve_plan_path(args.plan, getattr(args, "root", ".")))
     return int(args.func(args))
 
 
 # ---------------------------------------------------------------------------
-# Branches (user <-> Planner)
+# Plans (user <-> Planner)
 
 
-def cmd_branch_start(args: argparse.Namespace) -> int:
-    """Start a piece of work on its own branch, and brief the Planner for it."""
+def cmd_plan_new(args: argparse.Namespace) -> int:
+    """Start a plan on its own git branch, and brief the Planner for it."""
     try:
-        created = branch_mod.start(
+        created = plans_mod.start(
             args.name,
             root=args.root,
             worktree_root=args.path,
             base=args.base,
         )
         # A registered Planner already knows what it runs on and what it has
-        # learned, so starting a branch under one carries both across instead
+        # learned, so starting a plan under one carries both across instead
         # of beginning from nothing.
         model, effort = (args.model or ""), (args.effort or "")
         if planners_mod.exists(args.planner, args.root):
-            planner = planners_mod.link_branch(args.planner, args.name, root=args.root)
+            planner = planners_mod.link_plan(args.planner, args.name, root=args.root)
             model = model or planner.model
             effort = effort or planner.effort
 
@@ -788,19 +806,19 @@ def cmd_branch_start(args: argparse.Namespace) -> int:
         # blank. The briefing then opens by asking the session to say what it
         # is — a placeholder would just look like an answer.
         if model.strip():
-            branch_mod.register_planner(
+            plans_mod.register_planner(
                 args.name,
                 args.planner,
                 root=args.root,
                 model=model,
                 effort=effort,
             )
-        brief = branch_mod.planner_brief(args.name, root=args.root)
-    except BranchError as exc:
+        brief = plans_mod.planner_brief(args.name, root=args.root)
+    except WorkPlanError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    print(f"Branch '{created.branch}' created, worktree at {created.path}.")
+    print(f"Plan '{created.name}' created, worktree at {created.path}.")
     print(f"Its Planner is '{args.planner}'. Everything below is that Planner's briefing —")
     print("follow it, or hand this session to whoever will.\n")
     if not planners_mod.exists(args.planner, args.root):
@@ -808,43 +826,43 @@ def cmd_branch_start(args: argparse.Namespace) -> int:
         # briefing below is about to be written without any model on record and
         # without whatever an earlier Planner learned in this project.
         print(
-            f"note: '{args.planner}' is a label, not a registered Planner. This branch\n"
+            f"note: '{args.planner}' is a label, not a registered Planner. This plan\n"
             "      therefore carries no Planner model, and its report will say so. Register\n"
-            "      one and future branches inherit its model and its notes:\n"
-            f"        harness create -n {args.planner} --model <model>\n"
+            "      one and future plans inherit its model and its notes:\n"
+            f"        {invocation.cmd(f'create -n {args.planner}')}\n"
         )
     print("=" * 70)
     print(brief)
     return 0
 
 
-def cmd_branch_list(args: argparse.Namespace) -> int:
-    branches = branch_mod.list_branches(args.root)
-    if not branches:
-        print("(no branches in flight)")
+def cmd_plan_list(args: argparse.Namespace) -> int:
+    plans = plans_mod.list_plans(args.root)
+    if not plans:
+        print("(no plans in flight)")
         return 0
-    print("  NAME              BRANCH                 WORKTREE")
-    for item in branches:
-        print(f"  {item.name:<17} {item.branch:<22} {item.path}")
+    print("  PLAN              GIT BRANCH             WORKTREE")
+    for item in plans:
+        print(f"  {item.name:<17} {item.git_branch:<22} {item.path}")
     return 0
 
 
-def cmd_branch_report(args: argparse.Namespace) -> int:
+def cmd_plan_report(args: argparse.Namespace) -> int:
     try:
-        report = branch_mod.build_report(
+        report = plans_mod.build_report(
             args.name,
             root=args.root,
             run_integration=not args.no_run,
             check_determinism=args.determinism,
         )
-        branch = branch_mod.find_branch(args.name, args.root)
-    except BranchError as exc:
+        work = plans_mod.find_plan(args.name, args.root)
+    except WorkPlanError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    written = branch_mod.write_branch_report(report, branch.path, save=args.save)
+    written = plans_mod.write_plan_report(report, work.path, save=args.save)
     verdict = "READY TO MERGE" if report.merge_ready else "NOT READY"
-    print(f"[{report.branch}] {verdict}")
+    print(f"[{report.name}] {verdict}")
     print(f"  integration: {report.integration}")
     print(f"  tasks:       {report.tasks_done}/{report.tasks_total} done")
     print(f"  determinism: {report.determinism}")
@@ -856,17 +874,17 @@ def cmd_branch_report(args: argparse.Namespace) -> int:
     for path in written:
         print(f"  report: {path}")
     if report.merge_ready:
-        print(f"\n  Merging is your call: git merge {report.branch}")
+        print(f"\n  Merging is your call: git merge {report.git_branch}")
     return 0 if report.merge_ready else 1
 
 
-def cmd_branch_drop(args: argparse.Namespace) -> int:
+def cmd_plan_drop(args: argparse.Namespace) -> int:
     try:
-        branch = branch_mod.remove(args.name, root=args.root, force=args.force)
-    except BranchError as exc:
+        work = plans_mod.remove(args.name, root=args.root, force=args.force)
+    except WorkPlanError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(f"removed worktree {branch.path} (branch {branch.branch} kept)")
+    print(f"removed worktree {work.path} (git branch {work.git_branch} kept)")
     return 0
 
 
@@ -993,8 +1011,8 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             print(
-                f"\nRead the plan, then:\n"
-                f"  python -m harness plan approve {args.plan} --by <who>\n",
+                "\nRead the plan, then:\n"
+                "  " + invocation.cmd(f"plan approve {args.plan} --by <who>") + "\n",
                 file=sys.stderr,
             )
             return 2
@@ -1132,7 +1150,7 @@ def cmd_project_show(args: argparse.Namespace) -> int:
     if context.is_empty:
         print("No project context declared.")
         print(f"  expected at: {project_mod.config_path(args.root)}")
-        print("  create one:  python -m harness project init")
+        print("  create one:  " + invocation.cmd("project init"))
         return 1
 
     print(f"Project context: {context.source}\n")
@@ -1224,9 +1242,15 @@ def cmd_create(args: argparse.Namespace) -> int:
             "is set every report under it will say the run cannot be compared with\n"
             "another."
         )
+    # Deliberately not "now run `harness plan new`". In agent-driven work nobody
+    # starts a plan by hand: you say what you want, the Planner agrees it with
+    # you and starts the plan itself. Printing the command here invited the
+    # user to do the Planner's job — and to do it before there was any agreed
+    # work to name.
     print(
-        f"\nStart branches under it, and they inherit its model and its notes:\n"
-        f"  harness branch <name> --planner {planner.name}"
+        "\nNext: open that Planner session and tell it what you want done. It agrees\n"
+        "the work with you, then starts the plan itself — everything it starts\n"
+        "inherits its model and its notes."
     )
 
     # A manual Planner is opened by hand, so the harness cannot brief it the way
@@ -1262,8 +1286,8 @@ def cmd_planner_create(args: argparse.Namespace) -> int:
     )
     print(f"  record: {planner.path}")
     print(
-        f"\nStart branches under it, and they share its memory:\n"
-        f"  python -m harness branch <name> --planner {planner.name}"
+        f"\nStart plans under it, and they share its memory:\n"
+        f"  {invocation.cmd(f'plan new <name> --planner {planner.name}')}"
     )
     return 0
 
@@ -1272,13 +1296,13 @@ def cmd_planner_list(args: argparse.Namespace) -> int:
     planners = planners_mod.list_planners(args.root)
     if not planners:
         print("No planners registered.")
-        print("  create one: python -m harness planner create <name> --model <model>")
+        print("  create one: " + invocation.cmd("planner create <name> --model <model>"))
         return 1
-    print(f"  {'NAME':<16} {'MODEL':<28} {'EFFORT':<8} BRANCHES  NOTES")
+    print(f"  {'NAME':<16} {'MODEL':<28} {'EFFORT':<8} PLANS     NOTES")
     for planner in planners:
         print(
             f"  {planner.name:<16} {planner.model:<28} {planner.effort or '-':<8} "
-            f"{len(planner.branches):<12} {len(planner.notes)}"
+            f"{len(planner.plans):<12} {len(planner.notes)}"
         )
     return 0
 
@@ -1292,11 +1316,11 @@ def cmd_planner_show(args: argparse.Namespace) -> int:
     print(f"Planner: {planner.name}")
     print(f"  model:   {planner.model}" + (f" (effort {planner.effort})" if planner.effort else ""))
     print(f"  created: {planner.created_at}")
-    print(f"  drove:   {', '.join(planner.branches) or '(none yet)'}")
+    print(f"  drove:   {', '.join(planner.plans) or '(none yet)'}")
     if planner.notes:
         print(f"\n  Carried forward ({len(planner.notes)}):")
         for note in planner.notes:
-            where = f" [{note.branch}]" if note.branch else ""
+            where = f" [{note.plan}]" if note.plan else ""
             print(f"    - {note.text}{where}")
             print(f"      {note.at}")
     else:
@@ -1306,9 +1330,7 @@ def cmd_planner_show(args: argparse.Namespace) -> int:
 
 def cmd_planner_note(args: argparse.Namespace) -> int:
     try:
-        planner = planners_mod.add_note(
-            args.name, args.add, branch=args.branch or "", root=args.root
-        )
+        planner = planners_mod.add_note(args.name, args.add, plan=args.plan or "", root=args.root)
     except planners_mod.PlannerError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -1319,7 +1341,7 @@ def cmd_planner_note(args: argparse.Namespace) -> int:
 def cmd_planner_brief(args: argparse.Namespace) -> int:
     try:
         if args.register:
-            branch_mod.register_planner(
+            plans_mod.register_planner(
                 args.name,
                 args.register,
                 root=args.root,
@@ -1327,8 +1349,8 @@ def cmd_planner_brief(args: argparse.Namespace) -> int:
                 effort=args.effort or "",
                 require_model=True,
             )
-        print(branch_mod.planner_brief(args.name, root=args.root))
-    except BranchError as exc:
+        print(plans_mod.planner_brief(args.name, root=args.root))
+    except WorkPlanError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return 0
@@ -1339,7 +1361,7 @@ def cmd_planner_brief(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    status = branch_mod.project_status(args.root)
+    status = plans_mod.project_status(args.root)
     print(f"Project: {status.project_name}\n")
 
     # What is happening *now* outranks what the board says, and is the one
@@ -1351,12 +1373,12 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     print(status.headline)
 
-    if status.branches:
+    if status.plans:
         print()
-        print("  BRANCH            STATE              DETAIL")
-        for exp in status.branches:
-            marker = "*" if exp.name == status.here else " "
-            print(f" {marker}{exp.name:<17} {exp.state:<18} {exp.detail}")
+        print("  PLAN              STATE              DETAIL")
+        for item in status.plans:
+            marker = "*" if item.name == status.here else " "
+            print(f" {marker}{item.name:<17} {item.state:<18} {item.detail}")
 
     def _tier_line(name: str, tier: dict) -> str | None:
         if tier.get("adapter") != "cli":
@@ -1379,7 +1401,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print()
         for line in tier_lines:
             print(line)
-    if status.worker_adapter == "manual" and status.branches:
+    if status.worker_adapter == "manual" and status.plans:
         print()
         if status.agents_config_found:
             print(
@@ -1403,7 +1425,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     for step in status.next_steps:
         print(f"  {step}")
     print()
-    print("New here? README.md walks through a whole branch, start to finish.")
+    print("New here? README.md walks through a whole plan, start to finish.")
     return 0
 
 
@@ -1704,18 +1726,22 @@ def cmd_init(args: argparse.Namespace) -> int:
     adoption = adoption_mod.record(target_dir)
     print("\nNext steps:")
     if adoption is None:
-        print("  1. Create a Planner:     harness create -n <name> --model <model>")
-        print("  2. Start a branch:  harness branch <name> --planner <name>")
+        for index, step in enumerate(adoption_mod.next_steps(target_dir), 1):
+            print(f"  {index}. {step}")
+        print(f"\n  {adoption_mod.THEN_TALK}")
         print(
-            "\n  (smoke-test the harness itself any time: harness verify --spec configs/demo.yaml)"
+            "\n  (smoke-test the harness itself any time: "
+            + invocation.cmd("verify --spec configs/demo.yaml")
+            + ")"
         )
         return 0
 
     print(
         f"  This repository already has {adoption.source_files} source file(s), and none of\n"
         "  them is covered by a contract, an acceptance check, or a plan yet.\n"
-        "  Register a Planner and let it plan how to change that:\n"
+        "  Register the Planner you will talk to, and let it plan how to change that:\n"
     )
     for index, step in enumerate(adoption_mod.next_steps(target_dir), 1):
         print(f"  {index}. {step}")
+    print(f"\n  {adoption_mod.THEN_TALK}")
     return 0

@@ -25,6 +25,7 @@ from pathlib import Path
 
 import yaml
 
+from harness import invocation
 from harness.paths import get_configs_dir
 
 CONFIG_NAME = "project.yaml"
@@ -185,7 +186,7 @@ def brief_lines(context: ProjectContext, root: str | Path = ".") -> list[str]:
             "Planner is told rather than left to infer:",
             "",
             "```bash",
-            "python -m harness project init   # then edit the file it writes",
+            f"{invocation.cmd('project init')}   # then edit the file it writes",
             "```",
             "",
         ]

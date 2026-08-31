@@ -7,7 +7,7 @@ what produced each run.
 ## 0. Provenance
 
 Every `report.json` carries a `provenance` block (git commit + dirty flag,
-branch, Python version and interpreter, platform, harness version, seed) and
+git branch, Python version and interpreter, platform, harness version, seed) and
 `report.md` renders it. Without it "the numbers came out different" is
 unanswerable; with it, the first question — *was this even the same code?* —
 is answered by the artifact itself. Reports produced from a dirty worktree are
@@ -35,7 +35,7 @@ flagged, because they cannot be reconstructed from a commit.
 ```python
 from harness.reproducibility import set_all_seeds
 
-set_all_seeds(config.branch.seed)
+set_all_seeds(config.seed)
 ```
 
 ## 2. Hash stability

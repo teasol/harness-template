@@ -40,7 +40,7 @@ from typing import Any
 
 import yaml
 
-from harness import guard, heartbeat
+from harness import guard, heartbeat, invocation
 from harness.paths import get_agents_config_path
 from harness.report import write_reports
 from harness.runner import RunResult
@@ -287,7 +287,7 @@ def build_brief(task: Task, root: str | Path = ".") -> str:
         lines.append(f"  $ {step.run}")
     lines += [
         "",
-        f"You may run them yourself while working: python -m harness task verify --id {task.id}",
+        "You may run them yourself while working: " + invocation.cmd(f"task verify --id {task.id}"),
         "",
     ]
     return "\n".join(lines)
@@ -460,8 +460,8 @@ def run_task(
         outcome.message = (
             f"module '{task.id}' declares `executor: main` — the Main Worker (you) does this "
             f"one itself, no Sub-Worker is spawned. Do the work, then:\n"
-            f"  python -m harness task verify --id {task.id}\n"
-            f"  python -m harness task done --id {task.id} --by planner\n"
+            "  " + invocation.cmd(f"task verify --id {task.id}") + "\n"
+            "  " + invocation.cmd(f"task done --id {task.id} --by planner") + "\n"
             f"Brief: {brief_path}"
         )
         return outcome
@@ -470,7 +470,7 @@ def run_task(
         outcome.status = "needs_human"
         outcome.message = (
             f"briefing written to {brief_path}. Hand it to a Worker session, then run "
-            f"`python -m harness task done --id {task.id}`."
+            "`" + invocation.cmd(f"task done --id {task.id}") + "`."
         )
         return outcome
 

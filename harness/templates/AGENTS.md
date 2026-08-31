@@ -20,15 +20,15 @@ Work happens in **two tiers**.
 
 **Tier 1 — research strategy and decision.** The researcher and the Planner
 talk: what is being asked, what would count as an answer, what gets reported.
-The researcher decides what gets merged. **Never merge an branch branch
+The researcher decides what gets merged. **Never merge a plan's branch
 yourself** — reporting is the Planner's job, merging is the researcher's.
 
-**Tier 2 — serial execution**, one dedicated branch per piece of work. The
+**Tier 2 — serial execution**, one dedicated plan per piece of work. The
 Planner is also the **Main Worker**: it does the core logic, planning and
 orchestration itself, and delegates routine bulk — long mechanical coding, log
-parsing — to a **Sub-Worker**, one at a time. One Planner runs **many**
-branches; each branch has one Planner. The harness verifies whatever
-comes out, whoever produced it.
+parsing — to a **Sub-Worker**, one at a time. One Planner runs **many** plans;
+each plan has one Planner. The harness verifies whatever comes out, whoever
+produced it.
 
 You are always acting in ONE of these roles — know which:
 
@@ -59,23 +59,22 @@ You are always acting in ONE of these roles — know which:
 Orchestration commands:
 
 ```bash
-python -m harness plan validate|materialize|status .harness/plans/<plan>.yaml
+python -m harness plan validate|materialize|status <plan>
 python -m harness plan check                              # every plan, no name needed
-python -m harness plan status .harness/plans/<plan>.yaml --check   # one plan, with drift
+python -m harness plan status <plan> --check              # one plan, with drift
 python -m harness task list|show|claim|block|verify|done --id <id>
 python -m harness task verify --all [--status done]       # audit the board
 python -m harness task run --id <id>                      # invoke a Worker + verify
-python -m harness plan run .harness/plans/<plan>.yaml     # drain the ready queue
+python -m harness plan run <plan>                         # drain the ready queue
 ```
 
-Branch commands (Tier 1 boundary):
+Plan commands (Tier 1 boundary):
 
 ```bash
-python -m harness branch <name> [--question "..."] [--base main]
-python -m  <name> [--set "..."]       # record it later
-python -m harness branches
+python -m harness plan new <name> --planner <label> [--base main]
+python -m harness plans
 python -m harness report <name> [--determinism] [--save]
-python -m harness drop <name>
+python -m harness plan drop <name>
 python -m harness planner brief <name> --register <label> # become a Planner
 ```
 
@@ -99,6 +98,6 @@ python -m harness hash <file>          # sha256 helper
 ├── configs/            # agent platform & tier configurations
 ├── plans/              # orchestration DAGs (<plan>.yaml)
 └── tasks/              # worker task files (<module>.task.yaml)
-.worktrees/           # worktrees for isolated branch attempts (ignored)
+.worktrees/           # one worktree per plan in flight (ignored)
 results/                # verification run logs and generated artifacts (ignored)
 ```

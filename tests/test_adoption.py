@@ -111,7 +111,10 @@ def test_init_names_the_adoption_path(existing_project: Path, capsys) -> None:
     # It points at a Planner rather than at a procedure.
     assert "harness create -n" in out
     assert "harness project init" in out
-    assert "harness branch" in out
+    # And it does not hand the user the Planner's own command: nobody starts a
+    # plan by hand here.
+    assert "harness plan new" not in out
+    assert "tell that Planner what you want done" in out
 
 
 def test_init_on_an_empty_project_keeps_the_greenfield_path(tmp_path: Path, capsys) -> None:
@@ -119,7 +122,8 @@ def test_init_on_an_empty_project_keeps_the_greenfield_path(tmp_path: Path, caps
 
     assert main(["init", str(tmp_path), "--no-setup"]) == 0
     out = capsys.readouterr().out
-    assert "Create a Planner" in out
+    # The command itself, not a label describing it: it is the first thing to run.
+    assert "create -n <planner-name>" in out
     assert "already has" not in out
     # The demo stays reachable, just off the main path.
     assert "configs/demo.yaml" in out
@@ -140,7 +144,10 @@ def test_next_steps_drop_what_is_already_done(existing_project: Path) -> None:
     steps = adoption.next_steps(existing_project)
     assert not any("project init" in s for s in steps)
     assert not any("harness create -n" in s for s in steps)
-    assert any("harness branch" in s for s in steps)
+    # Nothing left for the person to run: the next move is a conversation with
+    # the Planner, which is what THEN_TALK says.
+    assert steps == []
+    assert "starts it itself" in adoption.THEN_TALK
 
 
 # ---------------------------------------------------------------------------

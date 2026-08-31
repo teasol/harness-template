@@ -37,7 +37,7 @@ def _provenance_lines(result: RunResult) -> list[str]:
         "## Provenance",
         "",
         f"- Commit: `{commit}`",
-        f"- Branch: `{prov.get('git_branch') or 'unknown'}`",
+        f"- Git branch: `{prov.get('git_branch') or 'unknown'}`",
         f"- Python: {prov.get('python_version') or 'unknown'} (`{prov.get('python_executable')}`)",
         f"- Platform: {prov.get('platform') or 'unknown'}",
         f"- Harness: {prov.get('harness_version') or 'unknown'}",

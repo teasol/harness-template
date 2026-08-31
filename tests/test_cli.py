@@ -473,3 +473,14 @@ def test_setup_rejects_an_unknown_reasoning_level(tmp_path: Path, capsys) -> Non
     )
     assert code == 2
     assert "not a reasoning level" in capsys.readouterr().err
+
+
+def test_the_old_branch_grammar_is_gone(capsys) -> None:
+    """0.5.0 removed `branch`/`branches`/`drop` rather than aliasing them.
+
+    A second name for the thing we just finished giving one name to would defeat
+    the point, so argparse should reject them outright.
+    """
+    for argv in (["branch", "x"], ["branches"], ["drop", "x"]):
+        with pytest.raises(SystemExit):
+            main(argv)

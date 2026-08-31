@@ -1,20 +1,20 @@
-"""Planners that outlive one branch.
+"""Planners that outlive one plan.
 
 A Planner spends its first hour learning the project: where the numbers of
 record live, which interpreter has the dependencies, which arms are already
 closed, that an empty checkpoint path is correct here rather than a bug. Then
-the branch ends and all of it is discarded, and the next Planner pays the
+the plan ends and all of it is discarded, and the next Planner pays the
 same hour — and makes the same first-time mistakes, because the knowledge that
 would have prevented them was never written anywhere.
 
-So a Planner is a thing with a name and a memory, and branches hang off it:
+So a Planner is a thing with a name and a memory, and plans hang off it:
 
     harness create -n icf --model claude-opus-5 --effort high
-    harness branch baseline --planner icf
+    harness plan new baseline --planner icf
     harness planner note icf --add "ICF_CKPT is empty on this node; that is correct."
 
-The registry lives in the *main* repository, not in a branch worktree, so
-every branch under a Planner reads and appends to the same memory. Notes
+The registry lives in the *main* repository, not in a plan's worktree, so
+every plan under a Planner reads and appends to the same memory. Notes
 are the Planner's own operational findings; durable facts about the project
 belong in ``project.yaml`` (see :mod:`harness.project`), which the researcher
 owns. The split matters: one is a lab notebook, the other is policy.
@@ -30,6 +30,8 @@ from pathlib import Path
 
 import yaml
 
+from harness import invocation
+
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 DIR_NAME = "planners"
 
@@ -44,7 +46,7 @@ class Note:
 
     at: str
     text: str
-    branch: str = ""
+    plan: str = ""
 
 
 @dataclasses.dataclass
@@ -55,7 +57,7 @@ class Planner:
     model: str = ""
     effort: str = ""
     created_at: str = ""
-    branches: list[str] = dataclasses.field(default_factory=list)
+    plans: list[str] = dataclasses.field(default_factory=list)
     notes: list[Note] = dataclasses.field(default_factory=list)
     path: Path | None = None
 
@@ -65,11 +67,11 @@ def _now() -> str:
 
 
 def main_repo_root(root: str | Path = ".") -> Path:
-    """The main working tree, even when called from inside a branch worktree.
+    """The main working tree, even when called from inside a plan's worktree.
 
     A worktree has its own directory but shares the repository. The Planner
-    registry belongs to the repository, so every branch under one Planner
-    appends to the same memory rather than to a copy that dies with the branch.
+    registry belongs to the repository, so every plan under one Planner
+    appends to the same memory rather than to a copy that dies with the plan.
     """
     root = Path(root).resolve()
     try:
@@ -123,7 +125,7 @@ def _from_dict(data: dict, path: Path) -> Planner:
                 Note(
                     at=str(raw.get("at", "")),
                     text=str(raw["text"]),
-                    branch=str(raw.get("branch", "")),
+                    plan=str(raw.get("plan", "")),
                 )
             )
     return Planner(
@@ -131,7 +133,7 @@ def _from_dict(data: dict, path: Path) -> Planner:
         model=str(entry.get("model", "") or ""),
         effort=str(entry.get("effort", "") or ""),
         created_at=str(entry.get("created_at", "") or ""),
-        branches=[str(e) for e in entry.get("branches", []) or []],
+        plans=[str(e) for e in entry.get("plans", []) or []],
         notes=notes,
         path=path,
     )
@@ -149,7 +151,7 @@ def save(planner: Planner) -> Path:
                     "model": planner.model,
                     "effort": planner.effort,
                     "created_at": planner.created_at,
-                    "branches": list(planner.branches),
+                    "plans": list(planner.plans),
                     "notes": [dataclasses.asdict(n) for n in planner.notes],
                 }
             },
@@ -183,7 +185,7 @@ def create(name: str, model: str = "", effort: str = "", root: str | Path = ".")
     where it is unknowable.
 
     Knowing the model still matters — two runs planned by different models are
-    not the same branch — but the place to insist on it is the report, which
+    not the same plan — but the place to insist on it is the report, which
     already refuses to call a run comparable when the model is missing. Record
     it whenever it becomes known with :func:`set_model`.
     """
@@ -215,25 +217,25 @@ def set_model(name: str, model: str, effort: str | None = None, root: str | Path
     return planner
 
 
-def add_note(name: str, text: str, branch: str = "", root: str | Path = ".") -> Planner:
+def add_note(name: str, text: str, plan: str = "", root: str | Path = ".") -> Planner:
     """Append something this Planner learned, so the next one starts with it."""
     if not text.strip():
         raise PlannerError("a note needs text")
     planner = load(name, root)
-    planner.notes.append(Note(at=_now(), text=text.strip(), branch=branch))
+    planner.notes.append(Note(at=_now(), text=text.strip(), plan=plan))
     save(planner)
     return planner
 
 
-def link_branch(name: str, branch: str, root: str | Path = ".") -> Planner:
+def link_plan(name: str, plan: str, root: str | Path = ".") -> Planner:
     planner = load(name, root)
-    if branch not in planner.branches:
-        planner.branches.append(branch)
+    if plan not in planner.plans:
+        planner.plans.append(plan)
         save(planner)
     return planner
 
 
-def brief_lines(planner: Planner | None, branch: str = "") -> list[str]:
+def brief_lines(planner: Planner | None, plan: str = "") -> list[str]:
     """The 'what this Planner already knows' section of a briefing."""
     if planner is None:
         return []
@@ -242,14 +244,14 @@ def brief_lines(planner: Planner | None, branch: str = "") -> list[str]:
         "",
         f"You are **{planner.name}** ({planner.model}"
         + (f", effort {planner.effort}" if planner.effort else "")
-        + f"). You have driven {len(planner.branches)} branch(s) in this project"
-        + (f": {', '.join(planner.branches)}." if planner.branches else "."),
+        + f"). You have driven {len(planner.plans)} plan(s) in this project"
+        + (f": {', '.join(planner.plans)}." if planner.plans else "."),
         "",
     ]
     if planner.notes:
         lines += ["Carried forward from those runs — treat as findings, not gospel:", ""]
         for note in planner.notes:
-            where = f" [{note.branch}]" if note.branch else ""
+            where = f" [{note.plan}]" if note.plan else ""
             lines.append(f"- {note.text}{where}")
         lines += [
             "",
@@ -263,8 +265,9 @@ def brief_lines(planner: Planner | None, branch: str = "") -> list[str]:
         "When you finish, record what the next run should not have to rediscover:",
         "",
         "```bash",
-        f"python -m harness planner note {planner.name} "
-        + (f"--branch {branch} " if branch else "")
+        invocation.cmd(f"planner note {planner.name}")
+        + " "
+        + (f"--plan {plan} " if plan else "")
         + '--add "..."',
         "```",
         "",
@@ -326,10 +329,14 @@ def onboarding_lines(planner: Planner, root: str | Path = ".") -> list[str]:
     lines += [
         "",
         "Then record what you are running on, so results can be compared:",
-        f"  harness planner set {planner.name} --model <the model you are>",
+        f"  {invocation.cmd(f'planner set {planner.name} --model <the model you are>')}",
         "",
         "Then, from that directory:",
-        "  harness status        # reads real state and names the next command",
+        f"  {invocation.cmd('status')}        # reads real state and names the next command",
+        "",
+        "The user will tell you what they want done. Agree what it is and what",
+        "would count as done, then start the plan yourself — they do not run this:",
+        f"  {invocation.cmd(f'plan new <name> --planner {planner.name}')}",
         "─" * 72,
     ]
     return lines

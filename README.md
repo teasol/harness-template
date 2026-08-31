@@ -8,7 +8,7 @@ whatever comes out of either.
 
 You and the Planner talk about what you want done. It writes a plan, explains
 it, and — once you agree — builds it: some modules itself, the routine bulk
-handed to Sub-Workers. Each piece of work lives on its own git branch. When it
+handed to Sub-Workers. Each plan lives on its own git branch. When it
 is finished you get a report — did integration pass, which modules were built,
 does it reproduce, and the numbers you asked for — and **you** decide whether to
 merge. The harness measures; it never decides.
@@ -30,8 +30,28 @@ cd my-project
 harness init                                   # scaffolds AGENTS.md, agents/, configs/
 
 # 3. Create the Planner you will work with:
-harness create -n my-planner --model <model> --effort high
+harness create -n my-planner                   # --model / --effort optional
 ```
+
+**Using uv?** Add the harness to the project you are about to initialize (which
+needs a `pyproject.toml` — run `uv init` first if it has none), and run every
+harness command through `uv run`:
+
+```bash
+cd my-project
+uv add git+https://github.com/teasol/harness-template.git
+uv run harness init                            # scaffolds AGENTS.md, agents/, configs/
+uv run harness create -n my-planner            # --model / --effort optional
+```
+
+Every `python -m harness ...` below is then `uv run harness ...` — same
+commands, resolved against the project's environment. **You do not have to
+translate them yourself:** every command the harness prints — init's next
+steps, the Planner's briefing, the block you paste into a Planner session, the
+scaffolded `AGENTS.md` — carries the prefix that matches how you invoked it. For
+a harness you want available outside any one project, `uv tool install
+git+https://github.com/teasol/harness-template.git` puts `harness` on your PATH
+instead.
 
 `harness init` scaffolds the role contracts (`agents/`), platform configuration
 (`configs/`), and asks which agent runs your **Sub-Workers**. The Planner is not
@@ -43,25 +63,37 @@ files predate it, so "not verified yet" has a boundary instead of being a
 feeling — and prints the order that works.
 
 ```bash
-harness project init                       # what a Planner must know here
-harness create -n <name> --model <model>   # a Planner, once per project
-harness branch <name> --planner <name>     # and it plans the rest
+harness create -n <planner-name>                # the Planner you will talk to
+harness project init                            # what it must know here — it can write this
 ```
+
+Then tell that Planner what you want done. It agrees the work with you and
+starts the plan itself — `harness plan new` is its command, not yours.
+
+**The Planner comes first, even here.** Registering one is the only step that is
+always yours to run; writing down what the project expects is work the Planner
+does once it is open and reading its own briefing.
 
 The first Planner's briefing opens with the situation: none of this code is
 covered by a contract or an acceptance check yet, and making it verifiable is
 its first job. **The harness does not prescribe how to modularize an existing
 codebase** — deciding the decomposition is the Planner's work, and a pipeline
 baked into the tool would be wrong for the next project anyway. See
-[docs/branches.md](docs/branches.md#adopting-an-existing-project).
+[docs/plans.md](docs/plans.md#adopting-an-existing-project).
 
-### 1. Create a Planner, then start a branch
+### 1. Create a Planner, and let it start the plan
 
-**The Planner comes first, and it outlives any one branch.**
+**The Planner comes first, and it outlives any one plan.**
 
 ```bash
 python -m harness create -n my-planner --model <model> --effort high
-python -m harness branch fix-loader --planner my-planner
+```
+
+You then talk to that Planner, and *it* starts the plan once you agree what the
+work is:
+
+```bash
+python -m harness plan new fix-loader --planner my-planner   # the Planner runs this
 ```
 
 `--model` is optional: it defaults to whatever the Planner tier records, and a
@@ -69,11 +101,11 @@ Planner you drive by hand legitimately has none until its session says what it
 is (`harness planner set <name> --model <model>`). Until then every report under
 it notes that the run cannot be compared with another.
 
-Starting a branch creates the git branch, an isolated working directory (a git
+Starting a plan creates the git branch, an isolated working directory (a git
 *worktree*) under `.worktrees/`, a plan skeleton, and prints the briefing:
 
 ```text
-Branch 'fix-loader' created, worktree at /path/to/project/.worktrees/fix-loader.
+Plan 'fix-loader' created, worktree at /path/to/project/.worktrees/fix-loader.
 Its Planner is 'my-planner'. Everything below is that Planner's briefing —
 follow it, or hand this session to whoever will.
 
@@ -82,7 +114,7 @@ follow it, or hand this session to whoever will.
 
 ## The work
 
-No goal written yet. Work out with the user what this branch is for:
+No goal written yet. Work out with the user what this plan is for:
 what they want done, what would count as done, what they want to see at
 the end. Then write it as the plan's `goal` — one paragraph, in the
 words you would use out loud — and explain the plan before building it.
@@ -178,19 +210,19 @@ Then, if you want it:
 git merge fix-loader
 ```
 
-Nothing merges on your behalf. Decide against a branch and simply don't merge —
-the branch remains, so the attempt stays on the record.
+Nothing merges on your behalf. Decide against a plan and simply don't merge —
+its git branch remains, so the attempt stays on the record.
 
 ### Running several at once
 
 ```bash
-python -m harness branch fix-loader --planner my-planner
-python -m harness branch new-metric --planner my-planner
-python -m harness branches
+python -m harness plan new fix-loader --planner my-planner
+python -m harness plan new new-metric --planner my-planner
+python -m harness plans
 ```
 
-One Planner can own several branches — that is why it is registered separately
-from any of them. Each report stands on its own: a branch may not read another's
+One Planner can own several plans — that is why it is registered separately from
+any of them. Each report stands on its own: a plan may not read another's
 results, and the harness rejects a plan that tries. Comparing them is **your**
 job, done by reading the finished reports.
 
@@ -205,7 +237,7 @@ job, done by reading the finished reports.
 | A task stopped after **3 attempts changed no deliverable** | The Sub-Worker is wedged, not slow. The brief or the acceptance is wrong. |
 | A Sub-Worker exited in **under 5 seconds** | A misconfigured command, not a coding problem. `harness setup --check`. |
 | A task aborted: **the Worker changed the harness** | Containment did its job. Acceptance under a rewritten harness proves nothing. |
-| `report` says `NOT READY` | It lists every blocker. Fix them — or decide the branch failed, which is a valid outcome. |
+| `report` says `NOT READY` | It lists every blocker. Fix them — or decide the plan failed, which is a valid outcome. |
 | `NOT REPRODUCIBLE` | Something is unseeded. See [docs/reproducibility.md](docs/reproducibility.md). |
 | A long run looks hung | `harness progress --watch` from another terminal. |
 | `cost: not measured` | Expected. The harness does not estimate token spend. |
@@ -234,9 +266,9 @@ workflow on top of it:
 ## How it works
 
 **Two tiers.** You and the Planner settle what the work is and you decide what
-gets merged. Everything else happens inside one branch, where the Planner is
+gets merged. Everything else happens inside one plan, where the Planner is
 also the **Main Worker**: it implements the core work itself and delegates
-routine bulk to a **Sub-Worker**, one at a time. One Planner runs many branches
+routine bulk to a **Sub-Worker**, one at a time. One Planner runs many plans
 over the life of a project.
 
 ```mermaid
@@ -248,7 +280,7 @@ flowchart TD
 
     subgraph T2 ["Tier 2 · serial execution"]
         direction TB
-        subgraph BR ["🌿 dedicated branch — fix-loader"]
+        subgraph BR ["🌿 one plan — fix-loader"]
             direction TB
             MW["🤖 Main Worker — the Planner itself<br/>core logic · planning · orchestration"]
             subgraph EX ["serial execution"]
@@ -263,13 +295,13 @@ flowchart TD
         H["⚙️ Harness<br/>integration · module acceptance<br/>reproducibility · metric extraction"]
     end
 
-    P ==>|"starts each branch"| MW
+    P ==>|"starts each plan"| MW
     EX ==>|"completed run"| H
     H ==>|"report — metrics and status"| P
     P ==>|"report"| U
     U --> DEC{"merge?"}
     DEC -->|"yes"| MAIN[("🌿 main")]
-    DEC -->|"no"| NEXT["next branch · iterate"]
+    DEC -->|"no"| NEXT["next plan · iterate"]
     NEXT --> P
 ```
 
@@ -278,18 +310,18 @@ Planner wrote itself carries the same contract and the same acceptance as one a
 Sub-Worker built. What the split changes is who writes the code, never whether
 it is checked.
 
-### Tier 1 — branches and the merge decision
+### Tier 1 — plans and the merge decision
 
 ```bash
 python -m harness create -n <planner> --model <model>   # a Planner, once
-python -m harness branch <name> --planner <planner>     # a branch + worktree
+python -m harness plan new <name> --planner <planner>   # git branch + worktree
 python -m harness planner brief <name>                  # current state, any time
-python -m harness branches                              # what is in flight
+python -m harness plans                                 # what is in flight
 python -m harness report <name> --determinism --save
 git merge <name>                                        # only you do this
 ```
 
-A Planner made with `harness create` outlives one branch: it carries its model —
+A Planner made with `harness create` outlives one plan: it carries its model —
 so a report is never "model not recorded" — and the notes it wrote in earlier
 runs, which is the hour it spent learning the project not being paid twice.
 `harness planner note <name> --add "..."` records something the next run should
@@ -302,7 +334,7 @@ re-verified, determinism, the exact commit to merge, and an explicit list of
 what went **unverified** — then extracts the metrics you asked for from real run
 artifacts.
 
-Full reference: [docs/branches.md](docs/branches.md).
+Full reference: [docs/plans.md](docs/plans.md).
 
 ### Tier 2 — plans, tasks, and Sub-Workers
 
@@ -320,9 +352,9 @@ flowchart TD
     T -->|"all done"| I["integration spec"]
 ```
 
-Sub-Workers run **one at a time** within a branch. Isolation belongs at the
-branch level: a plan's DAG is near-linear so concurrency buys little, while
-per-Worker branches would fracture the task board and make dependency gates read
+Sub-Workers run **one at a time** within a plan. Isolation belongs at the plan
+level: a plan's DAG is near-linear so concurrency buys little, while per-Worker
+branches would fracture the task board and make dependency gates read
 stale state.
 
 - **Planner / Main Worker contract**: [agents/planner.md](agents/planner.md)
@@ -389,7 +421,7 @@ steps:
         min: 0.5
 ```
 
-A task's acceptance is a spec run by this same Runner, and a branch's report is
+A task's acceptance is a spec run by this same Runner, and a plan's report is
 that machinery run over a whole plan. One engine, three altitudes.
 
 Every report records its provenance — commit, dirty flag, interpreter, platform,
@@ -416,7 +448,7 @@ make test          # pytest suite
 make lint          # ruff check + format check
 make audit         # re-verify every task marked done
 make drift         # validate every plan, fail on task/plan drift
-make branches      # list branches in flight
+make plans         # list plans in flight
 
 python -m harness progress --watch   # what is running right now (second terminal)
 ```
@@ -428,7 +460,7 @@ harness-template/
 ├── AGENTS.md               # Agent-facing ground rules (read this first)
 ├── Makefile                # status / setup / verify / reproduce / run / audit / drift
 ├── pyproject.toml          # Project metadata + tool config
-├── .worktrees/             # One worktree per branch in flight (gitignored)
+├── .worktrees/             # One worktree per plan in flight (gitignored)
 ├── .harness/               # Harness state that is not project code
 │   ├── configs/agents.yaml #   the Sub-Worker tier (the Planner is you)
 │   ├── configs/project.yaml#   authoritative docs, report format, conventions
@@ -451,12 +483,12 @@ harness-template/
 │   ├── worker.py           #   Sub-Worker adapters + the verify-and-retry loop
 │   ├── guard.py            #   Containment: the harness is not the agent's to edit
 │   ├── heartbeat.py        #   Where a run is right now, from another terminal
-│   ├── branch.py           #   Branches: worktrees, briefings, reports
+│   ├── plans.py            #   Plans in flight: worktrees, briefings, reports
 │   ├── project.py          #   What a Planner must know about THIS project
-│   ├── planners.py         #   Planners that outlive one branch, and their notes
+│   ├── planners.py         #   Planners that outlive one plan, and their notes
 │   ├── adoption.py         #   Landing on a codebase that already exists
 │   ├── setup.py            #   Choosing the Sub-Worker platform / model / effort
-│   └── cli.py              #   status | progress | setup | verify | plan | task | branch | report
+│   └── cli.py              #   status | progress | setup | verify | plan | task | report
 ├── src/                    # Your code
 ├── scripts/                # Runnable steps
 ├── tests/                  # Pytest suite
@@ -480,7 +512,7 @@ python -m harness status
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — ground rules every agent (and human) works under
-- [docs/branches.md](docs/branches.md) — Tier 1: branches, Planners, adoption, reports
+- [docs/plans.md](docs/plans.md) — Tier 1: plans, Planners, adoption, reports
 - [docs/orchestration.md](docs/orchestration.md) — Tier 2: plans, tasks, contracts
 - [docs/verification.md](docs/verification.md) — specs, checks, `reproduce`
 - [docs/reproducibility.md](docs/reproducibility.md) — determinism and provenance
@@ -493,7 +525,7 @@ python -m harness status
 - **CI** (`.github/workflows/ci.yml`): lint + tests on every push/PR.
 - **Verification** (`.github/workflows/verify.yml`): the determinism gate
   (`harness reproduce`), plan validity and plan/task drift, re-verification of
-  every task marked `done`, and the branch lifecycle. Reports are uploaded as
+  every task marked `done`, and the plan lifecycle. Reports are uploaded as
   build artifacts.
 - **Pre-commit** (`.pre-commit-config.yaml`): the same gates locally — run
   `pre-commit install` once per checkout.

@@ -200,7 +200,7 @@ HEADER = """\
 #
 # Re-run `harness setup` to change any of it.
 # Placeholders: {model} {effort} {session} {root} {brief_file}
-#               {task_file} {task_id} {branch}
+#               {task_file} {task_id} {plan}
 """
 
 

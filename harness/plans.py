@@ -1,23 +1,24 @@
-"""Branches — one piece of work, isolated, from start to report.
+"""Plans in flight — one piece of work, isolated, from start to report.
 
-A branch is a piece of work the Planner takes on: its own git branch, its own
-worktree, its own plan. You and the Planner agree what it is by talking; the
-harness does not make you write that down before it will let you start.
+A plan is a piece of work the Planner takes on: a series of module tasks, on its
+own git branch, in its own worktree. You and the Planner agree what it is by
+talking; the harness does not make you write that down before it will let you
+start.
 
-There used to be an "branch" here, and it required a research *question*
-recorded verbatim before anything could proceed. That framing fit one kind of
-user and was ceremony for everyone else, so it is gone. What it was protecting
-— that the work has a stated goal, and that the report answers to it — is
-carried by the plan's `goal`, which the Planner has to write anyway.
+This used to be a second concept called a *branch*, sitting on top of the plan
+and one-to-one with it — one name for the work, another for the file describing
+it, and a third meaning for the word git already owns. So the two are one: the
+plan is the unit of work, and the git branch and worktree are where it happens.
+:mod:`harness.plan` is the plan document (modules, contracts, report); this
+module is a plan in flight (its worktree, its state, its report).
 
-Worktrees, not just branches, because several pieces of work run at once and
-each needs its own files on disk. Within one branch Sub-Workers run
-sequentially, so its task board stays coherent and dependency gates read
-current state.
+Worktrees, not just git branches, because several plans run at once and each
+needs its own files on disk. Within one plan Sub-Workers run sequentially, so
+its task board stays coherent and dependency gates read current state.
 
-A report is deliberately self-contained: it draws only on its own branch's
-artifacts. Comparing two branches is your job, done by reading finished
-reports — not something one branch may reach across to do.
+A report is deliberately self-contained: it draws only on its own plan's
+artifacts. Comparing two plans is your job, done by reading finished reports —
+not something one plan may reach across to do.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from harness import adoption as adoption_mod
+from harness import invocation
 from harness import plan as plan_mod
 from harness import planners as planners_mod
 from harness import project as project_mod
@@ -50,8 +52,8 @@ from harness.runner import Runner
 from harness.spec import SpecError, load_spec
 from harness.task import load_board, verify_task
 
-#: Where worktrees live. A harness branch is identified by *having* a worktree
-#: here, not by a name prefix — the branch is called whatever you called it.
+#: Where worktrees live. A plan is identified by *having* a worktree here, not
+#: by a name prefix — its git branch is called whatever you called the plan.
 DEFAULT_WORKTREE_ROOT = ".worktrees"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -59,16 +61,16 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 RESERVED_NAMES = frozenset({"main", "master", "head", "origin"})
 
 
-class BranchError(RuntimeError):
-    """Raised when a branch cannot be created, found, or reported on."""
+class WorkPlanError(RuntimeError):
+    """Raised when a plan cannot be started, found, or reported on."""
 
 
 @dataclasses.dataclass
-class Branch:
-    """One piece of work: a git branch, a worktree, a plan."""
+class WorkPlan:
+    """One plan in flight: its git branch, its worktree, its plan file."""
 
     name: str
-    branch: str
+    git_branch: str
     path: Path
     head: str = ""
 
@@ -89,11 +91,11 @@ class MetricValue:
 
 
 @dataclasses.dataclass
-class BranchReport:
+class PlanReport:
     """What the researcher reads to decide whether to merge."""
 
     name: str
-    branch: str
+    git_branch: str
     goal: str
     merge_ready: bool
     commit: str | None = None
@@ -133,17 +135,17 @@ def _git(root: str | Path, *args: str, check: bool = True) -> str:
         check=False,
     )
     if check and proc.returncode != 0:
-        raise BranchError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
+        raise WorkPlanError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
     return proc.stdout.strip()
 
 
-def list_branches(
+def list_plans(
     root: str | Path = ".", worktree_root: str | Path = DEFAULT_WORKTREE_ROOT
-) -> list[Branch]:
+) -> list[WorkPlan]:
     """Every harness worktree git knows about, sorted by name.
 
     Membership is decided by *where the worktree is*, not by a prefix on the
-    branch name. Branches are named whatever you called them, so there is
+    plan name. Plans are named whatever you called them, so there is
     nothing in the name to match on — and a prefix would be a second naming
     scheme to remember for no gain.
     """
@@ -151,7 +153,7 @@ def list_branches(
     base = Path(worktree_root)
     base = base if base.is_absolute() else root / base
     porcelain = _git(root, "worktree", "list", "--porcelain")
-    branches: list[Branch] = []
+    found: list[WorkPlan] = []
     path: str | None = None
     head = ""
     for line in porcelain.splitlines():
@@ -163,19 +165,35 @@ def list_branches(
             name_ref = line[len("branch ") :].removeprefix("refs/heads/")
             resolved = Path(path).resolve()
             if resolved.parent == base:
-                branches.append(
-                    Branch(name=resolved.name, branch=name_ref, path=resolved, head=head)
+                found.append(
+                    WorkPlan(name=resolved.name, git_branch=name_ref, path=resolved, head=head)
                 )
             path = None
-    return sorted(branches, key=lambda b: b.name)
+    return sorted(found, key=lambda p: p.name)
 
 
-def find_branch(name: str, root: str | Path = ".") -> Branch:
-    for candidate in list_branches(root):
+def resolve_plan_path(value: str, root: str | Path = ".") -> Path:
+    """Accept either a plan's name or a path to its YAML, and return the path.
+
+    Plans are addressed by name now that a plan *is* the unit of work — the
+    thing you start, approve, run and report on. Paths keep working, because a
+    Planner working inside its own worktree naturally has one, and because the
+    demo plan is a file that no worktree owns.
+    """
+    candidate = Path(value)
+    if candidate.suffix in {".yaml", ".yml"} or candidate.exists():
+        return candidate
+    with contextlib.suppress(WorkPlanError):
+        return find_plan(value, root).plan_path
+    return get_plans_dir(root) / f"{value}.yaml"
+
+
+def find_plan(name: str, root: str | Path = ".") -> WorkPlan:
+    for candidate in list_plans(root):
         if candidate.name == name:
             return candidate
-    known = [b.name for b in list_branches(root)]
-    raise BranchError(f"no branch '{name}'. known: {known or '(none)'}")
+    known = [b.name for b in list_plans(root)]
+    raise WorkPlanError(f"no plan '{name}'. known: {known or '(none)'}")
 
 
 # ---------------------------------------------------------------------------
@@ -183,11 +201,11 @@ def find_branch(name: str, root: str | Path = ".") -> Branch:
 
 
 PLAN_TEMPLATE = """\
-# Plan for branch '{name}' — written by the Planner, read by Workers.
+# Plan '{name}' — written by the Planner, read by Workers.
 #
 # TODO(Planner): replace every TODO below, then run:
-#   python -m harness plan validate plans/{name}.yaml
-#   python -m harness plan materialize plans/{name}.yaml
+#   {prefix} plan validate {name}
+#   {prefix} plan materialize {name}
 plan:
   name: {name}
   goal: >
@@ -195,8 +213,8 @@ plan:
     what the report answers to, so write it as you would explain it out loud.
 
   # What to report back. Declare WHERE each number lives; the harness extracts
-  # the value from the real artifact. Paths must stay inside this branch — a
-  # report may not read another branch's results.
+  # the value from the real artifact. Paths must stay inside this plan — a
+  # report may not read another plan's results.
   report:
     metrics:
       - name: TODO_metric
@@ -234,7 +252,7 @@ _INHERITED_CONFIGS = ("agents.yaml", "agent-platforms.yaml", "project.yaml")
 
 
 def _inherit_agent_configs(root: Path, worktree: Path) -> list[str]:
-    """Copy the project's agent configuration into a new branch worktree.
+    """Copy the project's agent configuration into a new plan's worktree.
 
     Without this the harness finds no ``agents.yaml`` in the worktree and falls
     back to the manual adapter — silently. ``plan run`` then writes briefings
@@ -264,34 +282,39 @@ def start(
     worktree_root: str | Path = DEFAULT_WORKTREE_ROOT,
     base: str = "HEAD",
     scaffold: bool = True,
-) -> Branch:
-    """Create a branch and a worktree to do one piece of work in."""
+) -> WorkPlan:
+    """Start a plan: a git branch and a worktree to do one piece of work in."""
     if not NAME_RE.match(name):
-        raise BranchError(
-            f"invalid branch name '{name}' — use lowercase letters, digits, and hyphens"
+        raise WorkPlanError(
+            f"invalid plan name '{name}' — use lowercase letters, digits, and hyphens"
         )
     if name.lower() in RESERVED_NAMES:
-        raise BranchError(f"'{name}' is reserved — pick a name for the work itself")
+        raise WorkPlanError(f"'{name}' is reserved — pick a name for the work itself")
     root = Path(root).resolve()
-    branch = name
+    git_branch = name
     worktree_root = Path(worktree_root)
     path = worktree_root if worktree_root.is_absolute() else root / worktree_root
     path = path / name
     if path.exists():
-        raise BranchError(f"path already exists: {path}")
-    existing = _git(root, "branch", "--list", branch)
+        raise WorkPlanError(f"path already exists: {path}")
+    existing = _git(root, "branch", "--list", git_branch)
     if existing:
-        raise BranchError(f"branch '{branch}' already exists — pick another name")
+        raise WorkPlanError(f"git branch '{git_branch}' already exists — pick another name")
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    _git(root, "worktree", "add", "-b", branch, str(path), base)
+    _git(root, "worktree", "add", "-b", git_branch, str(path), base)
 
-    created = Branch(name=name, branch=branch, path=path, head=_git(path, "rev-parse", "HEAD"))
+    created = WorkPlan(
+        name=name, git_branch=git_branch, path=path, head=_git(path, "rev-parse", "HEAD")
+    )
     _inherit_agent_configs(root, path)
     if scaffold:
         if not created.plan_path.exists():
             created.plan_path.parent.mkdir(parents=True, exist_ok=True)
-            created.plan_path.write_text(PLAN_TEMPLATE.format(name=name), encoding="utf-8")
+            created.plan_path.write_text(
+                PLAN_TEMPLATE.format(name=name, prefix=invocation.command_prefix()),
+                encoding="utf-8",
+            )
         # Scaffold the integration spec the plan points at, so the Planner's
         # first validation error is about the TODOs it must fill in, not about
         # a file the scaffold neglected to create.
@@ -302,30 +325,30 @@ def start(
     return created
 
 
-def remove(name: str, root: str | Path = ".", force: bool = False) -> Branch:
-    """Remove a branch's worktree. The branch is kept — it is the record."""
-    branch = find_branch(name, root)
-    args = ["worktree", "remove", str(branch.path)]
+def remove(name: str, root: str | Path = ".", force: bool = False) -> WorkPlan:
+    """Remove a plan's worktree. The git branch is kept — it is the record."""
+    work = find_plan(name, root)
+    args = ["worktree", "remove", str(work.path)]
     if force:
         args.append("--force")
     _git(root, *args)
-    return branch
+    return work
 
 
 # ---------------------------------------------------------------------------
 # reporting
 
 
-def _resolve_plan(branch: Branch) -> Plan:
-    if not branch.plan_path.is_file():
-        raise BranchError(
-            f"branch '{branch.name}' has no plan at {branch.plan_path}. "
+def _resolve_plan(work: WorkPlan) -> Plan:
+    if not work.plan_path.is_file():
+        raise WorkPlanError(
+            f"plan '{work.name}' has no plan file at {work.plan_path}. "
             "The Planner writes it before anything can be reported."
         )
     try:
-        return load_plan(branch.plan_path)
+        return load_plan(work.plan_path)
     except PlanError as exc:
-        raise BranchError(f"plan for '{branch.name}' is invalid: {exc}") from exc
+        raise WorkPlanError(f"plan for '{work.name}' is invalid: {exc}") from exc
 
 
 def _extract_metrics(plan: Plan, run_dir: Path | None) -> list[MetricValue]:
@@ -359,38 +382,38 @@ def build_report(
     root: str | Path = ".",
     run_integration: bool = True,
     check_determinism: bool = False,
-) -> BranchReport:
-    """Assemble the researcher's decision aid for one branch.
+) -> PlanReport:
+    """Assemble the researcher's decision aid for one plan.
 
     The spine — integration result, task acceptance, determinism, the commit
     to merge — is measured here, not narrated by an agent. The requested
     metrics are extracted from the artifacts the run produced.
     """
-    branch = find_branch(name, root)
-    plan = _resolve_plan(branch)
-    exp_root = branch.path
+    work = find_plan(name, root)
+    plan = _resolve_plan(work)
+    plan_root = work.path
 
-    report = BranchReport(
-        name=branch.name,
-        branch=branch.branch,
+    report = PlanReport(
+        name=work.name,
+        git_branch=work.git_branch,
         goal=plan.goal.strip(),
         merge_ready=False,
         artifacts=list(plan.report.artifacts),
-        provenance=collect_provenance(exp_root, seed=None),
+        provenance=collect_provenance(plan_root, seed=None),
     )
     report.commit = report.provenance.get("git_commit")
     report.dirty = report.provenance.get("git_dirty")
     report.tiers = {
-        "planner": planner_of(branch) or _agent_tier(exp_root, "planner"),
-        "worker": _agent_tier(exp_root, "worker"),
+        "planner": planner_of(work) or _agent_tier(plan_root, "planner"),
+        "worker": _agent_tier(plan_root, "worker"),
     }
 
     # --- task board: is every module actually finished, and still passing? ---
     # Scoped to *this plan's* modules. A tasks/ directory may hold task files
     # from other plans (the shipped demo, an earlier plan); counting those
-    # would report a branch as complete when none of its own modules
+    # would report a plan as complete when none of its own modules
     # were built — and that number decides a merge.
-    board = {t.id: t for t in load_board(exp_root / "tasks")}
+    board = {t.id: t for t in load_board(plan_root / "tasks")}
     module_ids = [m.id for m in plan.modules]
     report.tasks_total = len(module_ids)
     report.tasks_done = sum(1 for i in module_ids if i in board and board[i].is_done)
@@ -411,7 +434,7 @@ def build_report(
             continue
         entry = {"id": task.id, "status": task.status, "acceptance": "not run"}
         if task.is_done:
-            result = verify_task(task, root=exp_root, results_dir=exp_root / "results")
+            result = verify_task(task, root=plan_root, results_dir=plan_root / "results")
             entry["acceptance"] = "passed" if result.success else "FAILED"
         entry["worker"] = task.worker
         report.task_results.append(entry)
@@ -437,13 +460,13 @@ def build_report(
         report.integration = "no integration spec declared"
         report.caveats.append("plan declares no integration spec — the whole was never verified")
     elif run_integration:
-        spec_path = _integration_path(exp_root, plan.integration)
+        spec_path = _integration_path(plan_root, plan.integration)
         try:
             spec = load_spec(spec_path)
         except SpecError as exc:
             report.integration = f"spec error: {exc}"
         else:
-            runner = Runner(root=exp_root, results_dir=exp_root / "results")
+            runner = Runner(root=plan_root, results_dir=plan_root / "results")
             result = runner.run(spec)
             write_reports(result)
             run_dir = Path(result.run_dir)
@@ -456,7 +479,7 @@ def build_report(
         # report meant paying for the whole integration again — hours of GPU in
         # the case that motivated this. Attach the last one instead, and say
         # exactly which run it is so nobody mistakes it for a fresh result.
-        previous = _last_run(exp_root, plan.integration)
+        previous = _last_run(plan_root, plan.integration)
         if previous is None:
             report.integration = "skipped (--no-run), and no previous run to attach"
             report.caveats.append(
@@ -483,10 +506,10 @@ def build_report(
     if check_determinism and plan.integration is not None:
         try:
             outcome = reproduce(
-                load_spec(_integration_path(exp_root, plan.integration)),
+                load_spec(_integration_path(plan_root, plan.integration)),
                 times=2,
-                root=exp_root,
-                results_dir=exp_root / "results" / "reproduce",
+                root=plan_root,
+                results_dir=plan_root / "results" / "reproduce",
             )
             report.determinism = "REPRODUCIBLE" if outcome.reproducible else "NOT REPRODUCIBLE"
             if not outcome.reproducible:
@@ -510,9 +533,9 @@ def build_report(
     # The approval gate exists so that somebody other than the author saw the
     # plan before the budget was spent. A Planner that approves its own plan
     # passes the check and defeats the purpose, so the report says so.
-    approver = plan_mod.approved_by(branch.plan_path)
+    approver = plan_mod.approved_by(work.plan_path)
     planner_label = str((report.tiers.get("planner") or {}).get("planner") or "") or (
-        (planner_of(branch) or {}).get("planner") or ""
+        (planner_of(work) or {}).get("planner") or ""
     )
     if (
         approver
@@ -526,11 +549,11 @@ def build_report(
 
     # A result whose Planner model is unknown cannot be compared with any other
     # result, so the gap is stated rather than left to be noticed.
-    if not ((report.tiers.get("planner") or {}).get("model") or _planner_model(branch, root)):
+    if not ((report.tiers.get("planner") or {}).get("model") or _planner_model(work, root)):
         report.caveats.append(
             "Planner model not recorded — this run cannot be compared with another. "
             "Record it on the Planner with `harness planner set <planner> --model <model>`, "
-            f"or on this branch alone with `harness planner brief {name} "
+            f"or on this plan alone with `harness planner brief {name} "
             "--register <label> --model <model>`."
         )
 
@@ -551,7 +574,7 @@ def build_report(
     if report.dirty:
         blockers.append("uncommitted changes in the worktree")
     if report.determinism == "NOT REPRODUCIBLE":
-        blockers.append("the branch is not reproducible")
+        blockers.append("the plan is not reproducible")
 
     report.merge_ready = not blockers
     report.blockers = blockers
@@ -568,19 +591,19 @@ class PreviousRun:
     commit: str | None
 
 
-def _last_run(exp_root: Path, integration: str | None) -> PreviousRun | None:
-    """The most recent completed run of this branch's integration spec.
+def _last_run(plan_root: Path, integration: str | None) -> PreviousRun | None:
+    """The most recent completed run of this plan's integration spec.
 
     Matched on the spec's name, so an unrelated spec's run in the same results
-    directory is never mistaken for this branch's evidence.
+    directory is never mistaken for this plan's evidence.
     """
     if integration is None:
         return None
     try:
-        spec_name = load_spec(_integration_path(exp_root, integration)).name
-    except (SpecError, BranchError, OSError):
+        spec_name = load_spec(_integration_path(plan_root, integration)).name
+    except (SpecError, WorkPlanError, OSError):
         return None
-    runs_dir = exp_root / "results" / "runs"
+    runs_dir = plan_root / "results" / "runs"
     if not runs_dir.is_dir():
         return None
     candidates = sorted(
@@ -602,18 +625,18 @@ def _last_run(exp_root: Path, integration: str | None) -> PreviousRun | None:
     return None
 
 
-def _integration_path(exp_root: Path, integration: str) -> Path:
+def _integration_path(plan_root: Path, integration: str) -> Path:
     candidate = Path(integration)
-    return candidate if candidate.is_absolute() else exp_root / candidate
+    return candidate if candidate.is_absolute() else plan_root / candidate
 
 
 # ---------------------------------------------------------------------------
 # rendering
 
 
-def report_markdown(report: BranchReport) -> str:
+def report_markdown(report: PlanReport) -> str:
     lines = [
-        f"# Branch report: {report.branch}",
+        f"# Plan report: {report.name}",
         "",
     ]
     if report.goal:
@@ -628,7 +651,7 @@ def report_markdown(report: BranchReport) -> str:
         "",
         f"**{verdict}** — merging is the researcher's call; the harness only reports.",
         "",
-        f"- Branch: `{report.branch}`",
+        f"- Git branch: `{report.git_branch}`",
         f"- Merge commit: `{commit}`",
         f"- Integration: {report.integration}",
         f"- Tasks: {report.tasks_done}/{report.tasks_total} done",
@@ -697,14 +720,12 @@ def report_markdown(report: BranchReport) -> str:
     return "\n".join(lines)
 
 
-def write_branch_report(
-    report: BranchReport, exp_root: str | Path, save: bool = False
-) -> list[Path]:
-    """Write the report under ``results/`` and, with ``save``, into the branch."""
-    exp_root = Path(exp_root)
+def write_plan_report(report: PlanReport, plan_root: str | Path, save: bool = False) -> list[Path]:
+    """Write the report under ``results/`` and, with ``save``, into the plan."""
+    plan_root = Path(plan_root)
     written: list[Path] = []
 
-    out_dir = exp_root / "results" / "branches" / report.branch
+    out_dir = plan_root / "results" / "plans" / report.name
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / "report.json"
     json_path.write_text(
@@ -715,7 +736,7 @@ def write_branch_report(
     written += [json_path, md_path]
 
     if save:
-        saved_dir = exp_root / "branches" / report.branch
+        saved_dir = plan_root / "plans" / report.name
         saved_dir.mkdir(parents=True, exist_ok=True)
         saved = saved_dir / "report.md"
         saved.write_text(report_markdown(report), encoding="utf-8")
@@ -728,26 +749,24 @@ def write_branch_report(
 
 
 def _anything_reported(root: str | Path = ".") -> bool:
-    """True once any branch here has reached a reportable state.
+    """True once any plan here has reached a reportable state.
 
     The adoption framing is for a project where nothing has been proven yet. Once
-    one branch has, repeating it in every briefing is noise.
+    one plan has, repeating it in every briefing is noise.
     """
     try:
-        return any(
-            e.state == "ready to report" for e in (branch_state(x) for x in list_branches(root))
-        )
-    except BranchError:
+        return any(e.state == "ready to report" for e in (plan_state(x) for x in list_plans(root)))
+    except WorkPlanError:
         return False
 
 
-def _planner_model(branch: Branch, root: str | Path = ".") -> str:
-    """The model driving this branch, from the marker or the registry.
+def _planner_model(work: WorkPlan, root: str | Path = ".") -> str:
+    """The model driving this plan, from the marker or the registry.
 
-    A registered Planner carries its own model, so a branch linked to one
+    A registered Planner carries its own model, so a plan linked to one
     is never "model not recorded" — the registry answers on its behalf.
     """
-    marker = planner_of(branch) or {}
+    marker = planner_of(work) or {}
     if marker.get("model"):
         return str(marker["model"])
     label = marker.get("planner")
@@ -762,7 +781,7 @@ def _planner_model(branch: Branch, root: str | Path = ".") -> str:
 def planner_brief(name: str, root: str | Path = ".") -> str:
     """The Planner's working briefing: the work, the state, and the next command.
 
-    Always the same sections in the same order, whatever the branch's
+    Always the same sections in the same order, whatever the plan's
     state — only their contents differ. A document that changes shape is a
     document you have to re-read; this one you can re-run and skim.
 
@@ -770,20 +789,20 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
     told to run it and follow the result. Tool-specific shims (a skill, a slash
     command) are thin optional wrappers around this, never a prerequisite.
     """
-    branch = find_branch(name, root)
-    exp_root = branch.path
-    state = branch_state(branch)
+    work = find_plan(name, root)
+    plan_root = work.path
+    state = plan_state(work)
 
     lines = [
-        f"# Planner briefing: {branch.name}",
+        f"# Planner briefing: {work.name}",
         "",
         "## The work",
         "",
     ]
     goal = ""
-    if branch.plan_path.is_file():
+    if work.plan_path.is_file():
         with contextlib.suppress(PlanError):
-            goal = load_plan(branch.plan_path).goal.strip()
+            goal = load_plan(work.plan_path).goal.strip()
     if goal:
         lines += [
             goal,
@@ -794,45 +813,45 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         ]
     else:
         lines += [
-            "No goal written yet. Work out with the user what this branch is for:",
+            "No goal written yet. Work out with the user what this plan is for:",
             "what they want done, what would count as done, what they want to see at",
             "the end. Then write it as the plan's `goal` — one paragraph, in the",
             "words you would use out loud — and explain the plan before building it.",
         ]
     lines += [""]
     # A project that predates the harness needs saying so, once, to the Planner
-    # that will do something about it. Dropped as soon as any branch has
+    # that will do something about it. Dropped as soon as any plan has
     # reached a report: by then the situation speaks for itself.
     adoption = adoption_mod.read(root)
     if adoption is not None and adoption.is_adoption and not _anything_reported(root):
         lines += adoption_mod.brief_lines(adoption, root)
 
     # A Planner with a memory opens with it: everything it learned in earlier
-    # branches, so the hour spent learning this project is paid once.
-    registered = planner_of(branch) or {}
+    # plans, so the hour spent learning this project is paid once.
+    registered = planner_of(work) or {}
     if registered.get("planner"):
         with contextlib.suppress(planners_mod.PlannerError):
             lines += planners_mod.brief_lines(
-                planners_mod.load(registered["planner"], root), branch.name
+                planners_mod.load(registered["planner"], root), work.name
             )
 
     # Before the state and long before any plan: what this project already
     # decided. A Planner that reads the wrong document plans against the wrong
     # facts, and it has no way to know which document is which unless told.
     try:
-        lines += project_mod.brief_lines(project_mod.load_project_context(exp_root), exp_root)
+        lines += project_mod.brief_lines(project_mod.load_project_context(plan_root), plan_root)
     except project_mod.ProjectError as exc:
         lines += ["## Project context", "", f"> Could not be read: {exc}", ""]
 
     lines += ["## State", "", f"**{state.state}** — {state.detail}", ""]
 
-    if branch.plan_path.is_file():
+    if work.plan_path.is_file():
         try:
-            plan = load_plan(branch.plan_path)
+            plan = load_plan(work.plan_path)
         except PlanError:
             pass
         else:
-            board = {t.id: t for t in load_board(exp_root / "tasks")}
+            board = {t.id: t for t in load_board(plan_root / "tasks")}
             lines += [
                 f"Goal: {plan.goal.strip()}",
                 f"Integration spec: {plan.integration or '(none declared)'}",
@@ -848,17 +867,17 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
                 lines.append(f"| `{module_id}` | {status} | {worker} | {deps} |")
             lines.append("")
 
-    if not _planner_model(branch, root):
+    if not _planner_model(work, root):
         # A hand-appointed Planner is the one agent the harness cannot inspect.
         # If it does not say what it is, the report cannot either.
         lines += [
             "## Register yourself first",
             "",
-            "This branch has no Planner model on record, so its report cannot be",
+            "This plan has no Planner model on record, so its report cannot be",
             "compared with any other. You were opened by a person; say what you are:",
             "",
             "```bash",
-            f"python -m harness planner brief {name} --register planner \\",
+            f"{invocation.cmd(f'planner brief {name} --register planner')} \\",
             "  --model <the model you are running on> --effort <low|medium|high>",
             "```",
             "",
@@ -868,13 +887,13 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "## Next",
         "",
         "```bash",
-        f"cd {exp_root}",
+        f"cd {plan_root}",
         state.next_command,
         "```",
         "",
         "## Your role",
         "",
-        "Read agents/planner.md and follow it. You own this branch end to end:",
+        "Read agents/planner.md and follow it. You own this plan end to end:",
         "agree what the work is, agree the plan, get each module",
         "built, verify, and report back.",
         "",
@@ -887,21 +906,27 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "",
         "You never merge — that is the researcher's decision.",
         "",
-        f"- Worktree: {exp_root}",
-        f"- Branch:   {branch.branch}",
-        f"- Plan:     {branch.plan_path}",
-        f"- Contract: {exp_root / 'agents' / 'planner.md'}",
+        f"- Worktree: {plan_root}",
+        f"- Git branch: {work.git_branch}",
+        f"- Plan:     {work.plan_path}",
+        f"- Contract: {plan_root / 'agents' / 'planner.md'}",
         "",
         "## The whole sequence",
         "",
         "```bash",
-        f"python -m harness plan validate plans/{branch.name}.yaml",
-        f"python -m harness plan approve plans/{branch.name}.yaml --by <user>"
-        "   # they run this, after you explain it",
-        f"python -m harness plan materialize plans/{branch.name}.yaml",
-        "python -m harness task list                 # what is ready",
-        f"python -m harness plan run plans/{branch.name}.yaml       # Sub-Workers build it",
-        f"python -m harness report {branch.name} --save",
+        *invocation.steps(
+            [
+                (f"plan validate {work.name}", ""),
+                (
+                    f"plan approve {work.name} --by <user>",
+                    "they run this, after you explain it",
+                ),
+                (f"plan materialize {work.name}", ""),
+                ("task list", "what is ready"),
+                (f"plan run {work.name}", "Sub-Workers build it"),
+                (f"report {work.name} --save", ""),
+            ]
+        ),
         "```",
         "",
         "`plan run` invokes the configured Worker per module, verifies acceptance",
@@ -914,8 +939,8 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "",
         "## When you are done",
         "",
-        f"Run `harness report {branch.name}`. It exits non-zero until the",
-        "branch is genuinely merge-ready. Then stop and hand back to the",
+        f"Run `harness report {work.name}`. It exits non-zero until the",
+        "plan is genuinely merge-ready. Then stop and hand back to the",
         "researcher — do not merge.",
         "",
     ]
@@ -930,7 +955,7 @@ def register_planner(
     effort: str = "",
     require_model: bool = False,
 ) -> Path:
-    """Record who is driving a branch, and on what.
+    """Record who is driving a plan, and on what.
 
     The harness cannot choose the Planner's model — that session was opened by
     a person — but recording it makes the tier split auditable: a report can
@@ -944,18 +969,18 @@ def register_planner(
     gap instead of refusing.
     """
     if require_model and not str(model).strip():
-        raise BranchError(
+        raise WorkPlanError(
             "registering a Planner requires --model: a run whose Planner model is "
             "unknown cannot be compared with any other run. Pass the model the "
             "session is actually running on."
         )
-    branch = find_branch(name, root)
-    marker = branch.path / "results" / "branches" / branch.name / "planner.json"
+    work = find_plan(name, root)
+    marker = work.path / "results" / "plans" / work.name / "planner.json"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(
         json.dumps(
             {
-                "branch": branch.name,
+                "plan": work.name,
                 "planner": label,
                 "model": model,
                 "effort": effort,
@@ -968,9 +993,9 @@ def register_planner(
     return marker
 
 
-def planner_of(branch: Branch) -> dict[str, Any] | None:
-    """The registered Planner for a branch, with its declared tier."""
-    marker = branch.path / "results" / "branches" / branch.name / "planner.json"
+def planner_of(work: WorkPlan) -> dict[str, Any] | None:
+    """The registered Planner for a plan, with its declared tier."""
+    marker = work.path / "results" / "plans" / work.name / "planner.json"
     if not marker.is_file():
         return None
     try:
@@ -980,7 +1005,7 @@ def planner_of(branch: Branch) -> dict[str, Any] | None:
 
 
 INTEGRATION_TEMPLATE = """\
-# Integration spec for branch '{name}' — verifies the ASSEMBLED whole once
+# Integration spec for plan '{name}' — verifies the ASSEMBLED whole once
 # every module is done. TODO(Planner): replace the placeholder step.
 name: {name}
 description: Integration check for {name}
@@ -999,11 +1024,11 @@ steps:
 
 
 @dataclasses.dataclass
-class BranchState:
-    """One branch's position in the flow, derived from files alone."""
+class PlanState:
+    """One plan's position in the flow, derived from files alone."""
 
     name: str
-    branch: str
+    git_branch: str
     state: str
     detail: str
     next_command: str
@@ -1019,7 +1044,7 @@ class ProjectStatus:
     worker_adapter: str = "manual"
     worker_tier: dict[str, Any] = dataclasses.field(default_factory=dict)
     planner_tier: dict[str, Any] = dataclasses.field(default_factory=dict)
-    branches: list[BranchState] = dataclasses.field(default_factory=list)
+    plans: list[PlanState] = dataclasses.field(default_factory=list)
     here: str | None = None
     headline: str = ""
     next_steps: list[str] = dataclasses.field(default_factory=list)
@@ -1029,22 +1054,25 @@ class ProjectStatus:
     agents_config_path: str = ""
 
 
-def branch_state(item: Branch) -> BranchState:
-    """Classify a branch without running anything.
+def plan_state(item: WorkPlan) -> PlanState:
+    """Classify a plan without running anything.
 
     Cheap on purpose: orientation must be instant, so this reads the plan and
     the board and never executes a spec.
     """
-    name, ref = item.name, item.branch
+    name, ref = item.name, item.git_branch
 
-    def state(kind: str, detail: str, command: str) -> BranchState:
-        return BranchState(name, ref, kind, detail, command)
+    def state(kind: str, detail: str, command: str) -> PlanState:
+        # `command` is written without the prefix: what a reader has to type to
+        # reach the harness depends on how it was installed, and only
+        # `invocation` knows that.
+        return PlanState(name, ref, kind, detail, invocation.cmd(command))
 
     if not item.plan_path.is_file():
         return state(
             "no plan",
             "the Planner has not written a plan yet",
-            f"harness plan validate plans/{name}.yaml   # after writing it",
+            f"plan validate {name}   # after writing it",
         )
     try:
         plan = load_plan(item.plan_path)
@@ -1054,7 +1082,7 @@ def branch_state(item: Branch) -> BranchState:
             "the plan is still all TODOs" if kind == "scaffold" else f"the plan is invalid: {exc}"
         )
         hint = "after replacing every TODO in it" if kind == "scaffold" else "after fixing it"
-        return state(kind, detail, f"harness plan validate plans/{name}.yaml   # {hint}")
+        return state(kind, detail, f"plan validate {name}   # {hint}")
 
     # A plan that nobody has agreed to is a proposal, and the state has to say
     # so — otherwise the Planner reads "materialize" as the next thing to do and
@@ -1064,8 +1092,7 @@ def branch_state(item: Branch) -> BranchState:
         return state(
             "needs agreement",
             f"{why} — explain it to the researcher, then they approve",
-            f"harness plan approve plans/{name}.yaml --by <researcher>"
-            "   # the researcher runs this, not you",
+            f"plan approve {name} --by <researcher>   # the researcher runs this, not you",
         )
 
     board = {t.id: t for t in load_board(get_tasks_dir(item.path))}
@@ -1075,7 +1102,7 @@ def branch_state(item: Branch) -> BranchState:
         return state(
             "not materialized",
             f"{len(module_ids) - len(present)} module(s) have no task file",
-            f"harness plan materialize plans/{name}.yaml",
+            f"plan materialize {name}",
         )
 
     blocked = [i for i in module_ids if board[i].status == "blocked"]
@@ -1084,7 +1111,7 @@ def branch_state(item: Branch) -> BranchState:
             "blocked",
             f"a Sub-Worker gave up on {blocked} — fix the brief, or take it over "
             "yourself (`executor: main`)",
-            f"harness task show --id {blocked[0]}",
+            f"task show --id {blocked[0]}",
         )
 
     done = [i for i in module_ids if board[i].is_done]
@@ -1092,12 +1119,12 @@ def branch_state(item: Branch) -> BranchState:
         return state(
             "building",
             f"{len(done)}/{len(module_ids)} module(s) done",
-            f"harness plan run plans/{name}.yaml",
+            f"plan run {name}",
         )
     return state(
         "ready to report",
         "every module is done",
-        f"harness report {name} --determinism --save",
+        f"report {name} --determinism --save",
     )
 
 
@@ -1115,13 +1142,13 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
     demo_present = (get_plans_dir(root) / "demo-pipeline.yaml").is_file()
 
     try:
-        branches = [branch_state(e) for e in list_branches(root)]
-    except BranchError:
-        branches = []
+        plans = [plan_state(e) for e in list_plans(root)]
+    except WorkPlanError:
+        plans = []
 
     here = None
     current = Path(cwd or Path.cwd()).resolve()
-    for candidate in list_branches(root) if branches else []:
+    for candidate in list_plans(root) if plans else []:
         if current == candidate.path or candidate.path in current.parents:
             here = candidate.name
             break
@@ -1130,7 +1157,7 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         instantiated=instantiated,
         project_name=project_name,
         demo_present=demo_present,
-        branches=branches,
+        plans=plans,
         here=here,
         worker_adapter=_worker_adapter(root),
         worker_tier=_agent_tier(root, "worker"),
@@ -1140,16 +1167,18 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
     )
 
     if not instantiated:
-        status.headline = "Project not initialized yet — run 'harness init' to scaffold it."
-        status.next_steps = [
-            "harness init   # scaffold project files and configure agents",
-        ]
+        status.headline = (
+            f"Project not initialized yet — run '{invocation.cmd('init')}' to scaffold it."
+        )
+        status.next_steps = invocation.steps(
+            [("init", "scaffold project files and configure agents")]
+        )
         return status
 
-    if not branches:
-        status.headline = f"'{project_name}' is set up, with no branches yet."
-        # A Planner comes before the branch it owns: registering one first
-        # means the branch inherits its model — so the report is never
+    if not plans:
+        status.headline = f"'{project_name}' is set up, with no plans yet."
+        # A Planner comes before the plan it owns: registering one first
+        # means the plan inherits its model — so the report is never
         # "model not recorded" — and everything that Planner has already
         # learned here. Registering afterwards works, but by then the first
         # briefing has already been written without any of it.
@@ -1157,26 +1186,35 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
 
         known = [p.name for p in planners_mod.list_planners(root)]
         if known:
-            status.next_steps = [
-                f"harness branch <name> --planner {known[0]}"
-                "   # a branch + worktree for one piece of work",
-            ]
+            # `status` is read by both the user and the Planner, and this
+            # command belongs to the Planner: the user's next move is to say
+            # what they want, not to name a plan. So it is labelled rather
+            # than presented as the reader's own next command.
+            status.next_steps = invocation.steps(
+                [
+                    (
+                        f"plan new <name> --planner {known[0]}",
+                        f"'{known[0]}' runs this, once you two agree the work",
+                    )
+                ]
+            )
         else:
-            status.next_steps = [
-                "harness create -n <name> --model <model>   # a Planner outlives one branch",
-                "harness branch <name> --planner <name>   # then the branch it owns",
-            ]
+            status.next_steps = invocation.steps(
+                [("create -n <planner-name>", "then tell it what you want done")]
+            )
         return status
 
-    unfinished = [e for e in branches if e.state != "ready to report"]
-    focus = next((e for e in branches if e.name == status.here), None) or (
-        unfinished[0] if unfinished else branches[0]
+    unfinished = [e for e in plans if e.state != "ready to report"]
+    focus = next((e for e in plans if e.name == status.here), None) or (
+        unfinished[0] if unfinished else plans[0]
     )
-    where = f"in branch '{status.here}'" if status.here else "at the project root"
-    status.headline = f"You are {where}; {len(branches)} branch(s) in flight."
+    where = f"in plan '{status.here}'" if status.here else "at the project root"
+    status.headline = f"You are {where}; {len(plans)} plan(s) in flight."
     status.next_steps = [focus.next_command]
     if focus.state == "ready to report":
-        status.next_steps.append(f"git merge {focus.branch}    # only after you read the report")
+        status.next_steps.append(
+            f"git merge {focus.git_branch}    # only after you read the report"
+        )
     return status
 
 

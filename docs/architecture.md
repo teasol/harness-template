@@ -5,7 +5,7 @@
 ```mermaid
 flowchart LR
     A["Spec YAML<br/>configs/*.yaml"] -->|"harness.spec.load_spec"| B["harness.runner.Runner"]
-    B -->|"subprocess (sh)"| C["Steps<br/>scripts / branches"]
+    B -->|"subprocess (sh)"| C["Steps<br/>scripts / commands"]
     C -->|"artifacts"| D[("results/runs/&lt;name&gt;-&lt;ts&gt;/")]
     B -->|"harness.checks.run_check"| E["Checks<br/>file_exists · file_hash · json_metric · text_contains"]
     D --> E
@@ -25,15 +25,15 @@ flowchart LR
 | `harness/reproduce.py` | Determinism gate: repeat a spec, diff artifact manifests |
 | `harness/reproducibility.py` | Seeding helpers, deterministic env vars, sha256, run provenance |
 | `harness/plan.py` | Plans: module DAGs, contracts, acceptance, report spec — the Planner's output format |
-| `harness/branch.py` | Branches: worktree/branch lifecycle, Planner briefing, researcher's report |
+| `harness/plans.py` | Plans in flight: worktree/git-branch lifecycle, Planner briefing, researcher's report |
 | `harness/worker.py` | Worker adapters (manual/cli) and the verify-and-retry loop |
 | `harness/setup.py` | First-run choice of Worker platform, model, and reasoning level |
 | `harness/task.py` | Task materialization, lifecycle (claim/block/done), dependency + deliverable enforcement, board — the Worker's world |
-| `harness/cli.py` | `python -m harness verify\|reproduce\|hash\|plan\|task\|exp` |
+| `harness/cli.py` | `python -m harness verify\|reproduce\|hash\|plan\|task\|report` |
 
 The layers stack: a task's acceptance is a standard spec run by the standard
-Runner ([orchestration.md](orchestration.md)), and an branch's report is
-that same machinery run over a whole plan ([branches.md](branches.md)).
+Runner ([orchestration.md](orchestration.md)), and a plan's report is
+that same machinery run over a whole plan ([plans.md](plans.md)).
 One engine, three altitudes.
 
 ## Design rules

@@ -2,9 +2,9 @@
 
 > New here? Start with the walkthrough at the top of [README.md](../README.md).
 
-This document covers Tier 2 — what happens inside one branch branch. Tier 1
-— the dialogue with the researcher, and the report they read to decide a merge —
-is in [branches.md](branches.md).
+This document covers Tier 2 — what happens inside one plan. Tier 1 — the
+dialogue with the researcher, and the report they read to decide a merge — is in
+[plans.md](plans.md).
 
 The Planner is also the **Main Worker**: it implements modules marked
 `executor: main` itself and delegates `executor: sub` modules to Sub-Workers,
@@ -94,7 +94,7 @@ plan:
 
 Validation enforces: unique ids, resolvable `depends_on`, acyclic DAG,
 non-empty brief and acceptance per module, known check types, deliverables
-owned by exactly one module, report paths that stay inside the branch, and
+owned by exactly one module, report paths that stay inside the plan, and
 (if set) an existing integration spec file.
 
 ### Who builds a module: `executor`
@@ -107,13 +107,13 @@ Choose `planner` when the module does not write new code:
 
 | The module mainly... | executor |
 | --- | --- |
-| runs an branch, drives a job, orchestrates existing scripts | `planner` |
+| runs a plan, drives a job, orchestrates existing scripts | `planner` |
 | reads logs and interprets results | `planner` |
 | implements something new, with tests | `worker` |
 
 The isolation a Worker buys is only worth its price when new code is being
 written. Briefing an agent to run a job you could run yourself costs more than
-running it — in one real branch a wrapper script that called an existing
+running it — in one real plan a wrapper script that called an existing
 evaluation script consumed 45 minutes of Worker time against 21 minutes of
 actual evaluation.
 
@@ -158,7 +158,7 @@ python -m harness plan run plans/my-plan.yaml
 ```
 
 Approval is fingerprinted against the plan file's contents and stored beside it
-as `plans/my-plan.yaml.approved`, so it travels with the branch and **lapses
+as `plans/my-plan.yaml.approved`, so it travels with the plan and **lapses
 the moment the plan is edited**. `plan validate` and `plan materialize` stay
 unguarded — they cost nothing. `--skip-approval` exists for automation that
 approved elsewhere.

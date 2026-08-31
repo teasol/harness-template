@@ -12,6 +12,7 @@ import re
 import shutil
 from pathlib import Path
 
+from harness import invocation
 from harness.paths import (
     get_agents_config_path,
     get_harness_dir,
@@ -46,6 +47,14 @@ def slugify(name: str) -> str:
     if not slug:
         raise InitError("Project name produces an empty slug")
     return slug
+
+
+def _localize_commands(text: str) -> str:
+    """Point every command in a scaffolded doc at how the harness was invoked."""
+    prefix = invocation.command_prefix()
+    if prefix == invocation.MODULE_PREFIX:
+        return text
+    return text.replace(invocation.MODULE_PREFIX, prefix)
 
 
 def init_project(
@@ -112,6 +121,15 @@ def init_project(
             kept_files.append(dst_path)
             continue
         dst_path.parent.mkdir(parents=True, exist_ok=True)
+        if src_rel.endswith(".md"):
+            # The contracts are written as `python -m harness ...`, which is the
+            # right thing in a checkout and wrong in a project that added the
+            # harness with `uv add` — there the agent reading them has to say
+            # `uv run harness ...`. Rewrite once, at copy time, so the file the
+            # agent reads names commands it can actually run.
+            dst_path.write_text(_localize_commands(src_path.read_text(encoding="utf-8")))
+            created_files.append(dst_path)
+            continue
         shutil.copy(src_path, dst_path)
         created_files.append(dst_path)
 

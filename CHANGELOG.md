@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-31
+
+**Breaking.** "Branches" are gone as a concept: a **plan** is the unit of work,
+and the git branch and worktree it runs in are plumbing. Commands, on-disk report
+paths and two persisted keys changed; see *Changed* and *Removed*.
+
+### Changed
+
+- **One concept where there were two.** A branch and its plan were one-to-one —
+  `harness branch fix-loader` created the git branch, the worktree, *and*
+  `plans/fix-loader.yaml` — so the work had two names, one of them borrowed from
+  a git feature that means something else. A plan now *is* the piece of work: the
+  series of module tasks, on its own git branch. `harness.branch` became
+  `harness.plans` (a plan in flight), while `harness.plan` stays what it was (the
+  plan document); the dataclass is `WorkPlan`, so nothing collides with
+  `plan.Plan`.
+- **Plan verbs take a plan's name.** `harness plan validate fix-loader` instead
+  of `harness plan validate plans/fix-loader.yaml`. Paths still work — a Planner
+  inside its own worktree has one, and the demo plan is a file no worktree owns.
+  `task list --plan <name>` is unchanged: that was always a name.
+- **The user is no longer told to start the work.** `create`, `init` and `status`
+  used to print `harness branch <name> --planner <p>` as the reader's next
+  command, but in agent-driven work nobody starts one by hand: you say what you
+  want, the Planner agrees it with you and runs `plan new` itself. `create` now
+  ends by telling you to talk to the Planner, the command moved into the block
+  you paste into that session, and `status` labels it as the Planner's
+  (`'my-planner' runs this, once you two agree the work`).
+- **`init` names the command that actually comes next.** It printed
+  `harness create -n <name> --model <model>`, with `--model` looking required
+  when the Planner records its own model, and on the adoption path it put
+  `harness project init` first. Registering the Planner is the one step that is
+  always the person's, so it is step 1; project context follows it as work the
+  Planner can do itself.
+- **Printed commands carry the prefix you actually invoked.** Everything was
+  hardcoded as `harness ...` or `python -m harness ...`, so a project that added
+  the harness with `uv add` was told to run commands it does not have. The prefix
+  — `harness`, `python -m harness`, or `uv run harness` — is now read from how
+  the process started, and every next step, briefing, plan scaffold header and
+  scaffolded `AGENTS.md` uses it (`harness.invocation`). `uv tool install` still
+  prints the bare script name, because there it is on the PATH.
+- **Report paths and keys renamed.** `results/branches/<name>/` →
+  `results/plans/<name>/`, `--save` writes `plans/<name>/report.md`, and the
+  report's `branch` field is now `git_branch` (it is a git ref, and only that).
+  A Planner's registry records `plans:` rather than `branches:`, and a note's
+  `plan:` rather than `branch:` — older registry files lose those two fields.
+- **Stale role contracts fixed.** `agents/planner.md` and `AGENTS.md` still told
+  the Planner to record a research *question* and named a command that 0.4.0
+  removed. Step 0 is now agreeing the work and writing the plan's `goal`.
+
+### Removed
+
+- `harness branch <name>` → `harness plan new <name>`; `harness branches` →
+  `harness plans` (or `harness plan list`); `harness drop <name>` →
+  `harness plan drop <name>`. No aliases: 0.4.0 was a breaking release days ago,
+  and a second name for the thing we just finished giving one name to would
+  defeat the point. `make branches` → `make plans`.
+
+### Added
+
+- `uv` install instructions in the README (`uv add git+…`, `uv run harness
+  init`), including `uv init` first for a project without a `pyproject.toml` and
+  `uv tool install` for a harness outside any one project.
+- Comment columns in printed next steps are aligned by computed width, which is
+  what lets the command prefix change length safely.
+
 ## [0.4.0] - 2026-08-31
 
 **Breaking.** The experiment layer is gone, replaced by branches you talk your

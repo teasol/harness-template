@@ -151,24 +151,37 @@ def read(root: str | Path = ".") -> Adoption | None:
     )
 
 
+#: What follows the commands, and why the list stops where it does. Starting the
+#: work is not a step the user performs: they say what they want, the Planner
+#: agrees it with them and runs `harness plan new` itself.
+THEN_TALK = (
+    "Then tell that Planner what you want done — it agrees the work with you\n"
+    "  and starts it itself. You never have to start a plan by hand."
+)
+
+
 def next_steps(root: str | Path = ".") -> list[str]:
-    """The order the adoption path actually needs, when it differs from greenfield."""
+    """The order the adoption path actually needs, when it differs from greenfield.
+
+    The Planner comes first even here. Registering one is the only command that
+    is always the *person's* to run, and everything after it — including
+    writing down what the project expects, and starting the work — is the
+    Planner's own once it is open and reading its briefing. So the list stops at
+    the Planner; :data:`THEN_TALK` says what happens next.
+    """
+    from harness import invocation
     from harness import planners as planners_mod
     from harness import project as project_mod
 
-    steps: list[str] = []
+    pairs: list[tuple[str, str]] = []
+    if not planners_mod.list_planners(root):
+        pairs.append(
+            ("create -n <planner-name>", "the Planner you will talk to (--model optional)")
+        )
     with contextlib.suppress(project_mod.ProjectError):
         if project_mod.load_project_context(root).is_empty:
-            steps.append(
-                "harness project init"
-                "                       # what a Planner must know about this project"
-            )
-    if not planners_mod.list_planners(root):
-        steps.append(
-            "harness create -n <name> --model <model>        # a Planner outlives this branch"
-        )
-    steps.append("harness branch <name> --planner <name>       # and plan the adoption there")
-    return steps
+            pairs.append(("project init", "what a Planner must know here — it can write this"))
+    return invocation.steps(pairs)
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +211,7 @@ BOUNDARY_CONDITIONS = [
     (
         "It changes at its own rate",
         "things that always change together should stay together, or every "
-        "branch touches two modules to make one change.",
+        "plan touches two modules to make one change.",
     ),
     (
         "You can observe its boundary today",

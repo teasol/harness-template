@@ -1,7 +1,7 @@
 """Tests for the experiment layer (Tier 1 <-> Tier 2).
 
 Worktree tests run against a throwaway clone in ``tmp_path`` so they never
-create branches or worktrees in the checkout under test.
+create plans or worktrees in the checkout under test.
 """
 
 from __future__ import annotations
@@ -12,11 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from harness import branch as branch_mod
 from harness import plan as plan_mod
+from harness import plans as plans_mod
 from harness import task as task_mod
-from harness.branch import BranchError
 from harness.plan import PlanError, load_plan
+from harness.plans import WorkPlanError
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 DEMO_PLAN = FIXTURES_DIR / "demo-pipeline.yaml"
@@ -60,7 +60,7 @@ def test_demo_plan_declares_a_report() -> None:
     assert plan.report.artifacts == ["stats.json"]
 
 
-def test_report_source_may_not_escape_the_branch(tmp_path: Path) -> None:
+def test_report_source_may_not_escape_the_plan(tmp_path: Path) -> None:
     """Reading a sibling experiment's results would make the report unjudgeable alone."""
     path = _plan_with_report_source(tmp_path, "../exp-baseline/results/stats.json")
     with pytest.raises(PlanError, match="escapes via"):
@@ -126,53 +126,53 @@ def test_modules_may_not_share_a_deliverable(tmp_path: Path) -> None:
 # lifecycle
 
 
-def test_invalid_branch_name_rejected(tmp_path: Path) -> None:
-    with pytest.raises(BranchError, match="invalid branch name"):
-        branch_mod.start("Not A Slug", root=tmp_path)
+def test_invalid_plan_name_rejected(tmp_path: Path) -> None:
+    with pytest.raises(WorkPlanError, match="invalid plan name"):
+        plans_mod.start("Not A Slug", root=tmp_path)
 
 
 @needs_git
 def test_start_list_remove(clone: Path) -> None:
-    assert branch_mod.list_branches(clone) == []
+    assert plans_mod.list_plans(clone) == []
 
-    experiment = branch_mod.start("alpha", root=clone)
-    assert experiment.branch == "alpha"
+    experiment = plans_mod.start("alpha", root=clone)
+    assert experiment.git_branch == "alpha"
     assert experiment.path.is_dir()
     assert experiment.plan_path.is_file()  # scaffolded for the Planner
 
-    listed = branch_mod.list_branches(clone)
+    listed = plans_mod.list_plans(clone)
     assert [e.name for e in listed] == ["alpha"]
 
-    with pytest.raises(BranchError, match="already exists"):
-        branch_mod.start("alpha", root=clone)
+    with pytest.raises(WorkPlanError, match="already exists"):
+        plans_mod.start("alpha", root=clone)
 
-    branch_mod.remove("alpha", root=clone, force=True)
-    assert branch_mod.list_branches(clone) == []
-    # The branch survives the worktree: it is the record of the attempt.
-    branches = subprocess.run(
+    plans_mod.remove("alpha", root=clone, force=True)
+    assert plans_mod.list_plans(clone) == []
+    # The git branch survives the worktree: it is the record of the attempt.
+    git_branches = subprocess.run(
         ["git", "branch", "--list", "alpha"],
         cwd=str(clone),
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    assert "alpha" in branches
+    assert "alpha" in git_branches
 
 
 @needs_git
-def test_branches_are_isolated_from_each_other(clone: Path) -> None:
+def test_plans_are_isolated_from_each_other(clone: Path) -> None:
     """Two experiments get separate worktrees, so neither sees the other's files."""
-    a = branch_mod.start("alpha", root=clone)
-    b = branch_mod.start("beta", root=clone)
+    a = plans_mod.start("alpha", root=clone)
+    b = plans_mod.start("beta", root=clone)
     assert a.path != b.path
     (a.path / "marker.txt").write_text("only-in-alpha", encoding="utf-8")
     assert not (b.path / "marker.txt").exists()
 
 
 @needs_git
-def test_find_unknown_branch(clone: Path) -> None:
-    with pytest.raises(BranchError, match="no branch"):
-        branch_mod.find_branch("ghost", root=clone)
+def test_find_unknown_plan(clone: Path) -> None:
+    with pytest.raises(WorkPlanError, match="no plan"):
+        plans_mod.find_plan("ghost", root=clone)
 
 
 # ---------------------------------------------------------------------------
@@ -180,9 +180,9 @@ def test_find_unknown_branch(clone: Path) -> None:
 
 
 @needs_git
-def test_report_on_a_finished_branch(clone: Path) -> None:
+def test_report_on_a_finished_plan(clone: Path) -> None:
     """The spine is measured, and requested metrics come from real artifacts."""
-    experiment = branch_mod.start("finished", root=clone)
+    experiment = plans_mod.start("finished", root=clone)
     wt = experiment.path
 
     # Planner: adopt the demo pipeline fixture as this experiment's plan.
@@ -209,7 +209,7 @@ def test_report_on_a_finished_branch(clone: Path) -> None:
     _run(wt, "git", "add", "-A")
     _run(wt, "git", "commit", "--quiet", "-m", "plan and tasks for finished")
 
-    report = branch_mod.build_report("finished", root=clone, run_integration=True)
+    report = plans_mod.build_report("finished", root=clone, run_integration=True)
 
     assert report.integration == "PASSED"
     assert report.tasks_done == report.tasks_total == 2
@@ -222,17 +222,17 @@ def test_report_on_a_finished_branch(clone: Path) -> None:
     assert values["sample_count"] == 42
     assert not [m for m in report.metrics if m.error]
 
-    written = branch_mod.write_branch_report(report, wt, save=True)
+    written = plans_mod.write_plan_report(report, wt, save=True)
     assert any(p.name == "report.json" for p in written)
-    saved = wt / "branches" / "finished" / "report.md"
+    saved = wt / "plans" / "finished" / "report.md"
     assert saved.is_file()
     assert "READY TO MERGE" in saved.read_text(encoding="utf-8")
 
 
 @needs_git
-def test_report_flags_an_unfinished_branch(clone: Path) -> None:
+def test_report_flags_an_unfinished_plan(clone: Path) -> None:
     """A dirty worktree with unfinished modules must never read as merge-ready."""
-    experiment = branch_mod.start("wip", root=clone)
+    experiment = plans_mod.start("wip", root=clone)
     wt = experiment.path
     shutil.copy(DEMO_PLAN, wt / "plans/wip.yaml")
     text = (wt / "plans/wip.yaml").read_text(encoding="utf-8")
@@ -241,20 +241,20 @@ def test_report_flags_an_unfinished_branch(clone: Path) -> None:
     for stale in (wt / "tasks").glob("*.task.yaml"):
         stale.unlink()
 
-    report = branch_mod.build_report("wip", root=clone, run_integration=False)
+    report = plans_mod.build_report("wip", root=clone, run_integration=False)
 
     assert report.merge_ready is False
     assert report.dirty is True
     assert any("not done" in c or "no tasks" in c for c in report.caveats)
     assert any("uncommitted" in c for c in report.caveats)
-    assert "NOT READY" in branch_mod.report_markdown(report)
+    assert "NOT READY" in plans_mod.report_markdown(report)
 
 
 @needs_git
 def test_report_requires_a_plan(clone: Path) -> None:
-    branch_mod.start("naked", root=clone, scaffold=False)
-    with pytest.raises(BranchError, match="has no plan"):
-        branch_mod.build_report("naked", root=clone)
+    plans_mod.start("naked", root=clone, scaffold=False)
+    with pytest.raises(WorkPlanError, match="has no plan"):
+        plans_mod.build_report("naked", root=clone)
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +264,7 @@ def test_report_requires_a_plan(clone: Path) -> None:
 @needs_git
 def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
     """Counting foreign task files reported an experiment complete when it was not."""
-    experiment = branch_mod.start("scoped", root=clone)
+    experiment = plans_mod.start("scoped", root=clone)
     wt = experiment.path
     # A plan with two modules, neither materialized...
     shutil.copy(DEMO_PLAN, wt / "plans/scoped.yaml")
@@ -280,7 +280,7 @@ def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
         encoding="utf-8",
     )
 
-    report = branch_mod.build_report("scoped", root=clone, run_integration=False)
+    report = plans_mod.build_report("scoped", root=clone, run_integration=False)
 
     assert report.tasks_total == 2
     assert report.tasks_done == 0  # not 2: foreign tasks are not this plan's
@@ -292,7 +292,7 @@ def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
 @needs_git
 def test_not_ready_always_states_a_reason(clone: Path) -> None:
     """A verdict the researcher cannot explain is not a decision aid."""
-    experiment = branch_mod.start("unexplained", root=clone)
+    experiment = plans_mod.start("unexplained", root=clone)
     wt = experiment.path
     shutil.copy(DEMO_PLAN, wt / "plans/unexplained.yaml")
     text = (wt / "plans/unexplained.yaml").read_text(encoding="utf-8")
@@ -300,28 +300,28 @@ def test_not_ready_always_states_a_reason(clone: Path) -> None:
         text.replace("name: demo-pipeline", "name: unexplained", 1), encoding="utf-8"
     )
 
-    report = branch_mod.build_report("unexplained", root=clone, run_integration=False)
+    report = plans_mod.build_report("unexplained", root=clone, run_integration=False)
 
     assert not report.merge_ready
     assert report.blockers, "NOT READY must always come with stated blockers"
-    assert "### Why not ready" in branch_mod.report_markdown(report)
+    assert "### Why not ready" in plans_mod.report_markdown(report)
 
 
 @needs_git
 def test_start_scaffolds_an_integration_spec(clone: Path) -> None:
     """The scaffold must not point at a file it forgot to create."""
-    experiment = branch_mod.start("scaffolded", root=clone)
+    experiment = plans_mod.start("scaffolded", root=clone)
     assert (experiment.path / "configs" / "scaffolded.yaml").is_file()
 
 
 @needs_git
 def test_a_scaffold_is_not_a_plan(clone: Path) -> None:
     """Validating an untouched scaffold must fail, or TODOs read as a plan."""
-    experiment = branch_mod.start("stub", root=clone)
+    experiment = plans_mod.start("stub", root=clone)
     with pytest.raises(PlanError, match="still the scaffold"):
         load_plan(experiment.plan_path)
-    with pytest.raises(BranchError, match="still the scaffold"):
-        branch_mod.build_report("stub", root=clone, run_integration=False)
+    with pytest.raises(WorkPlanError, match="still the scaffold"):
+        plans_mod.build_report("stub", root=clone, run_integration=False)
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +329,7 @@ def test_a_scaffold_is_not_a_plan(clone: Path) -> None:
 
 
 def test_status_on_the_uninstantiated_template(tmp_path: Path) -> None:
-    status = branch_mod.project_status(tmp_path, cwd=tmp_path)
+    status = plans_mod.project_status(tmp_path, cwd=tmp_path)
     assert not status.instantiated
     assert "harness init" in " ".join(status.next_steps)
 
@@ -341,14 +341,17 @@ def test_status_walks_the_whole_flow(clone: Path) -> None:
 
     # Instantiated, nothing started yet.
     (clone / "pyproject.toml").write_text('name = "myproj"\n', encoding="utf-8")
-    status = branch_mod.project_status(clone, cwd=clone)
-    assert status.instantiated and not status.branches
-    assert "harness branch" in " ".join(status.next_steps)
+    status = plans_mod.project_status(clone, cwd=clone)
+    assert status.instantiated and not status.plans
+    # No Planner registered yet, so that is the only step — the plan is the
+    # Planner's to start.
+    assert "harness create -n" in " ".join(status.next_steps)
+    assert "harness plan new" not in " ".join(status.next_steps)
 
     # Opened: the plan scaffold is the first thing in the way.
-    created = branch_mod.start("flow", root=clone)
+    created = plans_mod.start("flow", root=clone)
     wt = created.path
-    states = {e.name: e for e in branch_mod.project_status(clone, cwd=clone).branches}
+    states = {e.name: e for e in plans_mod.project_status(clone, cwd=clone).plans}
     assert states["flow"].state == "scaffold"
     assert "plan validate" in states["flow"].next_command
 
@@ -364,20 +367,20 @@ def test_status_walks_the_whole_flow(clone: Path) -> None:
 
     # A valid plan nobody has agreed to is a proposal, and the state says so —
     # this is the step where the Planner has to explain what it intends.
-    states = {e.name: e for e in branch_mod.project_status(clone, cwd=clone).branches}
+    states = {e.name: e for e in plans_mod.project_status(clone, cwd=clone).plans}
     assert states["flow"].state == "needs agreement"
     assert "plan approve" in states["flow"].next_command
     assert "the researcher runs this" in states["flow"].next_command
 
     plan_mod.record_approval(wt / "plans/flow.yaml", by="researcher")
-    states = {e.name: e for e in branch_mod.project_status(clone, cwd=clone).branches}
+    states = {e.name: e for e in plans_mod.project_status(clone, cwd=clone).plans}
     assert states["flow"].state == "not materialized"
     assert "materialize" in states["flow"].next_command
 
     # Materialized, nothing built.
     plan = load_plan(wt / "plans/flow.yaml")
     task_mod.materialize(plan, wt / "tasks")
-    states = {e.name: e for e in branch_mod.project_status(clone, cwd=clone).branches}
+    states = {e.name: e for e in plans_mod.project_status(clone, cwd=clone).plans}
     assert states["flow"].state == "building"
     assert "plan run" in states["flow"].next_command
 
@@ -386,7 +389,7 @@ def test_status_walks_the_whole_flow(clone: Path) -> None:
     data = yaml.safe_load(blocked.read_text(encoding="utf-8"))
     data["task"]["status"] = "blocked"
     blocked.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-    states = {e.name: e for e in branch_mod.project_status(clone, cwd=clone).branches}
+    states = {e.name: e for e in plans_mod.project_status(clone, cwd=clone).plans}
     assert states["flow"].state == "blocked"
 
     # Everything done: time to report, and only then to merge.
@@ -394,31 +397,31 @@ def test_status_walks_the_whole_flow(clone: Path) -> None:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         data["task"]["status"] = "done"
         path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-    status = branch_mod.project_status(clone, cwd=clone)
-    assert status.branches[0].state == "ready to report"
+    status = plans_mod.project_status(clone, cwd=clone)
+    assert status.plans[0].state == "ready to report"
     assert "harness report" in " ".join(status.next_steps)
     assert any("git merge" in step for step in status.next_steps)
 
 
 @needs_git
 def test_status_knows_which_worktree_you_are_in(clone: Path) -> None:
-    experiment = branch_mod.start("here", root=clone)
-    assert branch_mod.project_status(clone, cwd=clone).here is None
-    assert branch_mod.project_status(clone, cwd=experiment.path).here == "here"
+    experiment = plans_mod.start("here", root=clone)
+    assert plans_mod.project_status(clone, cwd=clone).here is None
+    assert plans_mod.project_status(clone, cwd=experiment.path).here == "here"
 
 
 @needs_git
 def test_status_reports_the_worker_adapter(clone: Path) -> None:
     """A manual adapter means no Workers are spawned; status must say so."""
     (clone / "pyproject.toml").write_text('name = "p"\n', encoding="utf-8")
-    branch_mod.start("w", root=clone)
-    assert branch_mod.project_status(clone, cwd=clone).worker_adapter == "manual"
+    plans_mod.start("w", root=clone)
+    assert plans_mod.project_status(clone, cwd=clone).worker_adapter == "manual"
 
     (clone / "configs" / "agents.yaml").write_text(
         "planner:\n  adapter: cli\n  command: 'true'\nworker:\n  adapter: cli\n  command: 'true'\n",
         encoding="utf-8",
     )
-    status = branch_mod.project_status(clone, cwd=clone)
+    status = plans_mod.project_status(clone, cwd=clone)
     assert status.worker_adapter == "cli"
     assert status.planner_tier["adapter"] == "cli"
 
@@ -429,24 +432,24 @@ def test_status_reports_the_worker_adapter(clone: Path) -> None:
 
 @needs_git
 def test_the_briefing_keeps_one_shape(clone: Path) -> None:
-    """Same sections in the same order, whatever state the branch is in.
+    """Same sections in the same order, whatever state the plan is in.
 
     A document that changes shape is one you must re-read; this one you
     re-run and skim.
     """
     sections = ["# Planner briefing:", "## The work", "## State", "## Next", "## Your role"]
 
-    branch_mod.start("shape", root=clone)
-    fresh = branch_mod.planner_brief("shape", root=clone)
+    plans_mod.start("shape", root=clone)
+    fresh = plans_mod.planner_brief("shape", root=clone)
 
-    created = branch_mod.find_branch("shape", clone)
+    created = plans_mod.find_plan("shape", clone)
     created.plan_path.write_text(
         "plan:\n  name: shape\n  goal: make the loader stop guessing\n"
         "  modules:\n    - id: m\n      brief: b\n      acceptance:\n"
         "        steps:\n          - id: s\n            run: 'true'\n            checks: []\n",
         encoding="utf-8",
     )
-    with_goal = branch_mod.planner_brief("shape", root=clone)
+    with_goal = plans_mod.planner_brief("shape", root=clone)
     assert "make the loader stop guessing" in with_goal
 
     for brief in (fresh, with_goal):
@@ -459,12 +462,12 @@ def test_the_briefing_keeps_one_shape(clone: Path) -> None:
 
 
 @needs_git
-def test_starting_a_branch_registers_its_planner(clone: Path) -> None:
-    """One branch, one Planner — so starting one is registering one."""
-    branch_mod.start("owned", root=clone)
-    # cmd_branch_start does the registering; do the same here.
-    branch_mod.register_planner("owned", "planner", root=clone, model="m", effort="high")
-    registered = branch_mod.planner_of(branch_mod.find_branch("owned", clone))
+def test_starting_a_plan_registers_its_planner(clone: Path) -> None:
+    """One plan, one Planner — so starting one is registering one."""
+    plans_mod.start("owned", root=clone)
+    # cmd_plan_new does the registering; do the same here.
+    plans_mod.register_planner("owned", "planner", root=clone, model="m", effort="high")
+    registered = plans_mod.planner_of(plans_mod.find_plan("owned", clone))
     assert registered["planner"] == "planner" and registered["model"] == "m"
 
 
@@ -472,9 +475,9 @@ def test_starting_a_branch_registers_its_planner(clone: Path) -> None:
 # --no-run must reuse evidence, not discard it
 
 
-def _finished_branch(clone: Path, name: str = "reuse") -> object:
-    """A branch whose single module is done and whose integration passes."""
-    experiment = branch_mod.start(
+def _finished_plan(clone: Path, name: str = "reuse") -> object:
+    """A plan whose single module is done and whose integration passes."""
+    experiment = plans_mod.start(
         name,
         root=clone,
     )
@@ -538,14 +541,14 @@ plan:
 @needs_git
 def test_no_run_reuses_the_last_integration_run(clone: Path) -> None:
     """Producing a report must not mean paying for the whole integration again."""
-    _finished_branch(clone)
+    _finished_plan(clone)
 
-    fresh = branch_mod.build_report("reuse", root=clone)
+    fresh = plans_mod.build_report("reuse", root=clone)
     assert fresh.integration == "PASSED"
     assert fresh.integration_ok
     assert [m.value for m in fresh.metrics] == [0.5]
 
-    reused = branch_mod.build_report("reuse", root=clone, run_integration=False)
+    reused = plans_mod.build_report("reuse", root=clone, run_integration=False)
     assert reused.integration.startswith("reused PASSED")
     assert reused.integration_ok
     # The numbers are really there, not "no integration run to read from".
@@ -555,11 +558,11 @@ def test_no_run_reuses_the_last_integration_run(clone: Path) -> None:
 
 @needs_git
 def test_no_run_with_nothing_to_reuse_says_so(clone: Path) -> None:
-    branch_mod.start(
+    plans_mod.start(
         "empty",
         root=clone,
     )
-    experiment = branch_mod.find_branch("empty", clone)
+    experiment = plans_mod.find_plan("empty", clone)
     (experiment.path / "plans").mkdir(exist_ok=True)
     experiment.plan_path.write_text(
         """
@@ -584,7 +587,7 @@ plan:
     (experiment.path / "configs" / "empty.yaml").write_text(
         "name: empty\nsteps:\n  - id: s\n    run: 'true'\n    checks: []\n", encoding="utf-8"
     )
-    report = branch_mod.build_report("empty", root=clone, run_integration=False)
+    report = plans_mod.build_report("empty", root=clone, run_integration=False)
     assert "no previous run" in report.integration
     assert not report.integration_ok
     assert not report.merge_ready
@@ -597,8 +600,8 @@ def test_reused_evidence_from_another_commit_blocks_the_merge(clone: Path) -> No
     Silently accepting it would let a report certify a commit the integration
     never ran against, which is the exact failure the reuse shortcut invites.
     """
-    experiment = _finished_branch(clone, "stale")
-    branch_mod.build_report("stale", root=clone)  # produces the run to reuse
+    experiment = _finished_plan(clone, "stale")
+    plans_mod.build_report("stale", root=clone)  # produces the run to reuse
 
     # The code moves on after that run.
     exp_root = experiment.path
@@ -608,7 +611,7 @@ def test_reused_evidence_from_another_commit_blocks_the_merge(clone: Path) -> No
         ["git", "commit", "-qm", "move on"], cwd=exp_root, check=True, capture_output=True
     )
 
-    report = branch_mod.build_report("stale", root=clone, run_integration=False)
+    report = plans_mod.build_report("stale", root=clone, run_integration=False)
     assert report.integration_ok, "the reused run itself did pass"
     assert report.integration_stale
     assert not report.merge_ready
@@ -619,16 +622,48 @@ def test_reused_evidence_from_another_commit_blocks_the_merge(clone: Path) -> No
 @needs_git
 def test_a_plan_approved_by_its_own_planner_is_flagged(clone: Path) -> None:
     """Self-approval passes the check and defeats it, so the report says so."""
-    experiment = _finished_branch(clone, "selfapproved")
+    experiment = _finished_plan(clone, "selfapproved")
     plan_mod.record_approval(experiment.plan_path, by="planner")
-    branch_mod.register_planner(
-        "selfapproved", "planner", root=clone, model="m", require_model=True
-    )
+    plans_mod.register_planner("selfapproved", "planner", root=clone, model="m", require_model=True)
 
-    report = branch_mod.build_report("selfapproved", root=clone, run_integration=False)
+    report = plans_mod.build_report("selfapproved", root=clone, run_integration=False)
     assert any("is the Planner itself" in c for c in report.caveats)
 
     # A different approver is not flagged.
     plan_mod.record_approval(experiment.plan_path, by="researcher")
-    report = branch_mod.build_report("selfapproved", root=clone, run_integration=False)
+    report = plans_mod.build_report("selfapproved", root=clone, run_integration=False)
     assert not any("is the Planner itself" in c for c in report.caveats)
+
+
+# ---------------------------------------------------------------------------
+# addressing a plan: the name is the handle, the path still works
+
+
+@needs_git
+def test_a_plan_is_addressable_by_name(clone: Path) -> None:
+    """`plan validate fix-loader`, not `plan validate plans/fix-loader.yaml`.
+
+    A plan lives in its own worktree, so the path is something the reader has to
+    reconstruct. The name is what they already have.
+    """
+    created = plans_mod.start("named", root=clone)
+    assert plans_mod.resolve_plan_path("named", clone) == created.plan_path
+
+    # A path stays a path — a Planner inside its own worktree has one, and the
+    # demo plan belongs to no worktree.
+    as_path = str(created.plan_path)
+    assert plans_mod.resolve_plan_path(as_path, clone) == Path(as_path)
+
+    # An unknown name resolves under the root's own plans dir rather than
+    # raising: the error the caller gets should be about the missing plan file.
+    unknown = plans_mod.resolve_plan_path("ghost", clone)
+    assert unknown.name == "ghost.yaml" and not unknown.is_file()
+
+
+@needs_git
+def test_plan_state_names_commands_by_plan_name(clone: Path) -> None:
+    """The command `status` prints must be runnable from where it is read."""
+    plans_mod.start("addressed", root=clone)
+    state = plans_mod.project_status(clone, cwd=clone).plans[0]
+    assert "addressed" in state.next_command
+    assert "plans/addressed.yaml" not in state.next_command
