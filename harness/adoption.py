@@ -234,7 +234,7 @@ def brief_lines(adoption: Adoption, root: str | Path = ".") -> list[str]:
         "",
         "None of that code is covered by a contract, an acceptance check, or a plan.",
         "Making it verifiable is work like any other work: settle the question with",
-        "the researcher, decompose it, give each module a contract and acceptance,",
+        "the user, decompose it, give each module a contract and acceptance,",
         "and prove it. **How to decompose it is yours to decide** — nothing here is a",
         "prescribed pipeline, and a codebase you have read beats a rule you have not.",
         "",

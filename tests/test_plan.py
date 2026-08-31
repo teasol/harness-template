@@ -5,13 +5,29 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from harness.plan import PlanError, load_plan
 
 
 def write_plan(tmp_path: Path, data: str) -> Path:
+    """Write a plan fixture, plus the integration spec every plan must declare.
+
+    ``plan.integration.spec`` is required, so each fixture gets a trivial
+    companion spec at ``configs/p.yaml``, and the key is added when the fixture
+    did not write one. Tests about integration itself pass their own value.
+    """
     path = tmp_path / "plan.yaml"
     path.write_text(data, encoding="utf-8")
+    spec_dir = tmp_path / "configs"
+    spec_dir.mkdir(exist_ok=True)
+    (spec_dir / "p.yaml").write_text(
+        "name: p\nsteps:\n  - id: ok\n    run: 'true'\n", encoding="utf-8"
+    )
+    raw = yaml.safe_load(data)
+    if "integration" not in (raw or {}).get("plan", {}):
+        raw["plan"]["integration"] = {"spec": "configs/p.yaml"}
+        path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return path
 
 
@@ -189,6 +205,25 @@ plan:
         load_plan(path)
 
 
+def test_integration_spec_required(tmp_path: Path) -> None:
+    """A plan without an integration spec is not a plan."""
+    path = tmp_path / "plan.yaml"
+    path.write_text(
+        """
+plan:
+  name: p
+  goal: g
+  modules:
+    - id: a
+      brief: b
+      acceptance: {steps: [{id: s, run: "true"}]}
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(PlanError, match="integration"):
+        load_plan(path)
+
+
 def test_goal_required(tmp_path: Path) -> None:
     path = write_plan(
         tmp_path,
@@ -228,10 +263,10 @@ def test_approval_is_tied_to_the_plans_contents(tmp_path: Path) -> None:
     from harness.plan import approval_status, record_approval
 
     path = write_plan(tmp_path, VALID_PLAN)
-    record_approval(path, by="researcher", note="looks right")
+    record_approval(path, by="user", note="looks right")
     approved, reason = approval_status(path)
     assert approved
-    assert "researcher" in reason
+    assert "user" in reason
 
     path.write_text(VALID_PLAN + "\n# a module snuck in later\n", encoding="utf-8")
     approved, reason = approval_status(path)
@@ -275,11 +310,11 @@ def test_plan_run_refuses_without_approval(tmp_path: Path, capsys) -> None:
     # And it says what approving would commit you to.
     assert "of agent time" in err
 
-    record_approval(path, by="researcher")
+    record_approval(path, by="user")
     rc = main(
         ["plan", "run", str(path), "--tasks-dir", str(tmp_path / "tasks"), "--root", str(tmp_path)]
     )
-    assert "approved by researcher" in capsys.readouterr().out
+    assert "approved by user" in capsys.readouterr().out
 
 
 def test_executor_accepts_the_older_names(tmp_path: Path) -> None:
@@ -414,7 +449,7 @@ def test_plan_run_stops_at_the_module_that_is_yours(tmp_path: Path, capsys) -> N
     path = write_plan(tmp_path, body)
     plan = load_plan(path)
     materialize(plan, tmp_path / "tasks")
-    record_approval(path, by="researcher")
+    record_approval(path, by="user")
 
     rc = main(
         ["plan", "run", str(path), "--tasks-dir", str(tmp_path / "tasks"), "--root", str(tmp_path)]

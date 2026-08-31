@@ -221,7 +221,7 @@ def brief_lines(context: ProjectContext, root: str | Path = ".") -> list[str]:
         lines += [
             "",
             "> **Registered but missing** — these paths do not exist, so verify before",
-            "> relying on them, and tell the researcher:",
+            "> relying on them, and tell the user:",
             "",
         ]
         lines += [f"> - {gap}" for gap in gaps]

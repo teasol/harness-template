@@ -127,7 +127,7 @@ def build_config(
         )
     resolved = command if command is not None else platform.command
     if session and command is None and platform.session_command:
-        # Attaching an existing session: the researcher already opened one and
+        # Attaching an existing session: the user already opened one and
         # wants this tier to continue in it rather than start fresh.
         resolved = platform.session_command
     if not resolved.strip():

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The integration spec is now required, and the "optional but merge-blocking"
+  contradiction is gone.** Every plan must declare `plan.integration.spec`; a
+  plan without one is invalid at `plan validate`, and the report machinery
+  raises rather than ever producing a contradictory verdict. The scaffold has
+  always written one, so existing plans are unaffected.
+- **The human role is now "user", not "researcher".** The engine's guarantees —
+  acceptance, integration, determinism — are about code and the artifacts it
+  produces, and verifying a full research or training run is hours of GPU time
+  the harness should not spend on repeat. The role that talks to the Planner,
+  approves plans, and decides merges is therefore named for what it is in every
+  project: the user. Docs, agent contracts, report text, and scaffolded
+  templates all use the new word; existing plan/task/approval files are
+  unaffected (the approver name is free text).
+
 ## [0.6.0] - 2026-08-31
 
 **Behaviour change.** A module with no `executor` now belongs to the Main Worker
@@ -181,9 +197,9 @@ way into. Commands and the plan schema changed; see *Removed* for the mapping.
 
 - **A plan now has to be explained before it can be built.** The Planner's
   workflow went draft → materialize → dispatch, so nothing ever asked it to say
-  what it intended: the question was agreed with the researcher, the plan was
+  what it intended: the question was agreed with the user, the plan was
   not. A valid but unapproved plan is now its own state, `needs agreement`, and
-  the next command it names is the researcher's `plan approve` rather than the
+  the next command it names is the user's `plan approve` rather than the
   Planner's `materialize`. The role contract gained the step, spelling out what
   the explanation has to cover — what the plan establishes, each module and who
   builds it, why this decomposition over the obvious alternative, the cost, and
@@ -245,7 +261,7 @@ end, and each entry below fixes something that went wrong while doing it.
 
 ### Changed
 
-- **Two tiers, not three.** Tier 1 is the researcher and the Planner settling
+- **Two tiers, not three.** Tier 1 is the user and the Planner settling
   the question and deciding the merge. Tier 2 is one experiment branch, where
   **the Planner is also the Main Worker**: it implements the core work itself
   and delegates routine bulk — long mechanical coding, log parsing — to a
@@ -427,7 +443,7 @@ went wrong doing it rather than something that looked wrong on paper.
   lives in the main repository, so every experiment under one Planner appends
   to the same memory rather than to a copy that dies with the branch. Notes
   carry an explicit staleness warning; durable policy belongs in
-  `project.yaml`, which the researcher owns.
+  `project.yaml`, which the user owns.
 - **`plan approve`, and `plan run` requires it.** A plan is a proposal until a
   person agrees to it. Approval is fingerprinted against the plan's contents,
   so editing a plan lapses its approval. Approving prints what it commits you
@@ -522,7 +538,7 @@ went wrong doing it rather than something that looked wrong on paper.
   sharper by talking it through, so the normal path is now: open the
   experiment, activate a Planner, agree on what is actually being asked, and
   record it when it settles. With none recorded, the Planner's briefing says so
-  and instructs it to establish the question with the researcher before
+  and instructs it to establish the question with the user before
   planning or spawning any Worker. `planner run` still refuses without one,
   since a spawned Planner has nobody to ask and would otherwise invent a goal.
 
@@ -588,7 +604,7 @@ went wrong doing it rather than something that looked wrong on paper.
   It covers every stage: not yet instantiated, no experiments, plan still a
   scaffold, tasks not materialized, modules building, a worker blocked, ready
   to report. A newcomer never has to know where they are. Also `make status`.
-- A **getting-started walkthrough at the top of `README.md`** for a researcher
+- A **getting-started walkthrough at the top of `README.md`** for a user
   who has never seen this repository: question in, merge decision out.
 
 - **Worker adapters (Tier 2 → Tier 3).** `harness task run --id <id>` invokes a
@@ -627,15 +643,15 @@ went wrong doing it rather than something that looked wrong on paper.
 - **Experiment reports.** `exp report` measures the spine itself (integration
   result, per-task acceptance re-verification, determinism, the commit to
   merge, and an explicit *Not verified* list) and extracts the metrics the
-  researcher asked for from real run artifacts. Exits non-zero unless
+  user asked for from real run artifacts. Exits non-zero unless
   merge-ready. `--save` writes the report into the branch. The harness never
-  merges: that decision stays with the researcher.
-- **`report:` section in plans.** The researcher states what they want to see;
+  merges: that decision stays with the user.
+- **`report:` section in plans.** The user states what they want to see;
   the Planner declares *where* each number lives; the harness supplies the
   value. An agent can no longer report a result it was not made to measure.
 - Report `source`/`artifacts` paths must stay inside the experiment (no
   absolute paths, no `..`), so every report can be judged on its own terms.
-  Cross-experiment comparison belongs to the researcher.
+  Cross-experiment comparison belongs to the user.
 - `plan validate` rejects a deliverable claimed by more than one module.
 - `make experiments`; `docs/experiments.md`.
 - `harness plan check` — validates every plan in `plans/` and flags drift

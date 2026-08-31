@@ -106,7 +106,7 @@ def test_planner_defaults_to_the_reasoning_tier() -> None:
 
 
 def test_attaching_a_session_switches_the_command(tmp_path: Path) -> None:
-    """A researcher with a session already open can hand it to a tier."""
+    """A user with a session already open can hand it to a tier."""
     platform = load_platforms(root=".")["claude"]
     config = build_config(platform, model="opus", effort="high", label="planner", session="abc-123")
     assert config.session == "abc-123"

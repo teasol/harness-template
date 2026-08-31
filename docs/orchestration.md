@@ -3,7 +3,7 @@
 > New here? Start with the walkthrough at the top of [README.md](../README.md).
 
 This document covers Tier 2 — what happens inside one plan. Tier 1 — the
-dialogue with the researcher, and the report they read to decide a merge — is in
+dialogue with the user, and the report they read to decide a merge — is in
 [plans.md](plans.md).
 
 The Planner is also the **Main Worker**, and it does the building: `executor`
@@ -73,7 +73,7 @@ plan:
   goal: >                  # required, one paragraph
     ...
   description: ...         # optional
-  integration:             # optional: spec run after ALL modules are done
+  integration:             # required: spec run after ALL modules are done
     spec: configs/my-plan.yaml
   modules:                 # required, non-empty; forms a DAG
     - id: module-a         # unique
@@ -98,7 +98,7 @@ plan:
 Validation enforces: unique ids, resolvable `depends_on`, acyclic DAG,
 non-empty brief and acceptance per module, known check types, deliverables
 owned by exactly one module, report paths that stay inside the plan, and
-(if set) an existing integration spec file.
+an existing integration spec file.
 
 ### Who builds a module: `executor`
 
@@ -162,7 +162,7 @@ until the plan has been approved, and prints what approving would commit you to
 — the module list and the worst-case agent time:
 
 ```bash
-python -m harness plan approve plans/my-plan.yaml --by researcher
+python -m harness plan approve plans/my-plan.yaml --by user
 python -m harness plan run plans/my-plan.yaml
 ```
 

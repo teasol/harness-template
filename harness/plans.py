@@ -92,7 +92,7 @@ class MetricValue:
 
 @dataclasses.dataclass
 class PlanReport:
-    """What the researcher reads to decide whether to merge."""
+    """What the user reads to decide whether to merge."""
 
     name: str
     git_branch: str
@@ -389,7 +389,7 @@ def build_report(
     run_integration: bool = True,
     check_determinism: bool = False,
 ) -> PlanReport:
-    """Assemble the researcher's decision aid for one plan.
+    """Assemble the user's decision aid for one plan.
 
     The spine — integration result, task acceptance, determinism, the commit
     to merge — is measured here, not narrated by an agent. The requested
@@ -463,9 +463,11 @@ def build_report(
     # --- integration: does the assembled whole work? ---
     run_dir: Path | None = None
     if plan.integration is None:
-        report.integration = "no integration spec declared"
-        report.caveats.append("plan declares no integration spec — the whole was never verified")
-    elif run_integration:
+        # Defensive: load_plan requires an integration spec, so this branch is
+        # unreachable through normal paths — but never let a missing spec
+        # produce a contradictory report; fail loudly instead.
+        raise PlanError("plan has no integration spec — every plan must declare one")
+    if run_integration:
         spec_path = _integration_path(plan_root, plan.integration)
         try:
             spec = load_spec(spec_path)
@@ -509,7 +511,7 @@ def build_report(
                 )
 
     # --- determinism (opt-in: a full re-run can be expensive) ---
-    if check_determinism and plan.integration is not None:
+    if check_determinism:
         try:
             outcome = reproduce(
                 load_spec(_integration_path(plan_root, plan.integration)),
@@ -523,7 +525,7 @@ def build_report(
         except (ReproduceError, SpecError) as exc:
             report.determinism = f"could not check: {exc}"
             report.caveats.append(f"determinism unverified: {exc}")
-    elif plan.integration is not None:
+    else:
         report.caveats.append("determinism not checked (pass --determinism to run the gate)")
 
     report.metrics = _extract_metrics(plan, run_dir)
@@ -563,7 +565,7 @@ def build_report(
             "--register <label> --model <model>`."
         )
 
-    # Every blocker becomes a stated reason: a verdict the researcher cannot
+    # Every blocker becomes a stated reason: a verdict the user cannot
     # explain is not a decision aid.
     blockers: list[str] = []
     if not report.integration_ok:
@@ -655,7 +657,7 @@ def report_markdown(report: PlanReport) -> str:
     lines += [
         "## Verdict",
         "",
-        f"**{verdict}** — merging is the researcher's call; the harness only reports.",
+        f"**{verdict}** — merging is the user's call; the harness only reports.",
         "",
         f"- Git branch: `{report.git_branch}`",
         f"- Merge commit: `{commit}`",
@@ -912,7 +914,7 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "the next. Either way the module keeps its contract and its acceptance —",
         "what changes is who writes the code, never whether it is checked.",
         "",
-        "You never merge — that is the researcher's decision.",
+        "You never merge — that is the user's decision.",
         "",
         f"- Worktree: {plan_root}",
         f"- Git branch: {work.git_branch}",
@@ -949,7 +951,7 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
         "",
         f"Run `harness report {work.name}`. It exits non-zero until the",
         "plan is genuinely merge-ready. Then stop and hand back to the",
-        "researcher — do not merge.",
+        "user — do not merge.",
         "",
     ]
     return "\n".join(lines)
@@ -1099,8 +1101,8 @@ def plan_state(item: WorkPlan) -> PlanState:
     if not approved:
         return state(
             "needs agreement",
-            f"{why} — explain it to the researcher, then they approve",
-            f"plan approve {name} --by <researcher>   # the researcher runs this, not you",
+            f"{why} — explain it to the user, then they approve",
+            f"plan approve {name} --by <user>   # the user runs this, not you",
         )
 
     board = {t.id: t for t in load_board(get_tasks_dir(item.path))}

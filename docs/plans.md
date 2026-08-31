@@ -4,19 +4,19 @@
 
 A **plan** is one piece of work — a series of module tasks — developed on its own
 git branch in its own worktree. The Planner works there from start to finish; the
-researcher reads the resulting report and decides whether to merge.
+user reads the resulting report and decides whether to merge.
 
 A plan is also the only unit of work here. There used to be a second concept
 wrapped around it, called a *branch*, one-to-one with the plan and named after
 the git feature underneath — three meanings for one thing. Now the plan is the
 work, and its git branch and worktree are where that work happens.
 
-The harness never merges. Which plan enters the record is the researcher's
+The harness never merges. Which plan enters the record is the user's
 judgement — it is the one thing here that is deliberately not automated.
 
 ```mermaid
 flowchart TD
-    R["Researcher (Tier 1)"] -->|"instruction"| E["harness plan new<br/>git branch + worktree"]
+    R["User (Tier 1)"] -->|"instruction"| E["harness plan new<br/>git branch + worktree"]
     E --> P["Planner = Main Worker (Tier 2)<br/>writes plans/&lt;name&gt;.yaml, then builds it"]
     P -->|"materialize"| T["tasks/*.task.yaml"]
     T -->|"executor: main — the default"| P
@@ -25,7 +25,7 @@ flowchart TD
     T -->|"all done"| I["integration spec"]
     I --> RPT["harness report"]
     RPT -->|"verdict + metrics"| R
-    R -->|"researcher's call"| M["git merge &lt;name&gt;"]
+    R -->|"the user's call"| M["git merge &lt;name&gt;"]
 ```
 
 ## The goal
@@ -40,7 +40,7 @@ Until the goal is written the plan is a scaffold, and `plan validate` refuses it
 briefing opens by saying exactly that, and names agreeing the work as its first
 job.
 
-**Starting a plan is the Planner's command, not the researcher's.** You say what
+**Starting a plan is the Planner's command, not the user's.** You say what
 you want done; it agrees the shape with you and runs:
 
 ```bash
@@ -75,7 +75,7 @@ together; the door stays open.
 | `harness plan new <name> --planner <p> [--base main]` | Start plan `<name>`: git branch + worktree, scaffolded `plans/<name>.yaml` and its integration spec. The Planner runs this |
 | `harness plans` (or `harness plan list`) | Every plan in flight, with its git branch and worktree |
 | `harness plan validate\|approve\|materialize\|status\|run <name>` | The plan's own lifecycle — see [orchestration.md](orchestration.md). Each takes the plan's **name**, or a path to its YAML |
-| `harness report <name> [--no-run] [--determinism] [--save]` | Build the researcher's decision aid; exits non-zero unless merge-ready |
+| `harness report <name> [--no-run] [--determinism] [--save]` | Build the user's decision aid; exits non-zero unless merge-ready |
 | `harness plan drop <name> [--force]` | Remove the worktree; **the git branch is kept** — it is the record of the attempt |
 
 Worktrees default to `.worktrees/<name>` inside the repo and are gitignored.
@@ -179,7 +179,7 @@ every plan under one Planner appends to the same memory.
 
 Notes are that Planner's operational findings, carried forward with an explicit
 warning that they may have gone stale. Durable project policy belongs in
-`project.yaml` instead, which the researcher owns — one is a lab notebook, the
+`project.yaml` instead, which the user owns — one is a lab notebook, the
 other is the rules.
 
 ## Registering a Planner
@@ -318,7 +318,7 @@ acceptance re-verification, determinism, the exact commit to merge, and a
 `Not verified` section — all produced by the harness. An agent cannot assert
 that its plan worked; the harness decides.
 
-**The payload is what the researcher asked for.** The researcher states what
+**The payload is what the user asked for.** The user states what
 they want to see when instructing the Planner. The Planner records *where each
 number lives*; the harness extracts the value from the artifact the run
 actually produced. The Planner chooses the mapping and never supplies a value.
@@ -344,10 +344,10 @@ A report may only draw on **its own** plan's artifacts. `source` and
 ```
 error: report metric 'acc' source must stay inside the plan:
 '../baseline/results/stats.json' escapes via '..'.
-Comparing plans is the researcher's job, not the plan's.
+Comparing plans is the user's job, not the plan's.
 ```
 
-Comparing plans belongs to Tier 1: the researcher collects finished reports and
+Comparing plans belongs to Tier 1: the user collects finished reports and
 weighs them. A plan that reaches into another cannot be judged on its own terms,
 so the harness refuses to produce one. Every report is
 also written as `report.json`, which makes that collection straightforward.
@@ -358,7 +358,7 @@ also written as `report.json`, which makes that collection straightforward.
 every task's acceptance still passes, the worktree is clean, and determinism
 (if checked) held. Anything short of that prints `NOT READY` and exits `1`,
 and **every** blocker is stated under `Why not ready` — a verdict the
-researcher cannot explain is not a decision aid.
+user cannot explain is not a decision aid.
 
 Progress is counted against the plan's own modules. A `tasks/` directory can
 hold task files from other plans; counting those would report a plan complete
@@ -372,7 +372,7 @@ lives only under `results/` and is gitignored.
 ## Typical flow
 
 ```bash
-# Researcher: register the Planner, then talk to it
+# User: register the Planner, then talk to it
 python -m harness create -n my-planner
 
 # Planner: once you agree what the work is, start the plan
@@ -383,8 +383,8 @@ python -m harness plan new sparse-attn --planner my-planner
 #  TODOs first — plan validate refuses a scaffold)
 python -m harness plan validate sparse-attn
 
-# Researcher approves what the Planner explained
-python -m harness plan approve sparse-attn --by <researcher>
+# User approves what the Planner explained
+python -m harness plan approve sparse-attn --by <user>
 
 # Planner materializes and runs it; Workers go one at a time
 python -m harness plan materialize sparse-attn
@@ -393,7 +393,7 @@ python -m harness plan run sparse-attn
 # Planner closes the loop, then hands back
 python -m harness report sparse-attn --determinism --save
 
-# Researcher decides
+# User decides
 git merge sparse-attn
 ```
 

@@ -356,11 +356,16 @@ def test_the_planner_can_take_over_a_module_a_sub_worker_failed(tmp_path: Path) 
     from harness.task import complete, materialize
 
     (tmp_path / "src").mkdir()
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "t.yaml").write_text(
+        "name: t\nsteps:\n  - id: ok\n    run: 'true'\n", encoding="utf-8"
+    )
     plan_path = tmp_path / "plan.yaml"
     body = """
 plan:
   name: t
   goal: prove the take-over path works
+  integration: {{spec: configs/t.yaml}}
   modules:
     - id: hard
       title: hard one

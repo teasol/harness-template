@@ -195,7 +195,7 @@ def cmd_plan_validate(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     order = " → ".join(plan.topological_order())
-    integration = plan.integration or "(none)"
+    integration = plan.integration
     print(f"[{plan.name}] valid — {len(plan.modules)} module(s)")
     print(f"  order:      {order}")
     print(f"  integration: {integration}")

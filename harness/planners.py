@@ -16,7 +16,7 @@ So a Planner is a thing with a name and a memory, and plans hang off it:
 The registry lives in the *main* repository, not in a plan's worktree, so
 every plan under a Planner reads and appends to the same memory. Notes
 are the Planner's own operational findings; durable facts about the project
-belong in ``project.yaml`` (see :mod:`harness.project`), which the researcher
+belong in ``project.yaml`` (see :mod:`harness.project`), which the user
 owns. The split matters: one is a lab notebook, the other is policy.
 """
 

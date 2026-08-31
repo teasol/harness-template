@@ -86,6 +86,7 @@ MINIMAL_PLAN = """
 plan:
   name: minimal
   goal: g
+  integration: {{spec: configs/minimal.yaml}}
   report:
     question: q
     metrics:
@@ -105,6 +106,10 @@ def test_plan_report_accepts_metric_path_syntax(tmp_path: Path) -> None:
     path = tmp_path / "plan.yaml"
     path.write_text(
         MINIMAL_PLAN.format(metric_line="        metric: results.loss\n"), encoding="utf-8"
+    )
+    (tmp_path / "configs").mkdir(exist_ok=True)
+    (tmp_path / "configs" / "minimal.yaml").write_text(
+        "name: minimal\nsteps:\n  - id: ok\n    run: 'true'\n", encoding="utf-8"
     )
     assert load_plan(path).report.metrics[0].metric == "results.loss"
 
@@ -291,7 +296,7 @@ def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
 
 @needs_git
 def test_not_ready_always_states_a_reason(clone: Path) -> None:
-    """A verdict the researcher cannot explain is not a decision aid."""
+    """A verdict the user cannot explain is not a decision aid."""
     experiment = plans_mod.start("unexplained", root=clone)
     wt = experiment.path
     shutil.copy(DEMO_PLAN, wt / "plans/unexplained.yaml")
@@ -370,9 +375,9 @@ def test_status_walks_the_whole_flow(clone: Path) -> None:
     states = {e.name: e for e in plans_mod.project_status(clone, cwd=clone).plans}
     assert states["flow"].state == "needs agreement"
     assert "plan approve" in states["flow"].next_command
-    assert "the researcher runs this" in states["flow"].next_command
+    assert "the user runs this" in states["flow"].next_command
 
-    plan_mod.record_approval(wt / "plans/flow.yaml", by="researcher")
+    plan_mod.record_approval(wt / "plans/flow.yaml", by="user")
     states = {e.name: e for e in plans_mod.project_status(clone, cwd=clone).plans}
     assert states["flow"].state == "not materialized"
     assert "materialize" in states["flow"].next_command
@@ -443,8 +448,12 @@ def test_the_briefing_keeps_one_shape(clone: Path) -> None:
     fresh = plans_mod.planner_brief("shape", root=clone)
 
     created = plans_mod.find_plan("shape", clone)
+    (created.path / "configs" / "shape.yaml").write_text(
+        "name: shape\nsteps:\n  - id: ok\n    run: 'true'\n", encoding="utf-8"
+    )
     created.plan_path.write_text(
         "plan:\n  name: shape\n  goal: make the loader stop guessing\n"
+        "  integration: {spec: configs/shape.yaml}\n"
         "  modules:\n    - id: m\n      brief: b\n      acceptance:\n"
         "        steps:\n          - id: s\n            run: 'true'\n            checks: []\n",
         encoding="utf-8",
@@ -630,7 +639,7 @@ def test_a_plan_approved_by_its_own_planner_is_flagged(clone: Path) -> None:
     assert any("is the Planner itself" in c for c in report.caveats)
 
     # A different approver is not flagged.
-    plan_mod.record_approval(experiment.plan_path, by="researcher")
+    plan_mod.record_approval(experiment.plan_path, by="user")
     report = plans_mod.build_report("selfapproved", root=clone, run_integration=False)
     assert not any("is the Planner itself" in c for c in report.caveats)
 

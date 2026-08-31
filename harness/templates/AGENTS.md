@@ -18,10 +18,10 @@ keep using the harness for anything that needs to be trusted or reproduced.
 
 Work happens in **two tiers**.
 
-**Tier 1 — research strategy and decision.** The researcher and the Planner
+**Tier 1 — research strategy and decision.** The user and the Planner
 talk: what is being asked, what would count as an answer, what gets reported.
-The researcher decides what gets merged. **Never merge a plan's branch
-yourself** — reporting is the Planner's job, merging is the researcher's.
+The user decides what gets merged. **Never merge a plan's branch
+yourself** — reporting is the Planner's job, merging is the user's.
 
 **Tier 2 — serial execution**, one dedicated plan per piece of work. The Planner
 is also the **Main Worker**, and it does the building: it works through the

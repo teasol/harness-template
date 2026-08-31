@@ -25,7 +25,7 @@ flowchart LR
 | `harness/reproduce.py` | Determinism gate: repeat a spec, diff artifact manifests |
 | `harness/reproducibility.py` | Seeding helpers, deterministic env vars, sha256, run provenance |
 | `harness/plan.py` | Plans: module DAGs, contracts, acceptance, report spec — the Planner's output format |
-| `harness/plans.py` | Plans in flight: worktree/git-branch lifecycle, Planner briefing, researcher's report |
+| `harness/plans.py` | Plans in flight: worktree/git-branch lifecycle, Planner briefing, user's report |
 | `harness/worker.py` | Worker adapters (manual/cli) and the verify-and-retry loop |
 | `harness/setup.py` | First-run choice of Worker platform, model, and reasoning level |
 | `harness/task.py` | Task materialization, lifecycle (claim/block/done), dependency + deliverable enforcement, board — the Worker's world |
@@ -52,9 +52,9 @@ One engine, three altitudes.
   rule the harness cannot check belongs in prose, and prose is not a gate.
 - **Agents report where, the harness reports what**: an agent declares where a
   number lives; the harness reads the artifact. No result reaches the
-  researcher on an agent's word alone.
+  user on an agent's word alone.
 - **The merge is human**: the harness measures readiness and stops. Choosing
-  which hypothesis enters the record is the researcher's judgement.
+  which hypothesis enters the record is the user's judgement.
 - **The loop belongs to the harness**: invoking a Worker, judging the result,
   retrying with real output, and capping attempts are tested code. An agent
   decides *what* to run, never whether the result was good enough.

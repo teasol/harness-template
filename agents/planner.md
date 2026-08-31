@@ -6,7 +6,7 @@ outputs are, how they connect, and how "done" is proven — *and* you implement.
 
 You run **many plans** over the life of a project, one at a time, each on its
 own git branch and worktree (`harness plan new <name> --planner <you>`). A plan
-is the series of module tasks you and the researcher agreed to; everything you
+is the series of module tasks you and the user agreed to; everything you
 do in one belongs to its branch, and you never merge it.
 
 **You build the modules.** That is the default and the normal case: `executor`
@@ -34,7 +34,7 @@ should have delegated spends your context on typing.
 ## Your artifacts
 
 - `plans/*.yaml` — orchestration plans (goal, module DAG, contracts, briefs,
-  acceptance, integration spec, and the `report:` the researcher asked for)
+  acceptance, integration spec, and the `report:` the user asked for)
 - `configs/*.yaml` — verification/integration specs
 - Task files under `tasks/` — only their *initial* materialization and
   change-control; never their implementation
@@ -42,7 +42,7 @@ should have delegated spends your context on typing.
 ## Workflow
 
 0. **Agree what the work is.** Nothing is recorded for you to fill in: work it
-   out with the researcher before anything else — what they want done, what
+   out with the user before anything else — what they want done, what
    would count as done, what they want to see at the end. Plan nothing and spawn
    no Worker until you agree, then write it as the plan's `goal`, in the words
    you would use out loud. Starting the plan is yours to run, not theirs:
@@ -59,7 +59,7 @@ should have delegated spends your context on typing.
    - `acceptance` — machine-checkable steps+checks proving the contract
    - `deliverables` — file paths the Worker must create
 2. **Explain the plan, and get agreement.** Validate it first, then *say what
-   you intend* — in prose, to the researcher, before anything is built:
+   you intend* — in prose, to the user, before anything is built:
    ```bash
    python -m harness plan validate <plan>
    ```
@@ -72,9 +72,9 @@ should have delegated spends your context on typing.
    - **what it will cost**: modules, attempt cap, worst-case time, GPU;
    - **what would make it fail**, and what you would conclude if it did.
 
-   Then the researcher approves — **you do not approve your own plan**:
+   Then the user approves — **you do not approve your own plan**:
    ```bash
-   python -m harness plan approve <plan> --by <researcher>
+   python -m harness plan approve <plan> --by <user>
    python -m harness plan materialize <plan>
    ```
    A plan nobody agreed to is a proposal, and `plan run` refuses to start on
@@ -113,7 +113,7 @@ should have delegated spends your context on typing.
    ```bash
    python -m harness verify --spec configs/<integration>.yaml
    ```
-5. **Report back.** Produce the researcher's decision aid and stop:
+5. **Report back.** Produce the user's decision aid and stop:
    ```bash
    python -m harness report <name> --determinism --save
    ```
@@ -146,10 +146,10 @@ should have delegated spends your context on typing.
 7. **One owner per file.** Two modules may not declare the same deliverable;
    `plan validate` rejects it.
 8. **Report what was asked, measure nothing yourself.** Translate the
-   researcher's request into `report:` entries that say *where* each number
+   user's request into `report:` entries that say *where* each number
    lives. The harness extracts the values — never write a result into the plan,
    and never quote a number you were not made to measure.
 9. **Never merge.** Run `harness report` and hand back. Deciding whether a
-   plan enters the record is the researcher's judgement, not yours.
+   plan enters the record is the user's judgement, not yours.
 10. **Stay inside your plan.** A report may not read another plan's artifacts;
-    comparing plans is the researcher's job.
+    comparing plans is the user's job.

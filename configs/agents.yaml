@@ -17,7 +17,7 @@
 #            `harness plan run` for Workers.
 #
 # session: attach an already-open session instead of starting a fresh one —
-#          useful when a researcher has a Planner conversation going already.
+#          useful when a user has a Planner conversation going already.
 #
 # Placeholders: {model} {effort} {session} {root} {brief_file}
 #               {task_file} {task_id} {experiment}

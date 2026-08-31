@@ -6,8 +6,8 @@ machine-checkable acceptance criteria. Plans are materialized into
 self-contained task files (see :mod:`harness.task`) that Worker agents
 execute one at a time, each in isolation.
 
-A plan also declares what it *reports* back to the researcher
-(``report:``). The researcher states what they want to see when instructing
+A plan also declares what it *reports* back to the user
+(``report:``). The user states what they want to see when instructing
 the Planner; the Planner records **where** each number comes from, and the
 harness extracts the values from real run artifacts. An agent never narrates
 a result it was not made to measure.
@@ -116,9 +116,9 @@ class MetricRef:
 
 @dataclasses.dataclass
 class Report:
-    """What this plan reports back to the researcher.
+    """What this plan reports back to the user.
 
-    Free-form by design: the researcher says what they want when they give
+    Free-form by design: the user says what they want when they give
     the instruction. Self-contained by rule: a report may only draw on this
     plan's own artifacts, never another plan's, so it can be
     judged on its own terms.
@@ -276,9 +276,12 @@ def load_plan(path: str | Path) -> Plan:
     if not isinstance(goal, str) or not goal.strip():
         raise PlanError("'plan.goal' must be a non-empty string")
 
-    integration = data.get("integration", {}).get("spec")
-    if integration is not None and not isinstance(integration, str):
-        raise PlanError("'plan.integration.spec' must be a path string")
+    integration = (data.get("integration") or {}).get("spec")
+    if not isinstance(integration, str) or not integration:
+        raise PlanError(
+            "'plan.integration.spec' is required: a plan is not a plan until it "
+            "declares the spec that verifies the assembled whole"
+        )
 
     modules_data = data.get("modules", [])
     if not isinstance(modules_data, list) or not modules_data:
@@ -295,18 +298,17 @@ def load_plan(path: str | Path) -> Plan:
 
     report = Report.from_dict(data.get("report"))
 
-    if integration is not None:
-        source_dir = Path(path).resolve().parent
-        integration_path = Path(integration)
-        candidates = [
-            integration_path,
-            source_dir / integration_path,
-            source_dir.parent / integration_path,
-            source_dir.parent / ".harness" / integration_path,
-            source_dir.parent / ".harness" / "configs" / integration_path.name,
-        ]
-        if not any(c.is_file() for c in candidates):
-            raise PlanError(f"integration spec not found: {integration}")
+    source_dir = Path(path).resolve().parent
+    integration_path = Path(integration)
+    candidates = [
+        integration_path,
+        source_dir / integration_path,
+        source_dir.parent / integration_path,
+        source_dir.parent / ".harness" / integration_path,
+        source_dir.parent / ".harness" / "configs" / integration_path.name,
+    ]
+    if not any(c.is_file() for c in candidates):
+        raise PlanError(f"integration spec not found: {integration}")
 
     return Plan(
         name=name,
