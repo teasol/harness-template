@@ -1,11 +1,13 @@
 # Agent platform presets — vendor knowledge as DATA, never in harness/ code.
 #
 # `harness setup` reads this to offer choices; you can edit it, add your lab's
-# own entry, or ignore it entirely and write configs/worker.yaml by hand. The
+# own entry, or ignore it entirely and write agents.yaml by hand. The
 # harness core knows nothing about any of these tools: it substitutes
 # placeholders into a string and runs it.
 #
-# Placeholders: {model} {effort} {root} {brief_file} {task_file} {task_id}
+# Placeholders substituted into the commands below:
+#   {model} {effort} {session} {root} {brief_file}   on every invocation
+#   {task_file} {task_id}                            task runs only
 #
 # FLAGS GO STALE. Each entry was checked against a real installation, but your
 # version may differ — run `<tool> --help` if a command misbehaves, then fix it

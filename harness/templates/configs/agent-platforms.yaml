@@ -1,11 +1,25 @@
 # Agent platform presets — vendor knowledge as DATA, never in harness/ code.
 #
 # `harness setup` reads this to offer choices; you can edit it, add your lab's
-# own entry, or ignore it entirely and write configs/worker.yaml by hand. The
+# own entry, or ignore it entirely and write agents.yaml by hand. The
 # harness core knows nothing about any of these tools: it substitutes
 # placeholders into a string and runs it.
 #
-# Placeholders: {model} {effort} {root} {brief_file} {task_file} {task_id}
+# Placeholders substituted into the commands below:
+#   {model} {effort} {session} {root} {brief_file}   on every invocation
+#   {task_file} {task_id}                            task runs only
+#
+# FLAGS GO STALE. Each entry was checked against a real installation, but your
+# version may differ — run `<tool> --help` if a command misbehaves, then fix it
+# here. A preset is a starting point, not a promise.
+#
+# PERMISSIONS. An unattended agent must be able to edit files AND run commands:
+# a Planner runs `harness plan materialize` and `plan run`, a Worker runs the
+# tests it is being judged on. A mode that only accepts edits leaves the agent
+# writing a correct plan and then stopping to ask permission — which is exactly
+# what happened the first time these presets were used. Run agents where you
+# are willing to let them execute: a plan's worktree is isolated and
+# disposable, which is the point.
 
 platforms:
   manual:
@@ -31,9 +45,12 @@ platforms:
     efforts: [low, medium, high, xhigh, max]
     default_effort: low
     model_hint: "an alias (fable, opus, sonnet, haiku) or a full model id"
+    # Worker default: small and fast, because a Worker's task is fully specified.
     default_model: haiku
+    # Planner default: the reasoning happens here.
     planner_model: opus
     planner_effort: high
+    # Attaching an already-open session instead of starting a fresh one.
     session_command: >-
       claude -p --resume {session} --model {model} --effort {effort}
       --permission-mode bypassPermissions --add-dir {root}
@@ -42,6 +59,8 @@ platforms:
   codex:
     label: Codex CLI
     docs: codex exec --help
+    # Effort is a config override rather than a flag; verify the key name
+    # against your version with `codex --help` / your config.toml.
     command: >-
       codex exec --cd {root} -m {model}
       -c model_reasoning_effort={effort} "$(cat {brief_file})"
@@ -62,6 +81,7 @@ platforms:
   opencode:
     label: opencode
     docs: opencode run --help
+    # `--variant` is opencode's provider-specific reasoning effort.
     command: 'opencode run -m {model} --variant {effort} "$(cat {brief_file})"'
     resume_command: 'opencode run --continue -m {model} --variant {effort} "$(cat {brief_file})"'
     efforts: [minimal, low, medium, high, max]
@@ -115,3 +135,4 @@ platforms:
     model_hint: "whatever your command expects"
     default_model: ""
     reads_brief_from: stdin
+

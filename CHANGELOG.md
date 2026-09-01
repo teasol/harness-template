@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The agent configuration has one source, and a test that says so.** Two
+  copies of `agents.yaml` and `agent-platforms.yaml` are checked in — the one
+  the package installs on `harness init`, and the one at this repository's root
+  because the repository is also a harness project — and they drifted for three
+  releases in the direction that matters least: the copy a project *receives*
+  was the poorer of the two, missing the placeholder list, the "flags go stale"
+  warning and the paragraph about why an agent needs permission to run commands
+  and not only to edit files. `harness setup` already generated the
+  `agents.yaml` header from `harness.setup.HEADER`, so that constant is now the
+  only place it is written and both checked-in copies are its output;
+  `tests/test_config_sources.py` fails when either one drifts or when the two
+  preset files differ, and `make sync-configs` (`scripts/sync_configs.py`) is
+  what you run to make them agree. Refreshing a header keeps every configured
+  value, so it is safe in a real project.
+
+### Fixed
+
+- **`harness setup` wrote a placeholder that does not exist into every project.**
+  The header it generates documented `{plan}` among the adapter command
+  placeholders — the same bug as the `{experiment}` in the checked-in config,
+  renamed rather than removed. `render_command` substitutes `{model}`,
+  `{effort}`, `{session}`, `{root}` and `{brief_file}` always and adds
+  `{task_file}` and `{task_id}` for task runs, so a command template using
+  either documented name raises `KeyError` when the harness tries to spawn the
+  agent. All four comment blocks now say exactly what is passed and which two
+  are task-only, and a test renders every documented placeholder through
+  `render_command` so a third spelling of this bug cannot ship.
+- `configs/agent-platforms.yaml` told you to write `configs/worker.yaml` by
+  hand — a filename that has not existed since the two tiers moved into one
+  `agents.yaml` — and left `{session}` out of its placeholder list.
+
 ## [0.7.0] - 2026-09-01
 
 **Behaviour change.** `plan.integration.spec` is required. A plan without one is

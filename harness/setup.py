@@ -185,22 +185,34 @@ def config_to_dict(config: AgentConfig) -> dict[str, Any]:
 
 
 HEADER = """\
-# Written by `harness setup`. Edit freely — it is ordinary configuration.
+# Which agent runs each tier. `harness setup` writes this file; edit it freely,
+# it is ordinary configuration.
 #
 # Two tiers, side by side so the split is visible:
 #
-#   planner — Tier 2. Decomposes the goal, judges the whole. The reasoning
-#             happens here, so this is where an expensive model earns its cost.
+#   planner — Tier 2. Decomposes the goal, judges the whole, and builds the
+#             modules it kept. The reasoning happens here, so this is where an
+#             expensive model earns its cost.
 #   worker  — Tier 3. Builds one fully-specified module against machine-checked
 #             acceptance. Bounded work; a small fast model usually suffices.
 #
-# `adapter: manual` means you open that session yourself; `cli` means the
-# harness spawns it. Set `session:` to attach an already-open session instead
-# of starting a fresh one.
+# A tier you cannot choose is not a tier, which is why model and reasoning
+# level are explicit here rather than whatever a tool happens to default to.
+#
+# adapter:
+#   manual — you open that session yourself; the harness writes a briefing and
+#            stops. The default, so a fresh project needs no API key.
+#   cli    — the harness spawns it: `plan run` for the modules the Planner
+#            delegated, `task run` to hand over one of them now.
+#
+# session: attach an already-open session instead of starting a fresh one —
+#          useful when you already have a Planner conversation going.
+#
+# Placeholders substituted into the commands below:
+#   {model} {effort} {session} {root} {brief_file}   on every invocation
+#   {task_file} {task_id}                            task runs only
 #
 # Re-run `harness setup` to change any of it.
-# Placeholders: {model} {effort} {session} {root} {brief_file}
-#               {task_file} {task_id} {plan}
 """
 
 

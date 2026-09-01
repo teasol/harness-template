@@ -7,7 +7,7 @@ SPEC ?= configs/demo.yaml
 PLAN ?= plans/plan.yaml
 
 .DEFAULT_GOAL := help
-.PHONY: help status setup agents-setup lint format test verify plan tasks run reproduce drift audit plans clean
+.PHONY: help status setup agents-setup sync-configs lint format test verify plan tasks run reproduce drift audit plans clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -21,6 +21,9 @@ setup: ## Editable install + dev tools + configure the Sub-Worker
 
 agents-setup: ## Choose the Sub-Worker platform / model / reasoning level
 	$(PYTHON) -m harness setup
+
+sync-configs: ## Refresh the checked-in agent configs from their single source
+	$(PYTHON) scripts/sync_configs.py
 
 lint: ## Run ruff checks (lint + format check)
 	$(PYTHON) -m ruff check .
