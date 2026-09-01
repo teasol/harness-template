@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-01
+
+**Behaviour change.** `plan.integration.spec` is required. A plan without one is
+rejected by `plan validate` instead of surviving to a report that could never
+approve it. Plans written by the scaffold already declare one; a hand-written
+plan that left it out has to add it.
+
 ### Changed
 
 - **The integration spec is now required, and the "optional but merge-blocking"

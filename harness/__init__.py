@@ -2,7 +2,7 @@
 
 from harness.spec import Check, Spec, SpecError, Step, load_spec
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     "Check",
