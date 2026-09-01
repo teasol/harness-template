@@ -172,6 +172,123 @@ def list_plans(
     return sorted(found, key=lambda p: p.name)
 
 
+def _git_ok(root: str | Path, *args: str) -> bool:
+    """Whether the command succeeded. `_git` returns stdout, which for a probe
+    like `cat-file -e` is empty either way."""
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["git", *args],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    return proc.returncode == 0
+
+
+def _plan_file_on(root: Path, ref: str, name: str) -> bool:
+    """True when this ref carries the plan file a plan of that name would have.
+
+    There is no naming scheme to match on — plans are called whatever the work
+    is called, deliberately — so the plan file is the only honest evidence that
+    a branch is a plan. Both layouts are checked because a project may predate
+    the move under `.harness/`.
+    """
+    return any(
+        _git_ok(root, "cat-file", "-e", f"{ref}:{rel}")
+        for rel in (f".harness/plans/{name}.yaml", f"plans/{name}.yaml")
+    )
+
+
+def dormant_plans(
+    root: str | Path = ".", worktree_root: str | Path = DEFAULT_WORKTREE_ROOT
+) -> list[str]:
+    """Plans that exist as a branch here but have no worktree to work in.
+
+    ``list_plans`` reads ``git worktree list``, which is right for plans in
+    flight and blind to the case that matters when sessions move: you fetch the
+    repository on the other machine and the plan is *there*, on its branch, with
+    no worktree — so the harness reported no plans at all and the work looked
+    lost. A branch whose tip carries its own plan file is a plan, wherever its
+    worktree is.
+    """
+    root = Path(root).resolve()
+    # A project need not be a git repository at all — `harness init` does not
+    # make one — and "not a repository" means "no plans on branches", not a
+    # crash in the middle of writing a handoff.
+    if not _git_ok(root, "rev-parse", "--git-dir"):
+        return []
+    live = {item.git_branch for item in list_plans(root, worktree_root)}
+    refs = _git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads", check=False)
+    candidates = [ref for ref in refs.splitlines() if ref and ref not in live]
+
+    remote = _git(root, "for-each-ref", "--format=%(refname:short)", "refs/remotes", check=False)
+    local = set(refs.splitlines())
+    for ref in remote.splitlines():
+        short = ref.split("/", 1)[1] if "/" in ref else ref
+        if short and short != "HEAD" and short not in local and short not in live:
+            candidates.append(short if _has_local(root, short) else ref)
+
+    found = []
+    for ref in candidates:
+        name = ref.rsplit("/", 1)[-1]
+        if name.lower() in RESERVED_NAMES or not NAME_RE.match(name):
+            continue
+        if _plan_file_on(root, ref, name):
+            found.append(name)
+    return sorted(dict.fromkeys(found))
+
+
+def _has_local(root: Path, name: str) -> bool:
+    return bool(_git(root, "branch", "--list", name, check=False))
+
+
+def resume(
+    name: str,
+    root: str | Path = ".",
+    worktree_root: str | Path = DEFAULT_WORKTREE_ROOT,
+) -> WorkPlan:
+    """Give an existing plan branch a worktree again, on this machine.
+
+    The counterpart of ``start``: same plan, same branch, same history, a
+    working copy that this machine does not have yet. Nothing is scaffolded —
+    the plan file is already on the branch, and writing a template over it is
+    how a session loses the work it was handed.
+    """
+    if not NAME_RE.match(name):
+        raise WorkPlanError(f"invalid plan name '{name}'")
+    root = Path(root).resolve()
+    worktree_root = Path(worktree_root)
+    path = worktree_root if worktree_root.is_absolute() else root / worktree_root
+    path = path / name
+    if path.exists():
+        raise WorkPlanError(f"path already exists: {path} — the plan is already here")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if _has_local(root, name):
+        _git(root, "worktree", "add", str(path), name)
+    else:
+        remote = next(
+            (
+                ref
+                for ref in _git(
+                    root, "for-each-ref", "--format=%(refname:short)", "refs/remotes", check=False
+                ).splitlines()
+                if ref.rsplit("/", 1)[-1] == name
+            ),
+            "",
+        )
+        if not remote:
+            raise WorkPlanError(
+                f"no branch for plan '{name}' here. fetch it first, or start a new plan"
+            )
+        _git(root, "worktree", "add", "-b", name, str(path), remote)
+
+    resumed = WorkPlan(name=name, git_branch=name, path=path, head=_git(path, "rev-parse", "HEAD"))
+    _inherit_agent_configs(root, path)
+    return resumed
+
+
 def resolve_plan_path(value: str, root: str | Path = ".") -> Path:
     """Accept either a plan's name or a path to its YAML, and return the path.
 
@@ -252,8 +369,9 @@ plan:
 
 
 #: Configuration a new worktree must inherit to behave like the project it
-#: came from. These live under `.harness/`, which is untracked, so a fresh
-#: worktree does not get them from git.
+#: came from. A fresh worktree is a fresh checkout of a branch: whatever a
+#: person chose not to commit — the agent configuration usually, because it
+#: names the tools installed on one machine — is simply absent there.
 _INHERITED_CONFIGS = ("agents.yaml", "agent-platforms.yaml", "project.yaml")
 
 
@@ -1055,6 +1173,10 @@ class ProjectStatus:
     worker_tier: dict[str, Any] = dataclasses.field(default_factory=dict)
     planner_tier: dict[str, Any] = dataclasses.field(default_factory=dict)
     plans: list[PlanState] = dataclasses.field(default_factory=list)
+    #: Plans that exist on a branch here but have no worktree on this machine.
+    #: A fresh clone of a project with work in flight looks exactly like a
+    #: project with no work at all, and the harness used to say so.
+    dormant: list[str] = dataclasses.field(default_factory=list)
     here: str | None = None
     headline: str = ""
     next_steps: list[str] = dataclasses.field(default_factory=list)
@@ -1155,6 +1277,10 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         plans = [plan_state(e) for e in list_plans(root)]
     except WorkPlanError:
         plans = []
+    try:
+        dormant = dormant_plans(root)
+    except WorkPlanError:
+        dormant = []
 
     here = None
     current = Path(cwd or Path.cwd()).resolve()
@@ -1168,6 +1294,7 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         project_name=project_name,
         demo_present=demo_present,
         plans=plans,
+        dormant=dormant,
         here=here,
         worker_adapter=_worker_adapter(root),
         worker_tier=_agent_tier(root, "worker"),
@@ -1182,6 +1309,19 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         )
         status.next_steps = invocation.steps(
             [("init", "scaffold project files and configure agents")]
+        )
+        return status
+
+    if not plans and dormant:
+        # The machine changed, not the project. Telling this reader to start a
+        # new plan is the one answer that loses the work: they would branch
+        # again beside a plan that already has the history.
+        status.headline = (
+            f"'{project_name}' has {len(dormant)} plan(s) here on a branch, with no "
+            "worktree on this machine."
+        )
+        status.next_steps = invocation.steps(
+            [(f"plan resume {dormant[0]}", "pick the work up where it was left")]
         )
         return status
 

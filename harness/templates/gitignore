@@ -20,6 +20,13 @@ htmlcov/
 # Worktrees (harness plan new <name>) — the git branches are the record
 .worktrees/
 
+# NOT ignored, on purpose: `.harness/` and HANDOFF.md. The plan files, the task
+# board, the Planner registry and the handoff are how work survives a session
+# ending — commit them, or the next machine starts from nothing. The one file
+# that is arguably per-machine is the agent configuration, since it names the
+# CLI tools installed here; uncomment it if yours differs per person.
+# .harness/configs/agents.yaml
+
 # Research artifacts (keep the READMEs only)
 data/*
 !data/README.md

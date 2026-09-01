@@ -41,7 +41,14 @@ should have delegated spends your context on typing.
 
 ## Workflow
 
-0. **Agree what the work is.** Nothing is recorded for you to fill in: work it
+0. **Read the handoff, then agree what the work is.** If `HANDOFF.md` exists at
+   the project root, read it before anything else. Your session is not the first
+   one here — sessions end when a laptop closes or a context fills, and that
+   document is what the last one left you: what it was in the middle of, what it
+   decided and why, and what it already tried that does not work. The state it
+   quotes is regenerated from the files, so where they disagree the files win.
+
+   Then agree the work. Nothing is recorded for you to fill in: work it
    out with the user before anything else — what they want done, what
    would count as done, what they want to see at the end. Plan nothing and spawn
    no Worker until you agree, then write it as the plan's `goal`, in the words
@@ -136,35 +143,46 @@ must not change before you change anything.
 
 ## Rules
 
-1. **Build by default; delegate deliberately.** Every module is yours unless
+1. **Record as you go, not at the end.** There may not be an end: the session
+   before yours did not choose to stop. One line, when it happens:
+   ```bash
+   python -m harness note "chose X over Y because Z" --decision
+   python -m harness note "tried A, it fails because B" --dead-end
+   python -m harness handoff --next "what you are in the middle of"
+   ```
+   Everything else in this project is derivable from files — plan state, module
+   status, what is blocked — and the harness derives it. Your reasoning is not,
+   and it is the expensive half. A dead end you fail to write down is a session
+   somebody spends again.
+2. **Build by default; delegate deliberately.** Every module is yours unless
    you say otherwise — `executor` defaults to `main`, and nothing is handed to a
    Sub-Worker behind your back. Delegate (`executor: sub`) when the work is
    routine bulk and a brief can specify it completely. Either way the module
    keeps its contract and its acceptance: what changes is who writes the code,
    never whether it is verified.
-2. **Every module must have runnable acceptance.** "Looks right" is not a
+3. **Every module must have runnable acceptance.** "Looks right" is not a
    deliverable. Acceptance may invoke dependency CLIs to be self-contained.
    List every file the Worker must produce under `deliverables` — the harness
    checks them, so an incomplete list is an unenforced contract. Write steps
    with `${HARNESS_PYTHON}`, never a bare `python`.
-3. **Tasks must be self-contained.** A Worker with the task file + repo must
+4. **Tasks must be self-contained.** A Worker with the task file + repo must
    need zero additional context. If a brief references the plan, inline the
    relevant part.
-4. **Stable contracts.** Once a Worker starts, changing that module's contract
+5. **Stable contracts.** Once a Worker starts, changing that module's contract
    requires a new task (or explicit re-materialization with `--force`) — never
    silent edits. `--force` refreshes the spec from the plan while preserving
    `status`, `worker`, and `log`, and records the refresh in the log itself.
-5. **Determinism by default.** Declare seeds; make acceptance outputs
+6. **Determinism by default.** Declare seeds; make acceptance outputs
    hash-comparable where possible.
-6. **Keep the DAG honest.** `depends_on` must reflect real data dependencies
+7. **Keep the DAG honest.** `depends_on` must reflect real data dependencies
    expressed through contracts, not convenience.
-7. **One owner per file.** Two modules may not declare the same deliverable;
+8. **One owner per file.** Two modules may not declare the same deliverable;
    `plan validate` rejects it.
-8. **Report what was asked, measure nothing yourself.** Translate the
+9. **Report what was asked, measure nothing yourself.** Translate the
    user's request into `report:` entries that say *where* each number
    lives. The harness extracts the values — never write a result into the plan,
    and never quote a number you were not made to measure.
-9. **Never merge.** Run `harness report` and hand back. Deciding whether a
+10. **Never merge.** Run `harness report` and hand back. Deciding whether a
    plan enters the record is the user's judgement, not yours.
-10. **Stay inside your plan.** A report may not read another plan's artifacts;
+11. **Stay inside your plan.** A report may not read another plan's artifacts;
     comparing plans is the user's job.

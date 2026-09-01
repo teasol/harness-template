@@ -484,3 +484,68 @@ def test_the_old_branch_grammar_is_gone(capsys) -> None:
     for argv in (["branch", "x"], ["branches"], ["drop", "x"]):
         with pytest.raises(SystemExit):
             main(argv)
+
+
+# ---------------------------------------------------------------------------
+# handing the project to a session that was not here
+
+
+@pytest.fixture()
+def handed_over(tmp_path: Path) -> Path:
+    """An initialized project with a Planner, ready to be left and picked up."""
+    from harness import init as init_mod
+    from harness import planners as planners_mod
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    init_mod.init_project(root)
+    planners_mod.create("dasol", model="m", root=root)
+    return root
+
+
+def test_note_infers_who_is_speaking(handed_over: Path, capsys) -> None:
+    """A session handed a document does not know its own registered name.
+
+    Requiring `--by` would mean guessing, and a note that cannot be recorded
+    without a guess is a note nobody records.
+    """
+    assert main(["note", "the loader only reads v2", "--dead-end", "--root", str(handed_over)]) == 0
+    assert "dead-end" in capsys.readouterr().out
+    assert (handed_over / "HANDOFF.md").is_file()
+
+
+def test_note_with_nobody_to_attribute_it_to_says_so(tmp_path: Path, capsys) -> None:
+    """Silently dropping it would be the worst of the three options."""
+    from harness import init as init_mod
+
+    init_mod.init_project(tmp_path)
+    assert main(["note", "something", "--root", str(tmp_path)]) == 2
+    assert "create -n" in capsys.readouterr().err
+
+
+def test_handoff_writes_a_path_you_can_hand_over(handed_over: Path, capsys) -> None:
+    assert main(["handoff", "--root", str(handed_over)]) == 0
+    out = capsys.readouterr().out
+    assert "HANDOFF.md" in out
+    assert "Commit it" in out  # a handoff on one machine hands nothing over
+
+
+def test_handoff_next_records_intent_and_shows_it(handed_over: Path, capsys) -> None:
+    assert (
+        main(["handoff", "--next", "mid-way through the widget", "--root", str(handed_over)]) == 0
+    )
+    capsys.readouterr()
+    assert main(["handoff", "--show", "--root", str(handed_over)]) == 0
+    assert "mid-way through the widget" in capsys.readouterr().out
+
+
+def test_handoff_show_writes_nothing(handed_over: Path, capsys) -> None:
+    """`--show` is for reading in a terminal; it must not touch the file."""
+    assert main(["handoff", "--show", "--root", str(handed_over)]) == 0
+    capsys.readouterr()
+    assert not (handed_over / "HANDOFF.md").exists()
+
+
+def test_a_note_cannot_be_two_kinds_at_once(handed_over: Path) -> None:
+    with pytest.raises(SystemExit):
+        main(["note", "x", "--decision", "--dead-end", "--root", str(handed_over)])

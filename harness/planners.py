@@ -40,13 +40,24 @@ class PlannerError(ValueError):
     """Raised when a Planner cannot be created, found, or read."""
 
 
+#: What a note is for. The kinds exist because they are read at different
+#: moments: a dead end is read *before* trying something, a decision *before*
+#: reopening it, and the next-intent only ever matters as the latest one.
+KINDS = ("fact", "decision", "dead-end", "next")
+
+
 @dataclasses.dataclass
 class Note:
-    """One thing a Planner learned, with when it learned it."""
+    """One thing a Planner learned, with when it learned it and who learned it."""
 
     at: str
     text: str
     plan: str = ""
+    kind: str = "fact"
+    #: Filled in when the note is read back out of a registry, so a handoff can
+    #: say who said it — sessions change, and "who" is part of how much weight
+    #: a note carries.
+    by: str = ""
 
 
 @dataclasses.dataclass
@@ -121,11 +132,14 @@ def _from_dict(data: dict, path: Path) -> Planner:
     notes = []
     for raw in entry.get("notes", []) or []:
         if isinstance(raw, dict) and raw.get("text"):
+            kind = str(raw.get("kind", "fact") or "fact")
             notes.append(
                 Note(
                     at=str(raw.get("at", "")),
                     text=str(raw["text"]),
                     plan=str(raw.get("plan", "")),
+                    kind=kind if kind in KINDS else "fact",
+                    by=str(entry["name"]),
                 )
             )
     return Planner(
@@ -152,7 +166,10 @@ def save(planner: Planner) -> Path:
                     "effort": planner.effort,
                     "created_at": planner.created_at,
                     "plans": list(planner.plans),
-                    "notes": [dataclasses.asdict(n) for n in planner.notes],
+                    "notes": [
+                        {"at": n.at, "text": n.text, "plan": n.plan, "kind": n.kind}
+                        for n in planner.notes
+                    ],
                 }
             },
             sort_keys=False,
@@ -217,14 +234,55 @@ def set_model(name: str, model: str, effort: str | None = None, root: str | Path
     return planner
 
 
-def add_note(name: str, text: str, plan: str = "", root: str | Path = ".") -> Planner:
+def add_note(
+    name: str, text: str, plan: str = "", root: str | Path = ".", kind: str = "fact"
+) -> Planner:
     """Append something this Planner learned, so the next one starts with it."""
     if not text.strip():
         raise PlannerError("a note needs text")
+    if kind not in KINDS:
+        raise PlannerError(f"unknown note kind '{kind}'. available: {', '.join(KINDS)}")
     planner = load(name, root)
-    planner.notes.append(Note(at=_now(), text=text.strip(), plan=plan))
+    planner.notes.append(Note(at=_now(), text=text.strip(), plan=plan, kind=kind))
     save(planner)
     return planner
+
+
+def all_notes(root: str | Path = ".") -> list[Note]:
+    """Every note in the project, oldest first, whoever recorded it.
+
+    Notes hang off a Planner because a Planner is what accumulates them, but
+    they are read by *whoever is here now* — and that is often a different
+    Planner, because switching machine or switching tool means a new model and
+    therefore a new registration. Scoping the read to one name would lose the
+    trail at exactly the moment it is most needed.
+    """
+    notes = [note for planner in list_planners(root) for note in planner.notes]
+    return sorted(notes, key=lambda n: n.at)
+
+
+def owner_of_plan(plan: str, root: str | Path = ".") -> str:
+    """Which Planner drove this plan, or '' if nothing claims it."""
+    for planner in list_planners(root):
+        if plan in planner.plans:
+            return planner.name
+    return ""
+
+
+def infer_planner(root: str | Path = ".", plan: str = "") -> str:
+    """Who is speaking, when nobody said.
+
+    A session that has just been handed a document does not know its own
+    registered name, and asking it to pass one it would have to guess at is how
+    notes end up unrecorded. Resolution order: the Planner that drove this plan,
+    then the only Planner in the project, then nothing.
+    """
+    if plan:
+        owner = owner_of_plan(plan, root)
+        if owner:
+            return owner
+    planners = list_planners(root)
+    return planners[0].name if len(planners) == 1 else ""
 
 
 def link_plan(name: str, plan: str, root: str | Path = ".") -> Planner:
@@ -301,11 +359,16 @@ def onboarding_lines(planner: Planner, root: str | Path = ".") -> list[str]:
     base = harness_dir if harness_dir.is_dir() else root
 
     refs: list[tuple[Path, str]] = []
+    # First, because it is the only one of these that knows what happened here
+    # yesterday. The rest are standing documents; this one is the situation.
+    handoff = _first_existing(root, "HANDOFF.md")
+    if handoff:
+        refs.append((handoff, "what the last session left you — read it first"))
     contract = _first_existing(base, "agents/planner.md") or _first_existing(
         root, "agents/planner.md"
     )
     if contract:
-        refs.append((contract, "your role contract — read it first"))
+        refs.append((contract, "your role contract"))
     rules = _first_existing(root, "AGENTS.md")
     if rules:
         refs.append((rules, "ground rules for every agent here"))

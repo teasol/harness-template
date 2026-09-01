@@ -76,9 +76,13 @@ together; the door stays open.
 | `harness plans` (or `harness plan list`) | Every plan in flight, with its git branch and worktree |
 | `harness plan validate\|approve\|materialize\|status\|run <name>` | The plan's own lifecycle — see [orchestration.md](orchestration.md). Each takes the plan's **name**, or a path to its YAML |
 | `harness report <name> [--no-run] [--determinism] [--save]` | Build the user's decision aid; exits non-zero unless merge-ready |
+| `harness plan resume <name>` | Give a plan that is here on a branch a worktree again — the other machine, or after `plan drop`. Nothing is scaffolded over it |
 | `harness plan drop <name> [--force]` | Remove the worktree; **the git branch is kept** — it is the record of the attempt |
 
-Worktrees default to `.worktrees/<name>` inside the repo and are gitignored.
+Worktrees default to `.worktrees/<name>` inside the repo and are gitignored. A
+worktree is therefore local to one machine, while the branch is not: after
+`git pull` on a second machine the plan exists with no working copy, which is
+what `harness plan resume` and the `HANDOFF.md` it points at are for.
 Removing a worktree never deletes the git branch, so a rejected plan remains
 inspectable.
 

@@ -39,6 +39,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from harness import adoption as adoption_mod
+from harness import handoff as handoff_mod
 from harness import heartbeat, invocation
 from harness import plan as plan_mod
 from harness import planners as planners_mod
@@ -360,6 +361,7 @@ def cmd_task_block(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     print(f"task '{task.id}' → blocked ({args.reason})")
+    handoff_mod.refresh(getattr(args, "root", "."))
     return 0
 
 
@@ -427,6 +429,7 @@ def cmd_task_done(args: argparse.Namespace) -> int:
     print(f"task '{task.id}' → done")
     if record is not None:
         print(f"  worker record reconciled: {record}")
+    handoff_mod.refresh(args.root)
     return 0
 
 
@@ -525,6 +528,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Overwrite existing task files"
     )
     plan_materialize.set_defaults(func=cmd_plan_materialize)
+
+    plan_resume = plan_sub.add_parser(
+        "resume", help="Give a plan that has a branch here a worktree on this machine"
+    )
+    plan_resume.add_argument("name", help="Plan name")
+    plan_resume.add_argument(
+        "--path",
+        default=plans_mod.DEFAULT_WORKTREE_ROOT,
+        help="Directory holding worktrees",
+    )
+    plan_resume.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    plan_resume.set_defaults(func=cmd_plan_resume)
 
     plan_status = plan_sub.add_parser("status", help="Show module progress for a plan")
     plan_status.add_argument("plan", help="Plan name, or a path to its YAML file")
@@ -633,6 +648,39 @@ def build_parser() -> argparse.ArgumentParser:
     report_cmd.add_argument("--save", action="store_true", help="Also write the report into it")
     report_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
     report_cmd.set_defaults(func=cmd_plan_report)
+
+    handoff_cmd = sub.add_parser(
+        "handoff", help="The document the next session reads instead of being told"
+    )
+    handoff_cmd.add_argument(
+        "--next",
+        default=None,
+        metavar="TEXT",
+        help="Record what you are in the middle of (latest one wins)",
+    )
+    handoff_cmd.add_argument(
+        "--show", action="store_true", help="Print it instead of writing the file"
+    )
+    handoff_cmd.add_argument("--by", default=None, help="Planner recording it (default: inferred)")
+    handoff_cmd.add_argument("--plan", default=None, help="Plan it belongs to (default: inferred)")
+    handoff_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    handoff_cmd.set_defaults(func=cmd_handoff)
+
+    note_cmd = sub.add_parser(
+        "note", help="Record one line the next session should not have to rediscover"
+    )
+    note_cmd.add_argument("text", help="The finding, decision or dead end, in one sentence")
+    kind_group = note_cmd.add_mutually_exclusive_group()
+    kind_group.add_argument(
+        "--decision", action="store_true", help="A choice made, and why — so it is not reopened"
+    )
+    kind_group.add_argument(
+        "--dead-end", action="store_true", help="Something tried that failed — so it is not retried"
+    )
+    note_cmd.add_argument("--by", default=None, help="Planner recording it (default: inferred)")
+    note_cmd.add_argument("--plan", default=None, help="Plan it was learned in (default: inferred)")
+    note_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    note_cmd.set_defaults(func=cmd_note)
 
     status_cmd = sub.add_parser("status", help="Where am I and what do I do next? (start here)")
     status_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
@@ -816,6 +864,7 @@ def cmd_plan_new(args: argparse.Namespace) -> int:
                 model=model,
                 effort=effort,
             )
+        handoff_mod.refresh(args.root)
         brief = plans_mod.planner_brief(args.name, root=args.root)
     except WorkPlanError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -881,6 +930,27 @@ def cmd_plan_report(args: argparse.Namespace) -> int:
     return 0 if report.merge_ready else 1
 
 
+def cmd_plan_resume(args: argparse.Namespace) -> int:
+    """Give a plan that arrived as a branch a worktree on this machine."""
+    try:
+        resumed = plans_mod.resume(args.name, root=args.root, worktree_root=args.path)
+    except WorkPlanError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        dormant = plans_mod.dormant_plans(args.root)
+        if dormant:
+            print(f"plans you could resume here: {', '.join(dormant)}", file=sys.stderr)
+        return 2
+    print(f"Plan '{resumed.name}' resumed, worktree at {resumed.path}.")
+    print("Same branch, same history — nothing was scaffolded over it.")
+    handoff = handoff_mod.handoff_path(args.root)
+    if handoff.is_file():
+        print(f"\nRead {handoff.name} first: it is what the last session left you.")
+    print()
+    print(plans_mod.planner_brief(args.name, root=args.root))
+    handoff_mod.refresh(args.root)
+    return 0
+
+
 def cmd_plan_drop(args: argparse.Namespace) -> int:
     try:
         work = plans_mod.remove(args.name, root=args.root, force=args.force)
@@ -888,6 +958,7 @@ def cmd_plan_drop(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     print(f"removed worktree {work.path} (git branch {work.git_branch} kept)")
+    handoff_mod.refresh(args.root)
     return 0
 
 
@@ -968,6 +1039,7 @@ def cmd_plan_approve(args: argparse.Namespace) -> int:
     record = plan_mod.record_approval(args.plan, args.by, args.note)
     print(f"approved by {args.by} — recorded in {record}")
     print("The approval is tied to the plan's contents: edit the plan and it lapses.")
+    handoff_mod.refresh(getattr(args, "root", "."))
     return 0
 
 
@@ -1076,6 +1148,8 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
     board = task_mod.load_board(args.tasks_dir)
     done = sum(1 for t in board if t.is_done)
     print(f"\n{completed} task(s) delegated this pass; {done}/{len(plan.modules)} module(s) done")
+    # The plan moved, whichever way this pass ended.
+    handoff_mod.refresh(args.root)
     if yours is not None:
         module_index = order.index(yours) + 1
         print(
@@ -1390,6 +1464,74 @@ def cmd_planner_brief(args: argparse.Namespace) -> int:
 # Orientation
 
 
+def cmd_handoff(args: argparse.Namespace) -> int:
+    """Write, show, or add to the document the next session reads."""
+    if args.next:
+        plan = args.plan or _plan_here(args.root)
+        by = args.by or planners_mod.infer_planner(args.root, plan=plan)
+        if not by:
+            print(
+                "error: nobody to record this against. Pass --by <planner>, or "
+                f"register one with `{invocation.cmd('create -n <planner-name>')}`",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            planners_mod.add_note(by, args.next, plan=plan, root=args.root, kind="next")
+        except planners_mod.PlannerError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+
+    if args.show:
+        print(handoff_mod.render(args.root, cwd=Path.cwd()), end="")
+        return 0
+
+    target = handoff_mod.write(args.root, cwd=Path.cwd())
+    print(f"Handoff written to {target}")
+    print()
+    print("Hand this path to the next session — it needs nothing else. Commit it,")
+    print("or the next machine will not have it:")
+    print(f"  git add {target.name} && git commit -m 'handoff'")
+    return 0
+
+
+def cmd_note(args: argparse.Namespace) -> int:
+    """Record one line the next session would otherwise have to rediscover."""
+    kind = "decision" if args.decision else "dead-end" if args.dead_end else "fact"
+    plan = args.plan or _plan_here(args.root)
+    by = args.by or planners_mod.infer_planner(args.root, plan=plan)
+    if not by:
+        print(
+            "error: nobody to record this against. Pass --by <planner>, or "
+            f"register one with `{invocation.cmd('create -n <planner-name>')}`",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        planner = planners_mod.add_note(by, args.text, plan=plan, root=args.root, kind=kind)
+    except planners_mod.PlannerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"recorded as {kind} — {planner.name} now carries {len(planner.notes)} note(s) forward")
+    handoff_mod.refresh(args.root)
+    return 0
+
+
+def _plan_here(root: str) -> str:
+    """The plan whose worktree we are standing in, if any.
+
+    A Planner works inside its plan's worktree, so the plan a note belongs to is
+    almost always the one it is being written from. Asking for it again is how
+    notes end up untagged.
+    """
+    status = plans_mod.project_status(root, cwd=Path.cwd())
+    if status.here:
+        return status.here
+    # Outside a worktree there is still no ambiguity while one plan is in
+    # flight, and an untagged note is one the next session cannot place.
+    return status.plans[0].name if len(status.plans) == 1 else ""
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     status = plans_mod.project_status(args.root)
     print(f"Project: {status.project_name}\n")
@@ -1457,6 +1599,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     for step in status.next_steps:
         print(f"  {step}")
     print()
+    # A session that arrived mid-project needs this before it needs anything
+    # else, and it is the one file that answers "what was going on here".
+    handoff = handoff_mod.handoff_path(args.root)
+    if handoff.is_file():
+        print(f"Picking up where someone left off? Read {handoff.name} first —")
+        print("it is what the last session left you, and it is kept current.")
     print("New here? README.md walks through a whole plan, start to finish.")
     return 0
 

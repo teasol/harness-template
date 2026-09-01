@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`harness handoff` — the document a session that was not here reads instead
+  of being told.** The harness was built as if one Planner session lasts a
+  project. It does not: the context window fills, the laptop closes, tomorrow is
+  spent on the other machine with a different tool. Each of those is a session
+  that knows nothing, and re-explaining a project by hand is expensive and
+  lossy. `HANDOFF.md` sits at the root of the main working tree and is
+  **regenerated whenever the work moves** — `task done`, `task block`,
+  `plan approve`, `plan new`, `plan drop`, and every pass of `plan run` — so it
+  is never older than the state it describes and nobody maintains it. Half of it
+  is derived (which plan is in flight, which module is next, what is blocked,
+  the command to run); the other half is what no file records and is recorded a
+  line at a time:
+  ```bash
+  harness note "chose single-process: mp broke the seed" --decision
+  harness note "the loader only reads v2 fixtures" --dead-end
+  harness handoff --next "mid-way through the widget acceptance"
+  ```
+  Recording is deliberately cheap and continuous rather than a ritual for the
+  end of a run: no run ends tidily, and the previous design — "when you finish,
+  record what the next run should not have to rediscover" — captured nothing
+  from the sessions that mattered. `harness note` infers who is speaking and
+  which plan it belongs to, because a session that has just been handed a
+  document does not know its own registered name. Notes now carry a kind
+  (`fact`, `decision`, `dead-end`, `next`), the handoff reads **every**
+  Planner's notes rather than one name's — switching tool means a new model and
+  therefore a new registration, which used to lose the trail at exactly the
+  wrong moment — and only the latest `next` is shown, because intent is state
+  and a stale one reads as a current instruction. Nothing is written into a
+  project with no Planner, no plan in flight and no plan on a branch: there is
+  nothing to hand over yet, and a file saying so is noise in a working copy —
+  and the first thing a clone of a template would inherit, describing somebody
+  else's project. An existing handoff is always refreshed, because a stale one
+  is worse than none: it gets read as current.
+- **`harness plan resume <name>` — pick up a plan on a machine that has the
+  branch but not the worktree.** A worktree is local; the branch is not. So
+  after `git pull` on the second machine the plan is *there*, with no working
+  copy, and `plan new` refuses the name because the branch exists. `plan resume`
+  attaches a worktree to the existing branch and inherits the agent
+  configuration, scaffolding nothing over what is already on it.
+
 ### Changed
 
 - **The agent configuration has one source, and a test that says so.** Two
@@ -26,6 +68,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A fresh clone of a project with work in flight reported no work at all.**
+  Plans were discovered only by walking `git worktree list`, so on a second
+  machine `harness plans` printed nothing and `harness status` said "set up,
+  with no plans yet" and offered `plan new` — the one answer that loses the
+  work, since it branches again beside a plan that already has the history.
+  Plans on a branch with no worktree here are now found (a branch whose tip
+  carries its own plan file is a plan — there is no naming scheme to match on,
+  by design), reported by `status` with `plan resume` as the next step, and
+  listed in the handoff.
+- `harness status`, the `create` paste block, `AGENTS.md` and the Planner
+  contract now point at `HANDOFF.md` first when it exists, and the contract's
+  step 0 is reading it. The scaffolded `.gitignore` says which harness state has
+  to be committed for any of this to survive a change of machine — and
+  `plans.py` no longer claims `.harness/` is untracked, which nothing enforced
+  and which made the Planner registry's survival accidental.
 - **`harness setup` wrote a placeholder that does not exist into every project.**
   The header it generates documented `{plan}` among the adapter command
   placeholders — the same bug as the `{experiment}` in the checked-in config,

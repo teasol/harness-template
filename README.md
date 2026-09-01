@@ -240,6 +240,50 @@ any of them. Each report stands on its own: a plan may not read another's
 results, and the harness rejects a plan that tries. Comparing them is **your**
 job, done by reading the finished reports.
 
+### When the session changes — and it will
+
+Sessions end for reasons that have nothing to do with the work: the context
+window fills, the laptop closes, tomorrow is spent on the other machine with a
+different tool. Every one of those starts a session that knows nothing, and
+re-explaining a project by hand is both expensive and lossy.
+
+So the harness keeps one document current, and handing over is handing over a
+path:
+
+```bash
+python -m harness handoff        # writes HANDOFF.md, prints where
+```
+
+`HANDOFF.md` sits at the project root and is **regenerated whenever the work
+moves** — a task finishes, a plan is approved, `plan run` hands back. Half of it
+is derived from the plan and task files, so it cannot go stale: which plan is in
+flight, which module is next, what is blocked, what command to run. The other
+half is what no file records, and it is the half worth reading:
+
+```bash
+python -m harness note "chose single-process: mp broke the seed" --decision
+python -m harness note "the loader only reads v2 fixtures" --dead-end
+python -m harness handoff --next "mid-way through the widget acceptance"
+```
+
+One line each, recorded *as it happens* rather than saved for the end of a run —
+runs do not end tidily. A dead end nobody wrote down is a session somebody
+spends again.
+
+Commit `HANDOFF.md` and `.harness/`: a handoff that only exists on the machine
+that wrote it hands nothing over. Then on the other machine:
+
+```bash
+git pull
+python -m harness status               # names the plans that are here on a branch
+python -m harness plan resume <plan-name>
+```
+
+A plan lives on its own git branch in its own worktree, and a worktree is
+local — so a fresh clone has the branch and not the working copy. `plan resume`
+gives it one back: same branch, same history, nothing scaffolded over it. Before
+this existed, that clone looked exactly like a project with no work at all.
+
 ### When something goes wrong
 
 | Symptom | What it means |
@@ -254,6 +298,8 @@ job, done by reading the finished reports.
 | `report` says `NOT READY` | It lists every blocker. Fix them — or decide the plan failed, which is a valid outcome. |
 | `NOT REPRODUCIBLE` | Something is unseeded. See [docs/reproducibility.md](docs/reproducibility.md). |
 | A long run looks hung | `harness progress --watch` from another terminal. |
+| A fresh clone says **no plans yet** | The plan's branch is there, its worktree is not. `harness status` names it; `harness plan resume <plan-name>`. |
+| `HANDOFF.md` is thin | Only derived state was recorded. Decisions and dead ends are recorded by hand, one line at a time — see above. |
 | `cost: not measured` | Expected. The harness does not estimate token spend. |
 ## Why
 
@@ -471,6 +517,8 @@ make drift         # validate every plan, fail on task/plan drift
 make plans         # list plans in flight
 
 python -m harness progress --watch   # what is running right now (second terminal)
+python -m harness handoff            # refresh HANDOFF.md for whoever comes next
+python -m harness note "..." --decision | --dead-end
 ```
 
 ## Project structure
@@ -478,6 +526,7 @@ python -m harness progress --watch   # what is running right now (second termina
 ```
 harness-template/
 ├── AGENTS.md               # Agent-facing ground rules (read this first)
+├── HANDOFF.md              # What the last session left the next one (generated, commit it)
 ├── Makefile                # status / setup / verify / reproduce / run / audit / drift
 ├── pyproject.toml          # Project metadata + tool config
 ├── .worktrees/             # One worktree per plan in flight (gitignored)

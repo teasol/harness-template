@@ -52,6 +52,23 @@ jobs:
           python -m harness plans
           python -m harness plan drop ci-smoke --force
 
+      # A plan survives the machine it was started on: dropping the worktree
+      # keeps the branch, and `plan resume` is how the next session gets a
+      # working copy back. Exercised here because the failure mode is silent —
+      # a plan with no worktree used to look like no plan at all.
+      - name: Handoff and resume (the session changed, not the work)
+        run: |
+          python -m harness plan resume ci-smoke
+          python -m harness plans
+          python -m harness create -n ci --model ci-model --effort low
+          python -m harness note "ci smoke: nothing learned"
+          python -m harness note "ci smoke: nothing failed" --dead-end
+          python -m harness handoff --next "ci smoke"
+          python -m harness handoff --show
+          test -f HANDOFF.md
+          grep -q "nothing failed" HANDOFF.md
+          python -m harness plan drop ci-smoke --force
+
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4

@@ -4,7 +4,9 @@ Ground rules for AI coding agents (and humans) working in repositories created
 with Research Harness. Read this before making any change.
 
 Lost? `python -m harness status` reads the repository's real state and names
-the next action.
+the next action. Picking up someone else's work — or your own from another
+machine — start at `HANDOFF.md`: it is regenerated whenever the work moves and
+carries what no file records, the decisions made and the dead ends already hit.
 
 ## Repository purpose
 
