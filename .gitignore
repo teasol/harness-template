@@ -17,8 +17,8 @@ htmlcov/
 # Secrets & environments
 .env
 
-# Plan worktrees (harness plan new <name>) — the git branches are the record
-.experiments/
+# Worktrees (harness plan new <name>) — the git branches are the record
+.worktrees/
 
 # Research artifacts (keep the READMEs only)
 data/*

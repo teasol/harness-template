@@ -1,6 +1,6 @@
-# Example experiment configuration. Rename and extend per project.
+# Example project configuration. Rename and extend per project.
 # This is *data*, not logic — keep control flow out of YAML.
-experiment:
+run:
   name: baseline
   seed: 42
 

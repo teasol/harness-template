@@ -1,8 +1,8 @@
-"""Tests for Planners that outlive one experiment.
+"""Tests for Planners that outlive one plan.
 
 A Planner spends its first hour learning a project — where the numbers of
 record live, which interpreter has the dependencies, which arms are closed.
-Discarding that at the end of every experiment means paying the hour again and
+Discarding that at the end of every plan means paying the hour again and
 repeating the same first-time mistakes.
 """
 
@@ -36,7 +36,7 @@ def test_a_manual_planner_may_be_created_without_a_model(repo: Path) -> None:
 
     A manual Planner is a session a person opens later, so nobody can name its
     model in advance. Knowing it still matters — two runs planned by different
-    models are not the same experiment — but the report is where that gets
+    models are not comparable — but the report is where that gets
     insisted on, not creation.
     """
     planner = planners_mod.create("icf", root=repo)
@@ -110,14 +110,14 @@ def test_linking_a_plan_is_idempotent(repo: Path) -> None:
 def test_registry_is_shared_across_worktrees(repo: Path) -> None:
     """A worktree must append to the same memory, not to a copy that dies with it.
 
-    Experiments live in worktrees; a Planner spans experiments. If the registry
-    resolved per-worktree, every experiment would start from nothing again —
+    Plans live in worktrees; a Planner spans plans. If the registry
+    resolved per-worktree, every plan would start from nothing again —
     which is the problem this exists to solve.
     """
     planners_mod.create("icf", model="m", root=repo)
     worktree = repo / ".worktrees" / "baseline"
     subprocess.run(
-        ["git", "worktree", "add", "-q", "-b", "exp/baseline", str(worktree)],
+        ["git", "worktree", "add", "-q", "-b", "plans/baseline", str(worktree)],
         cwd=repo,
         check=True,
         capture_output=True,
@@ -154,7 +154,7 @@ def test_no_planner_means_no_section(repo: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# the Planner comes before the experiment it owns
+# the Planner comes before the plan it owns
 
 
 def test_status_asks_for_a_planner_and_nothing_else(repo: Path, capsys) -> None:

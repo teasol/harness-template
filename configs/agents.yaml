@@ -20,7 +20,7 @@
 #          useful when a user has a Planner conversation going already.
 #
 # Placeholders: {model} {effort} {session} {root} {brief_file}
-#               {task_file} {task_id} {experiment}
+#               {task_file} {task_id}  — these two only for task runs
 #
 # Run `harness setup` to fill this in from the presets in
 # configs/agent-platforms.yaml.

@@ -1,4 +1,4 @@
-"""Tests for the experiment layer (Tier 1 <-> Tier 2).
+"""Tests for the plan layer (Tier 1 <-> Tier 2).
 
 Worktree tests run against a throwaway clone in ``tmp_path`` so they never
 create plans or worktrees in the checkout under test.
@@ -41,7 +41,7 @@ def clone(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# report schema: self-containment is the rule that keeps experiments comparable
+# report schema: self-containment is the rule that keeps plans comparable
 
 
 def _plan_with_report_source(tmp_path: Path, source: str) -> Path:
@@ -61,8 +61,8 @@ def test_demo_plan_declares_a_report() -> None:
 
 
 def test_report_source_may_not_escape_the_plan(tmp_path: Path) -> None:
-    """Reading a sibling experiment's results would make the report unjudgeable alone."""
-    path = _plan_with_report_source(tmp_path, "../exp-baseline/results/stats.json")
+    """Reading a sibling plan's results would make the report unjudgeable alone."""
+    path = _plan_with_report_source(tmp_path, "../other-plan/results/stats.json")
     with pytest.raises(PlanError, match="escapes via"):
         load_plan(path)
 
@@ -140,10 +140,10 @@ def test_invalid_plan_name_rejected(tmp_path: Path) -> None:
 def test_start_list_remove(clone: Path) -> None:
     assert plans_mod.list_plans(clone) == []
 
-    experiment = plans_mod.start("alpha", root=clone)
-    assert experiment.git_branch == "alpha"
-    assert experiment.path.is_dir()
-    assert experiment.plan_path.is_file()  # scaffolded for the Planner
+    work = plans_mod.start("alpha", root=clone)
+    assert work.git_branch == "alpha"
+    assert work.path.is_dir()
+    assert work.plan_path.is_file()  # scaffolded for the Planner
 
     listed = plans_mod.list_plans(clone)
     assert [e.name for e in listed] == ["alpha"]
@@ -166,7 +166,7 @@ def test_start_list_remove(clone: Path) -> None:
 
 @needs_git
 def test_plans_are_isolated_from_each_other(clone: Path) -> None:
-    """Two experiments get separate worktrees, so neither sees the other's files."""
+    """Two plans get separate worktrees, so neither sees the other's files."""
     a = plans_mod.start("alpha", root=clone)
     b = plans_mod.start("beta", root=clone)
     assert a.path != b.path
@@ -187,10 +187,10 @@ def test_find_unknown_plan(clone: Path) -> None:
 @needs_git
 def test_report_on_a_finished_plan(clone: Path) -> None:
     """The spine is measured, and requested metrics come from real artifacts."""
-    experiment = plans_mod.start("finished", root=clone)
-    wt = experiment.path
+    work = plans_mod.start("finished", root=clone)
+    wt = work.path
 
-    # Planner: adopt the demo pipeline fixture as this experiment's plan.
+    # Planner: adopt the demo pipeline fixture as the plan here.
     shutil.copy(DEMO_PLAN, wt / "plans/finished.yaml")
     plan_text = (wt / "plans/finished.yaml").read_text(encoding="utf-8")
     plan_text = plan_text.replace("name: demo-pipeline", "name: finished", 1)
@@ -201,7 +201,7 @@ def test_report_on_a_finished_plan(clone: Path) -> None:
         spec_text.replace("name: demo-pipeline", "name: finished", 1), encoding="utf-8"
     )
 
-    # Materialize and complete all tasks for this experiment
+    # Materialize and complete all tasks for this plan
     import yaml
 
     plan = load_plan(wt / "plans/finished.yaml")
@@ -237,8 +237,8 @@ def test_report_on_a_finished_plan(clone: Path) -> None:
 @needs_git
 def test_report_flags_an_unfinished_plan(clone: Path) -> None:
     """A dirty worktree with unfinished modules must never read as merge-ready."""
-    experiment = plans_mod.start("wip", root=clone)
-    wt = experiment.path
+    work = plans_mod.start("wip", root=clone)
+    wt = work.path
     shutil.copy(DEMO_PLAN, wt / "plans/wip.yaml")
     text = (wt / "plans/wip.yaml").read_text(encoding="utf-8")
     text = text.replace("name: demo-pipeline", "name: wip", 1)
@@ -268,9 +268,9 @@ def test_report_requires_a_plan(clone: Path) -> None:
 
 @needs_git
 def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
-    """Counting foreign task files reported an experiment complete when it was not."""
-    experiment = plans_mod.start("scoped", root=clone)
-    wt = experiment.path
+    """Counting foreign task files reported a plan complete when it was not."""
+    work = plans_mod.start("scoped", root=clone)
+    wt = work.path
     # A plan with two modules, neither materialized...
     shutil.copy(DEMO_PLAN, wt / "plans/scoped.yaml")
     text = (wt / "plans/scoped.yaml").read_text(encoding="utf-8")
@@ -297,8 +297,8 @@ def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
 @needs_git
 def test_not_ready_always_states_a_reason(clone: Path) -> None:
     """A verdict the user cannot explain is not a decision aid."""
-    experiment = plans_mod.start("unexplained", root=clone)
-    wt = experiment.path
+    work = plans_mod.start("unexplained", root=clone)
+    wt = work.path
     shutil.copy(DEMO_PLAN, wt / "plans/unexplained.yaml")
     text = (wt / "plans/unexplained.yaml").read_text(encoding="utf-8")
     (wt / "plans/unexplained.yaml").write_text(
@@ -315,16 +315,16 @@ def test_not_ready_always_states_a_reason(clone: Path) -> None:
 @needs_git
 def test_start_scaffolds_an_integration_spec(clone: Path) -> None:
     """The scaffold must not point at a file it forgot to create."""
-    experiment = plans_mod.start("scaffolded", root=clone)
-    assert (experiment.path / "configs" / "scaffolded.yaml").is_file()
+    work = plans_mod.start("scaffolded", root=clone)
+    assert (work.path / "configs" / "scaffolded.yaml").is_file()
 
 
 @needs_git
 def test_a_scaffold_is_not_a_plan(clone: Path) -> None:
     """Validating an untouched scaffold must fail, or TODOs read as a plan."""
-    experiment = plans_mod.start("stub", root=clone)
+    work = plans_mod.start("stub", root=clone)
     with pytest.raises(PlanError, match="still the scaffold"):
-        load_plan(experiment.plan_path)
+        load_plan(work.plan_path)
     with pytest.raises(WorkPlanError, match="still the scaffold"):
         plans_mod.build_report("stub", root=clone, run_integration=False)
 
@@ -410,9 +410,9 @@ def test_status_walks_the_whole_flow(clone: Path) -> None:
 
 @needs_git
 def test_status_knows_which_worktree_you_are_in(clone: Path) -> None:
-    experiment = plans_mod.start("here", root=clone)
+    work = plans_mod.start("here", root=clone)
     assert plans_mod.project_status(clone, cwd=clone).here is None
-    assert plans_mod.project_status(clone, cwd=experiment.path).here == "here"
+    assert plans_mod.project_status(clone, cwd=work.path).here == "here"
 
 
 @needs_git
@@ -486,15 +486,15 @@ def test_starting_a_plan_registers_its_planner(clone: Path) -> None:
 
 def _finished_plan(clone: Path, name: str = "reuse") -> object:
     """A plan whose single module is done and whose integration passes."""
-    experiment = plans_mod.start(
+    work = plans_mod.start(
         name,
         root=clone,
     )
-    exp_root = experiment.path
-    (exp_root / "configs").mkdir(exist_ok=True)
-    (exp_root / "src").mkdir(exist_ok=True)
-    (exp_root / "src" / "widget.py").write_text("x = 1\n", encoding="utf-8")
-    (exp_root / "configs" / f"{name}.yaml").write_text(
+    work_root = work.path
+    (work_root / "configs").mkdir(exist_ok=True)
+    (work_root / "src").mkdir(exist_ok=True)
+    (work_root / "src" / "widget.py").write_text("x = 1\n", encoding="utf-8")
+    (work_root / "configs" / f"{name}.yaml").write_text(
         f"""
 name: {name}
 steps:
@@ -510,8 +510,8 @@ steps:
 """,
         encoding="utf-8",
     )
-    (exp_root / "plans").mkdir(exist_ok=True)
-    experiment.plan_path.write_text(
+    (work_root / "plans").mkdir(exist_ok=True)
+    work.plan_path.write_text(
         f"""
 plan:
   name: {name}
@@ -542,9 +542,9 @@ plan:
     from harness.plan import load_plan as _load_plan
     from harness.task import complete, materialize
 
-    materialize(_load_plan(experiment.plan_path), exp_root / "tasks")
-    complete(exp_root / "tasks", "widget", worker="w", root=exp_root)
-    return experiment
+    materialize(_load_plan(work.plan_path), work_root / "tasks")
+    complete(work_root / "tasks", "widget", worker="w", root=work_root)
+    return work
 
 
 @needs_git
@@ -571,9 +571,9 @@ def test_no_run_with_nothing_to_reuse_says_so(clone: Path) -> None:
         "empty",
         root=clone,
     )
-    experiment = plans_mod.find_plan("empty", clone)
-    (experiment.path / "plans").mkdir(exist_ok=True)
-    experiment.plan_path.write_text(
+    work = plans_mod.find_plan("empty", clone)
+    (work.path / "plans").mkdir(exist_ok=True)
+    work.plan_path.write_text(
         """
 plan:
   name: empty
@@ -592,8 +592,8 @@ plan:
 """,
         encoding="utf-8",
     )
-    (experiment.path / "configs").mkdir(exist_ok=True)
-    (experiment.path / "configs" / "empty.yaml").write_text(
+    (work.path / "configs").mkdir(exist_ok=True)
+    (work.path / "configs" / "empty.yaml").write_text(
         "name: empty\nsteps:\n  - id: s\n    run: 'true'\n    checks: []\n", encoding="utf-8"
     )
     report = plans_mod.build_report("empty", root=clone, run_integration=False)
@@ -609,15 +609,15 @@ def test_reused_evidence_from_another_commit_blocks_the_merge(clone: Path) -> No
     Silently accepting it would let a report certify a commit the integration
     never ran against, which is the exact failure the reuse shortcut invites.
     """
-    experiment = _finished_plan(clone, "stale")
+    work = _finished_plan(clone, "stale")
     plans_mod.build_report("stale", root=clone)  # produces the run to reuse
 
     # The code moves on after that run.
-    exp_root = experiment.path
-    (exp_root / "src" / "widget.py").write_text("x = 2\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=exp_root, check=True, capture_output=True)
+    work_root = work.path
+    (work_root / "src" / "widget.py").write_text("x = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=work_root, check=True, capture_output=True)
     subprocess.run(
-        ["git", "commit", "-qm", "move on"], cwd=exp_root, check=True, capture_output=True
+        ["git", "commit", "-qm", "move on"], cwd=work_root, check=True, capture_output=True
     )
 
     report = plans_mod.build_report("stale", root=clone, run_integration=False)
@@ -631,15 +631,15 @@ def test_reused_evidence_from_another_commit_blocks_the_merge(clone: Path) -> No
 @needs_git
 def test_a_plan_approved_by_its_own_planner_is_flagged(clone: Path) -> None:
     """Self-approval passes the check and defeats it, so the report says so."""
-    experiment = _finished_plan(clone, "selfapproved")
-    plan_mod.record_approval(experiment.plan_path, by="planner")
+    work = _finished_plan(clone, "selfapproved")
+    plan_mod.record_approval(work.plan_path, by="planner")
     plans_mod.register_planner("selfapproved", "planner", root=clone, model="m", require_model=True)
 
     report = plans_mod.build_report("selfapproved", root=clone, run_integration=False)
     assert any("is the Planner itself" in c for c in report.caveats)
 
     # A different approver is not flagged.
-    plan_mod.record_approval(experiment.plan_path, by="user")
+    plan_mod.record_approval(work.plan_path, by="user")
     report = plans_mod.build_report("selfapproved", root=clone, run_integration=False)
     assert not any("is the Planner itself" in c for c in report.caveats)
 

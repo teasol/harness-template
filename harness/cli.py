@@ -751,7 +751,7 @@ def build_parser() -> argparse.ArgumentParser:
     planner_brief = planner_sub.add_parser(
         "brief", help="Print everything a session needs to act as this plan's Planner"
     )
-    planner_brief.add_argument("name", help="Experiment name")
+    planner_brief.add_argument("name", help="Plan name")
     planner_brief.add_argument(
         "--register", default=None, help="Record this label as this plan's Planner"
     )

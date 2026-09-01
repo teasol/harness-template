@@ -145,7 +145,7 @@ project:
     architecture: docs/current_architecture.md
     protocol: docs/current_experiments.md
 
-  # Where this project's house reporting format is defined. Experiment reports
+  # Where this project's house reporting format is defined. Plan reports
   # follow it instead of the harness's own shape.
   report_format: docs/current_status.md
 

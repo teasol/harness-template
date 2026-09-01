@@ -22,6 +22,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project: the user. Docs, agent contracts, report text, and scaffolded
   templates all use the new word; existing plan/task/approval files are
   unaffected (the approver name is free text).
+- **The last of the pre-0.4.0 "experiment" vocabulary is gone from live files.**
+  Three renames landed on the concept and left the word behind in places nobody
+  reads on the way past: the `Experiment` issue template is now `Plan` (goal,
+  who builds each module, and a link to the report the harness generated rather
+  than a metric table retyped by hand), `configs/default.yaml`'s example key is
+  `run:`, and the docstrings in `harness/runner.py`, `harness/project.py` and
+  `configs/agent-platforms.yaml` say plan. The test suite's in-flight-plan
+  variables are named `work`, which is what the source already calls them —
+  `plan` stays the loaded plan document, so the two are never the same name.
+
+### Fixed
+
+- **This repository stopped ignoring its own worktrees.** The root `.gitignore`
+  listed `.experiments/`, the path from before 0.4.0, while `harness plan new`
+  creates `.worktrees/` — which the *shipped* template has ignored all along.
+  Running a plan inside this checkout, or inside a project cloned from it as a
+  template, left the worktree sitting in `git status` as untracked. The two
+  files are identical again.
+- **`configs/agents.yaml` documented an adapter placeholder that does not
+  exist.** It listed `{experiment}`; `render_command()` substitutes `{model}`,
+  `{effort}`, `{session}`, `{root}` and `{brief_file}` on every invocation and
+  adds `{task_file}` and `{task_id}` for task runs, so a command template that
+  used the documented name would raise `KeyError` when the harness tried to
+  spawn the agent. The comment now names only what is passed, and says which
+  two are task-only.
+- **`harness planner brief` called its argument "Experiment name"** in `--help`,
+  the last user-visible sighting of a concept the CLI removed two releases ago.
 
 ## [0.6.0] - 2026-08-31
 

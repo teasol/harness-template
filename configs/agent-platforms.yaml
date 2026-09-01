@@ -16,8 +16,8 @@
 # tests it is being judged on. A mode that only accepts edits leaves the agent
 # writing a correct plan and then stopping to ask permission — which is exactly
 # what happened the first time these presets were used. Run agents where you
-# are willing to let them execute: an experiment worktree is isolated and its
-# worktree is disposable, which is the point.
+# are willing to let them execute: a plan's worktree is isolated and
+# disposable, which is the point.
 
 platforms:
   manual:

@@ -258,9 +258,9 @@ class Runner:
 def _python_path(root: Path, existing: str | None) -> str:
     """Put the tree being verified ahead of anything installed.
 
-    Without this a step run inside an experiment worktree would import the
+    Without this a step run inside a plan's worktree would import the
     main checkout's code (an editable install points at one tree only), so
-    the experiment would verify somebody else's source.
+    the plan would verify somebody else's source.
     """
     entries = [str(root)] + [str(root / "src")] * (root / "src").is_dir()
     if existing:
