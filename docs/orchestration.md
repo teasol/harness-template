@@ -20,10 +20,10 @@ everything else is written down.
 
 ```mermaid
 flowchart TD
-    P["Planner agent<br/>(agents/planner.md)"] -->|"writes"| PL["plans/*.yaml<br/>goal · DAG · contracts · briefs · acceptance"]
+    P["Planner agent<br/>(.harness/agents/planner.md)"] -->|"writes"| PL["plans/*.yaml<br/>goal · DAG · contracts · briefs · acceptance"]
     PL -->|"harness plan materialize"| T["tasks/*.task.yaml<br/>self-contained work orders"]
     T -->|"executor: main — the default"| P
-    T -->|"executor: sub"| W1["Sub-Worker<br/>(agents/worker.md)"]
+    T -->|"executor: sub"| W1["Sub-Worker<br/>(.harness/agents/worker.md)"]
     P -->|"implements"| S1["src/... deliverables"]
     W1 -->|"implements"| S2["src/... deliverables"]
     S1 -->|"harness task verify/done"| H["Runner + checks<br/>(existing harness)"]

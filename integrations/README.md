@@ -58,7 +58,7 @@ plan name as its argument. Two or three lines is the whole thing.
 
 ## Configuring Workers
 
-Workers are invoked by `configs/agents.yaml`. The default (`manual`) writes a
+Workers are invoked by `.harness/configs/agents.yaml`. The default (`manual`) writes a
 briefing for a human to hand to a session, so the template works with no setup.
 
 To automate, set `adapter: cli` and point `command` at your coding agent's
@@ -75,4 +75,4 @@ cheaper and more likely to succeed.
 The harness deliberately does not ship a command for any specific tool. Flags
 change between versions and between vendors; a stale example that silently
 does the wrong thing is worse than none. Check your tool's own documentation
-for its non-interactive invocation, and put it in `configs/agents.yaml`.
+for its non-interactive invocation, and put it in `.harness/configs/agents.yaml`.

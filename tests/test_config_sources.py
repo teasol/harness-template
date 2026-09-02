@@ -1,14 +1,15 @@
 """Tests that keep the shipped configuration and its documentation honest.
 
-Three copies of the agent configuration exist for good reasons — one in the
-package that `harness init` installs, one at this repository's root because the
-repository is also a harness project, and the header that `harness setup`
-writes. They drifted: the root copies were maintained for three releases while
-the copies users actually receive were not, so the file a project gets was the
-poorer of the two. Prose is not testable, but *identity* is, and the drift these
-tests catch is always identity drift.
+The configuration a project receives lives in one place, `harness/templates/`,
+and is copied out by `harness init`. It did not use to: a second copy sat at
+this repository's root, because the repository was treated as a harness project
+too, and for three releases the root copy was maintained while the copy users
+actually receive was not — so the file a project got was the poorer of the two.
+The duplicates are gone, and `agents.yaml` has a source above even the shipped
+file: `harness setup` generates its header from `harness.setup.HEADER`, so the
+checked-in file is only that constant's output.
 
-They also gate a bug that has now shipped twice: a placeholder documented in a
+These tests also gate a bug that shipped twice: a placeholder documented in a
 comment that nothing substitutes. `render_command` resolves the command template
 with `str.format`, so a name it does not pass raises `KeyError` at spawn time —
 after the model has been chosen and the brief written.
@@ -26,32 +27,29 @@ from harness.worker import AgentConfig, render_command
 
 REPO = Path(__file__).resolve().parent.parent
 PACKAGED_CONFIGS = REPO / "harness" / "templates" / "configs"
-ROOT_CONFIGS = REPO / "configs"
 
 SYNC = "make sync-configs"
 
 
-@pytest.mark.parametrize(
-    "path",
-    [ROOT_CONFIGS / "agents.yaml", PACKAGED_CONFIGS / "agents.yaml"],
-    ids=["root", "packaged"],
-)
-def test_every_checked_in_agents_yaml_carries_the_current_header(path: Path) -> None:
-    """`setup.HEADER` is the single source; a checked-in copy is only its output."""
-    text = path.read_text(encoding="utf-8")
+def test_the_repository_keeps_no_second_copy_of_the_configuration() -> None:
+    """One copy cannot drift from itself, which is why the duplicates went.
+
+    This repository is the package, not a harness project: it does not run the
+    harness on itself, so it has no reason to hold configuration of its own.
+    """
+    for stray in ("configs/agents.yaml", "configs/agent-platforms.yaml"):
+        assert not (REPO / stray).exists(), (
+            f"{stray} is back. The shipped copy under harness/templates/configs/ is "
+            "the only one; a second copy is what drifted for three releases."
+        )
+
+
+def test_the_shipped_agents_yaml_carries_the_current_header() -> None:
+    """`setup.HEADER` is the source; the checked-in file is only its output."""
+    text = (PACKAGED_CONFIGS / "agents.yaml").read_text(encoding="utf-8")
     assert text.startswith(setup_mod.HEADER), (
-        f"{path.relative_to(REPO)} has a stale header. It is written by "
-        f"`harness setup`, so regenerate it rather than editing it: {SYNC}"
-    )
-
-
-def test_the_platform_presets_are_the_same_file_everywhere() -> None:
-    """Presets are vendor data with nothing project-specific to differ about."""
-    packaged = (PACKAGED_CONFIGS / "agent-platforms.yaml").read_bytes()
-    root = (ROOT_CONFIGS / "agent-platforms.yaml").read_bytes()
-    assert packaged == root, (
-        "configs/agent-platforms.yaml and the copy inside the package have "
-        f"diverged. The packaged file is the source of record: {SYNC}"
+        "harness/templates/configs/agents.yaml has a stale header. It is written "
+        f"by `harness setup`, so regenerate it rather than editing it: {SYNC}"
     )
 
 
@@ -76,9 +74,7 @@ def _documented(text: str) -> tuple[set[str], set[str]]:
 
 
 DOCUMENTING_FILES = [
-    ROOT_CONFIGS / "agents.yaml",
     PACKAGED_CONFIGS / "agents.yaml",
-    ROOT_CONFIGS / "agent-platforms.yaml",
     PACKAGED_CONFIGS / "agent-platforms.yaml",
 ]
 
@@ -94,7 +90,7 @@ def test_the_header_documents_placeholders_at_all() -> None:
     assert always and task_only
 
 
-@pytest.mark.parametrize("path", DOCUMENTING_FILES, ids=lambda p: str(p.name) + ":" + p.parent.name)
+@pytest.mark.parametrize("path", DOCUMENTING_FILES, ids=lambda p: p.name)
 def test_documented_placeholders_are_the_ones_the_harness_substitutes(path: Path) -> None:
     """`{experiment}` and `{plan}` were both documented; neither ever existed."""
     always, task_only = _documented(path.read_text(encoding="utf-8"))
@@ -108,7 +104,7 @@ def test_documented_placeholders_are_the_ones_the_harness_substitutes(path: Path
         _render(template, task_id="widget", task_file="tasks/widget.yaml")
 
 
-def test_the_two_files_document_the_same_placeholders() -> None:
+def test_both_files_document_the_same_placeholders() -> None:
     """Two lists that disagree mean one of them is wrong, and no one knows which."""
     documented = {
         str(path.relative_to(REPO)): tuple(

@@ -51,20 +51,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The agent configuration has one source, and a test that says so.** Two
-  copies of `agents.yaml` and `agent-platforms.yaml` are checked in — the one
-  the package installs on `harness init`, and the one at this repository's root
-  because the repository is also a harness project — and they drifted for three
-  releases in the direction that matters least: the copy a project *receives*
-  was the poorer of the two, missing the placeholder list, the "flags go stale"
-  warning and the paragraph about why an agent needs permission to run commands
-  and not only to edit files. `harness setup` already generated the
-  `agents.yaml` header from `harness.setup.HEADER`, so that constant is now the
-  only place it is written and both checked-in copies are its output;
-  `tests/test_config_sources.py` fails when either one drifts or when the two
-  preset files differ, and `make sync-configs` (`scripts/sync_configs.py`) is
-  what you run to make them agree. Refreshing a header keeps every configured
-  value, so it is safe in a real project.
+- **`AGENTS.md` describes this repository instead of describing a research
+  project.** It opened "Ground rules for AI coding agents working in
+  repositories created with Research Harness" and went on to call this a
+  research project with a plan directory and a task board — a near-copy of the
+  file that ships. It is now what an agent working on *the package* needs:
+  that `harness/templates/` is the payload and where to change a contract, why
+  the dependency floor is stdlib + PyYAML, that printed commands must go through
+  `invocation.py`, that tests must not write into the checkout, that
+  `setup.HEADER` is the source of the `agents.yaml` header, and that the
+  `Verification` workflow does not run on a push to `main`.
+- The README's project-structure section showed one tree labelled
+  `harness-template/` that mixed this repository's layout with a scaffolded
+  project's. It is now two: what `harness init` puts in your project, and what
+  this repository contains.
+- **The agent configuration has one source, and a test that says so.** The two
+  copies had drifted for three releases in the direction that matters least: the
+  copy a project *receives* was the poorer one, missing the placeholder list,
+  the "flags go stale" warning and the paragraph about why an agent needs
+  permission to run commands and not only to edit files. `harness setup` already
+  generated the `agents.yaml` header from `harness.setup.HEADER`, so that
+  constant is the only place it is written and the shipped file is its output;
+  `tests/test_config_sources.py` fails when it drifts, and `make sync-configs`
+  (`scripts/sync_configs.py`) puts it back. Refreshing a header keeps every
+  configured value, so it is safe to point at a real project's file.
+
+### Removed
+
+- **The second copy of everything the harness ships.** This repository held a
+  parallel set of the files `harness init` installs — `configs/agents.yaml`,
+  `configs/agent-platforms.yaml`, `agents/planner.md`, `agents/worker.md` — so
+  that the harness could be run on the repository itself. That dogfooding is not
+  worth its cost: nothing functional read those files (deleting them leaves the
+  test suite and every CI step green), and they were the drift that let the copy
+  users actually receive fall three releases behind the copy maintained here.
+  `harness/templates/` is now the only place the shipped configuration and the
+  role contracts exist, and a test fails if a root copy reappears. `configs/`
+  keeps only `demo.yaml`, which is this package's own end-to-end smoke spec and
+  differs from the shipped twin on purpose. `configs/default.yaml`, referenced
+  by nothing and copied by nothing, is gone too.
 
 ### Fixed
 

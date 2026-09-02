@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from harness import setup as setup_mod
 from harness.setup import (
     SetupError,
     build_config,
@@ -21,9 +22,20 @@ from harness.setup import (
 )
 from harness.worker import AgentConfig, WorkerError, load_agent_config, load_worker_config
 
+#: The presets that ship inside the package. This repository is not a harness
+#: project — it does not use the harness on itself — so there is no root copy to
+#: read, and reading the shipped file is what a real project reads anyway.
+PACKAGED_PRESETS = (
+    Path(setup_mod.__file__).resolve().parent / "templates" / "configs" / "agent-platforms.yaml"
+)
+
+
+def _shipped_presets():
+    return load_platforms(path=PACKAGED_PRESETS)
+
 
 def test_shipped_presets_load() -> None:
-    platforms = load_platforms(root=".")
+    platforms = _shipped_presets()
     assert {"manual", "claude", "codex", "opencode", "antigravity", "custom"} <= set(platforms)
     for name, platform in platforms.items():
         if name in ("custom", "manual"):
@@ -36,7 +48,7 @@ def test_shipped_presets_load() -> None:
 
 
 def test_manual_platform_builds_manual_adapter() -> None:
-    platform = load_platforms(root=".")["manual"]
+    platform = _shipped_presets()["manual"]
     planner = build_config(platform, attempts=3, label="planner")
     worker = build_config(platform, attempts=6, label="worker")
     assert planner.adapter == "manual"
@@ -51,7 +63,7 @@ def test_missing_presets_is_an_error(tmp_path: Path) -> None:
 
 
 def test_build_config_injects_the_tier() -> None:
-    platform = load_platforms(root=".")["claude"]
+    platform = _shipped_presets()["claude"]
     config = build_config(platform, model="haiku", effort="low")
     assert config.adapter == "cli"
     assert config.model == "haiku" and config.effort == "low"
@@ -59,19 +71,19 @@ def test_build_config_injects_the_tier() -> None:
 
 
 def test_unknown_reasoning_level_is_refused() -> None:
-    platform = load_platforms(root=".")["claude"]
+    platform = _shipped_presets()["claude"]
     with pytest.raises(SetupError, match="not a reasoning level"):
         build_config(platform, model="haiku", effort="turbo")
 
 
 def test_model_is_required_when_the_command_wants_one() -> None:
-    platform = load_platforms(root=".")["claude"]
+    platform = _shipped_presets()["claude"]
     with pytest.raises(SetupError, match="needs a model"):
         build_config(platform, model="", effort="low")
 
 
 def test_custom_platform_needs_its_own_command() -> None:
-    platform = load_platforms(root=".")["custom"]
+    platform = _shipped_presets()["custom"]
     with pytest.raises(SetupError, match="no command preset"):
         build_config(platform, model="x", effort="")
     config = build_config(platform, model="x", effort="", command="run-my-agent {root}")
@@ -80,7 +92,7 @@ def test_custom_platform_needs_its_own_command() -> None:
 
 def test_both_tiers_round_trip(tmp_path: Path) -> None:
     """Both tiers are written to one file, and each loads back independently."""
-    platform = load_platforms(root=".")["claude"]
+    platform = _shipped_presets()["claude"]
     planner = build_config(platform, model="opus", effort="high", attempts=3, label="planner")
     worker = build_config(platform, model="haiku", effort="low", attempts=6)
     path = write_agent_config(planner, worker, root=tmp_path)
@@ -100,14 +112,14 @@ def test_both_tiers_round_trip(tmp_path: Path) -> None:
 
 def test_planner_defaults_to_the_reasoning_tier() -> None:
     """The preset's planner defaults should not be the worker's small model."""
-    platform = load_platforms(root=".")["claude"]
+    platform = _shipped_presets()["claude"]
     assert platform.planner_model and platform.planner_model != platform.default_model
     assert platform.planner_effort != platform.default_effort
 
 
 def test_attaching_a_session_switches_the_command(tmp_path: Path) -> None:
     """A user with a session already open can hand it to a tier."""
-    platform = load_platforms(root=".")["claude"]
+    platform = _shipped_presets()["claude"]
     config = build_config(platform, model="opus", effort="high", label="planner", session="abc-123")
     assert config.session == "abc-123"
     assert "{session}" in config.command
@@ -115,7 +127,7 @@ def test_attaching_a_session_switches_the_command(tmp_path: Path) -> None:
 
 
 def test_a_session_command_without_a_session_is_refused() -> None:
-    platform = load_platforms(root=".")["claude"]
+    platform = _shipped_presets()["claude"]
     with pytest.raises(SetupError, match="none was given"):
         build_config(
             platform,
@@ -141,7 +153,7 @@ def test_presets_let_an_agent_actually_run_things() -> None:
     permission to run `plan materialize`, because the preset only accepted
     edits. A preset that cannot execute is a preset that cannot finish.
     """
-    platforms = load_platforms(root=".")
+    platforms = _shipped_presets()
     assert "acceptEdits" not in platforms["claude"].command
     assert "bypassPermissions" in platforms["claude"].command
     assert "bypassPermissions" in platforms["claude"].resume_command
@@ -155,9 +167,8 @@ def test_presets_let_an_agent_actually_run_things() -> None:
 
 def test_opencode_offers_verified_models() -> None:
     """Ids are long and versioned; a wrong one fails much later, as a dead agent."""
-    from harness.setup import load_platforms
 
-    opencode = load_platforms(root=".")["opencode"]
+    opencode = _shipped_presets()["opencode"]
     assert opencode.models == [
         "zai/glm-5.3",
         "deepseek/deepseek-v4-flash",
@@ -171,9 +182,8 @@ def test_opencode_offers_verified_models() -> None:
 
 def test_a_number_picks_from_the_list(monkeypatch, capsys) -> None:
     from harness.cli import _prompt_model
-    from harness.setup import load_platforms
 
-    opencode = load_platforms(root=".")["opencode"]
+    opencode = _shipped_presets()["opencode"]
     monkeypatch.setattr("builtins.input", lambda _: "3")
     assert _prompt_model("worker", opencode, opencode.default_model) == "deepseek/deepseek-v4-pro"
     assert "1. zai/glm-5.3" in capsys.readouterr().out
@@ -182,9 +192,8 @@ def test_a_number_picks_from_the_list(monkeypatch, capsys) -> None:
 def test_free_text_still_goes_through(monkeypatch) -> None:
     """A list is a shortcut, not a whitelist — new models must not be blocked."""
     from harness.cli import _prompt_model
-    from harness.setup import load_platforms
 
-    opencode = load_platforms(root=".")["opencode"]
+    opencode = _shipped_presets()["opencode"]
     monkeypatch.setattr("builtins.input", lambda _: "anthropic/claude-opus-5")
     assert _prompt_model("worker", opencode, "") == "anthropic/claude-opus-5"
 
@@ -192,18 +201,16 @@ def test_free_text_still_goes_through(monkeypatch) -> None:
 def test_out_of_range_numbers_are_taken_literally(monkeypatch) -> None:
     """`9` is not a choice here, so it is whatever the user meant to type."""
     from harness.cli import _prompt_model
-    from harness.setup import load_platforms
 
-    opencode = load_platforms(root=".")["opencode"]
+    opencode = _shipped_presets()["opencode"]
     monkeypatch.setattr("builtins.input", lambda _: "9")
     assert _prompt_model("worker", opencode, "") == "9"
 
 
 def test_a_platform_without_a_model_list_prompts_plainly(monkeypatch) -> None:
     from harness.cli import _prompt_model
-    from harness.setup import load_platforms
 
-    custom = load_platforms(root=".")["custom"]
+    custom = _shipped_presets()["custom"]
     assert not custom.models
     monkeypatch.setattr("builtins.input", lambda _: "")
     assert _prompt_model("worker", custom, "fallback") == "fallback"

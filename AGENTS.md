@@ -1,87 +1,78 @@
 # AGENTS.md
 
-Ground rules for AI coding agents (and humans) working in repositories created
-with Research Harness. Read this before making any change.
+Ground rules for working on **the `research-harness` package itself**. Read this
+before making any change.
 
-Lost? `python -m harness status` reads the repository's real state and names
-the next action. Picking up someone else's work — or your own from another
-machine — start at `HANDOFF.md`: it is regenerated whenever the work moves and
-carries what no file records, the decisions made and the dead ends already hit.
+This repository is not a harness project. It does not run the harness on itself,
+has no `.harness/`, no plans, no Planner and no task board — it is the source of
+the tool that gives other repositories those things. Do not add them here: a
+second copy of the configuration is exactly what drifted for three releases, and
+`tests/test_config_sources.py` now fails if one reappears.
 
-## Repository purpose
+## What ships, and what does not
 
-This is a research project with **two-tier agent orchestration**:
-a Planner agent owns direction and flow (`.harness/plans/` or `plans/`), Worker agents each own one
-module task (`.harness/tasks/` or `tasks/`), and the harness enforces every contract
-machine-checkably. Project-specific research code lives alongside it and must
-keep using the harness for anything that needs to be trusted or reproduced.
+Everything a project receives lives in **`harness/templates/`**, and
+`harness init` copies it out ([harness/init.py](harness/init.py)). That matters
+more than it looks: a user installs with `pip install` or `uv add`, so they never
+have this checkout — the role contracts, the agent configuration, the demo spec
+and the `.gitignore` have to be inside the package or they do not exist for
+them.
 
-## Orchestration roles
+So when you change a contract or a config, change the file under
+`harness/templates/`. There is no root copy any more.
 
-Work happens in **two tiers**.
+Two files at the root are *not* copies and stay:
 
-**Tier 1 — research strategy and decision.** The user and the Planner
-talk: what is being asked, what would count as an answer, what gets reported.
-The user decides what gets merged. **Never merge a plan's branch
-yourself** — reporting is the Planner's job, merging is the user's.
+- `configs/demo.yaml` + `scripts/demo_step.py` — this package's own end-to-end
+  smoke test, run by CI and `make verify`. The shipped twin differs on purpose:
+  it points at `${HARNESS_DIR}/scripts/`, because in a scaffolded project the
+  script lives under `.harness/`.
+- `.gitignore` — this repository's own, like any repository's.
 
-**Tier 2 — serial execution**, one dedicated plan per piece of work. The Planner
-is also the **Main Worker**, and it does the building: it works through the
-plan's modules in order, and `executor` defaults to `main`, so every module is
-its own unless it says otherwise. Where a module is routine bulk — long
-mechanical coding, log parsing — it marks that one `executor: sub`, a
-**Sub-Worker** is spawned for it alone, finishes it, and returns; the Main Worker
-carries on with the next module. One Planner runs **many** plans; each plan has
-one Planner. The harness verifies whatever comes out, whoever produced it.
+## Rules
 
-You are always acting in ONE of these roles — know which:
+1. **stdlib + PyYAML.** No runtime dependency beyond PyYAML. The harness runs
+   inside other people's environments and must not fight their dependency
+   resolution. Dev-only tools (pytest, ruff) go in `[project.optional-dependencies]`.
+2. **Behaviour is proven by a test, not by a docstring.** Every fix lands with a
+   test that fails without it. The suite is fast (~100s) and hermetic: no
+   network, no API keys, no model calls. Where a coding agent would be, a shell
+   command stands in.
+3. **Tests must not write into the checkout.** Use `tmp_path`. A command that
+   writes state — `plan new`, `task done`, `note`, `handoff` — takes a `--root`
+   or `root=`; pass a temporary one. `HANDOFF.md` appearing at the repository
+   root means a test leaked.
+4. **Say why in the code, not only in the commit.** The comments and docstrings
+   here carry the reasoning — what went wrong before, what the alternative was,
+   why the default is what it is. That is deliberate: the next reader is usually
+   a model with no memory of the incident. Keep it, and add to it.
+5. **The CHANGELOG is part of the change.** Entries go under `[Unreleased]` in
+   `Added` / `Changed` / `Fixed`, and they explain the *reason*, not just the
+   diff. Releases are separate `chore(release):` commits that bump
+   `pyproject.toml`, `harness/__init__.py` and the heading together.
+6. **Printed commands go through [harness/invocation.py](harness/invocation.py).**
+   Never hardcode `harness ...` or `python -m harness ...` in output a user
+   reads: the prefix depends on how the harness was invoked (`uv run harness`,
+   the console script, or `python -m`). `invocation.cmd()` and
+   `invocation.steps()` resolve it.
+7. **`harness/setup.py:HEADER` is the source of the `agents.yaml` header.** The
+   checked-in file is its output. Editing the file by hand desynchronizes it
+   from what `harness setup` writes into real projects; run `make sync-configs`.
+8. **A documented placeholder must exist.** Adapter commands are resolved with
+   `str.format`, so a name `render_command` does not pass raises `KeyError` when
+   the harness spawns the agent. This shipped twice (`{experiment}`, then
+   `{plan}`); the tests now render every documented placeholder.
 
-- **Planner / Main Worker** (agents/planner.md): own the plans, module DAGs, contracts, acceptance, the integration spec, and the report — **and build the modules.** That is the default: every module is yours unless you mark it `executor: sub`, which you do for routine bulk a brief can specify completely. Choosing what to hand off is your judgement, and it is the judgement the tier exists for.
-- **Sub-Worker** (agents/worker.md): claim exactly one task, implement it fully against the task file's brief and contract, verify, mark done. Never touch other modules, the plan, or `harness/` — **this is enforced, not merely asked**: the harness hashes its own package around every invocation and fails the task outright if it changed, and fails it too if you modified a tracked file you never declared as a deliverable. If acceptance fails for an infrastructural reason, say so in your output and stop; do not fix the harness.
-- **Maintainer** (default): work on project code, CI, or docs. Follow the rules below.
-
-## Non-negotiable rules
-
-1. **Verify before you finish.** A task is not done until
-   acceptance tests and integration verification pass. If your change touches
-   determinism (seeds, data loading, model code), run `harness reproduce`.
-2. **Never commit artifacts.** `data/` and `results/` are gitignored.
-   Never commit checkpoints, logs, or datasets.
-3. **Determinism first.** Every source of randomness must be seeded.
-4. **Declarative verification.** Prefer adding a check to a spec over writing one-off validation scripts.
-
-## Standard commands
-
-Orchestration commands:
+## Before you push
 
 ```bash
-python -m harness plan validate|materialize|status <plan>
-python -m harness plan approve <plan> --by <who>           # plan run requires this
-python -m harness plan check                              # every plan, no name needed
-python -m harness task list|show|claim|block|verify|done --id <id>
-python -m harness task verify --all [--status done]       # audit the board
-python -m harness task run --id <id>                      # invoke a Worker + verify
-python -m harness plan run <plan>                         # drain the ready queue
-python -m harness progress [--watch]                      # where it is right now
+make lint          # ruff check + format check
+make test          # pytest
+make verify        # the package's own end-to-end spec
 ```
 
-Plan commands (Tier 1 boundary):
-
-```bash
-python -m harness project init|show                        # what a Planner must know here
-python -m harness create -n <name> [--model M] [--effort E]  # a Planner
-python -m harness planner set <name> --model M            # once a manual one is known
-python -m harness planner list|show <name>
-python -m harness planner note <name> --add "..." [--plan P]
-python -m harness plan new <name> [--planner P] [--base main]
-python -m harness plans
-python -m harness report <name> [--determinism] [--save]
-python -m harness plan drop <name>
-```
-
-Verification commands:
-
-```bash
-python -m harness verify --spec <spec>.yaml [--results-dir DIR]
-python -m harness reproduce --spec <spec>.yaml [--times N]
-python -m harness hash <file>          # sha256 helper
+CI runs lint + tests on every push (Python 3.10–3.12). The heavier
+`Verification` workflow — determinism gate, plan lifecycle, handoff and
+resume — runs on pull requests, on manual dispatch, and weekly. **It does not
+run on a push to `main`**, which is how a broken step once survived two
+releases; if you change something it exercises, run its steps locally.

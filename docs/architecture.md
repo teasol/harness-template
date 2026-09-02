@@ -60,7 +60,7 @@ One engine, three altitudes.
   decides *what* to run, never whether the result was good enough.
 - **No vendor in the core**: how a Worker is invoked, and how a Planner is
   registered, are configuration and plain commands. Platform presets are data
-  (`configs/agent-platforms.yaml`); tool-specific shims live in
+  (`.harness/configs/agent-platforms.yaml`); tool-specific shims live in
   `integrations/`. Both are optional and neither is referenced by name in code.
 - **A tier you cannot choose is not a tier**: platform, model, and reasoning
   level are explicit settings, and both tiers are recorded in the report — so

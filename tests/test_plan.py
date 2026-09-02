@@ -358,7 +358,9 @@ def test_the_two_tier_model_is_stated_where_agents_read_it() -> None:
     is the opposite of the Main Worker role. A doc that contradicts the model is
     worse than no doc, because agents follow it.
     """
-    root = Path(__file__).resolve().parent.parent
+    # The shipped copies are the only ones there are: this repository is the
+    # package, not a harness project, so it keeps no contracts of its own.
+    root = Path(__file__).resolve().parent.parent / "harness" / "templates"
     planner = (root / "agents" / "planner.md").read_text(encoding="utf-8")
     worker = (root / "agents" / "worker.md").read_text(encoding="utf-8")
     agents_md = (root / "AGENTS.md").read_text(encoding="utf-8")
@@ -371,12 +373,6 @@ def test_the_two_tier_model_is_stated_where_agents_read_it() -> None:
     assert "two tiers" in agents_md
     assert "Tier 3" not in agents_md
 
-    # The scaffolded copies are what land in someone else's project.
-    for rel in ("harness/templates/agents/planner.md", "harness/templates/AGENTS.md"):
-        text = (root / rel).read_text(encoding="utf-8")
-        assert "Tier 3" not in text
-        assert "Never implement modules yourself" not in text
-
 
 def test_nothing_tells_the_planner_it_may_not_implement() -> None:
     """The Planner is the Main Worker, and every surface it reads must agree.
@@ -387,11 +383,10 @@ def test_nothing_tells_the_planner_it_may_not_implement() -> None:
     """
     root = Path(__file__).resolve().parent.parent
     surfaces = [
-        "agents/planner.md",
         "harness/templates/agents/planner.md",
-        "AGENTS.md",
         "harness/templates/AGENTS.md",
         "harness/plans.py",
+        "harness/handoff.py",
         "integrations/README.md",
         "README.md",
     ]
@@ -405,7 +400,9 @@ def test_nothing_tells_the_planner_it_may_not_implement() -> None:
             assert forbidden not in text, f"{rel} still forbids the Main Worker from working"
 
     # And the way out of a blocked task has to be spelled out where it happens.
-    contract = (root / "agents" / "planner.md").read_text(encoding="utf-8")
+    contract = (root / "harness" / "templates" / "agents" / "planner.md").read_text(
+        encoding="utf-8"
+    )
     assert "Take the module over" in contract
     assert "executor: main" in contract
     worker_src = (root / "harness" / "worker.py").read_text(encoding="utf-8")

@@ -420,8 +420,9 @@ Isolation belongs at the plan level: a plan's DAG is near-linear so concurrency
 buys little, while per-Worker branches would fracture the task board and make
 dependency gates read stale state.
 
-- **Planner / Main Worker contract**: [agents/planner.md](agents/planner.md)
-- **Sub-Worker contract**: [agents/worker.md](agents/worker.md)
+- **Planner / Main Worker contract**: [agents/planner.md](harness/templates/agents/planner.md)
+  — lands in your project as `.harness/agents/planner.md`
+- **Sub-Worker contract**: [agents/worker.md](harness/templates/agents/worker.md)
 - **Full reference**: [docs/orchestration.md](docs/orchestration.md)
 
 ### Choosing the Sub-Worker
@@ -451,7 +452,7 @@ received it. A preset that does not match the installed CLI otherwise fails
 silently: attempts ending in under a second each, with the agent never having
 seen the task.
 
-Platform knowledge lives in `configs/agent-platforms.yaml` as **data** — adding
+Platform knowledge lives in `.harness/configs/agent-platforms.yaml` as **data** — adding
 your lab's tool, or a local model, is an entry there, not a change to
 `harness/`.
 
@@ -523,23 +524,37 @@ python -m harness note "..." --decision | --dead-end
 
 ## Project structure
 
+What `harness init` puts in **your** project — everything the harness owns is
+under `.harness/`, so it cannot collide with what is already there:
+
+```
+<my-project>/
+├── AGENTS.md               # Ground rules every agent reads (root, by convention)
+├── HANDOFF.md              # What the last session left the next one (generated, commit it)
+├── .gitignore              # Harness entries appended to whatever was there
+├── .worktrees/             # One worktree per plan in flight (gitignored)
+├── results/                # Run artifacts and reports
+└── .harness/               # Everything else the harness owns
+    ├── agents/planner.md   #   Planner = Main Worker: plans, and implements
+    ├── agents/worker.md    #   Sub-Worker: one module task, in isolation
+    ├── configs/agents.yaml #   the Sub-Worker tier (the Planner is you)
+    ├── configs/project.yaml#   authoritative docs, report format, conventions
+    ├── configs/demo.yaml   #   smoke spec, so "prove it works here" works
+    ├── plans/              #   plans (Planner output)
+    ├── tasks/              #   materialized work orders + lifecycle
+    ├── planners/           #   registered Planners and what they have learned
+    └── adoption.json       #   how the harness arrived, if code predated it
+```
+
+And this repository, which is the package rather than a project using it:
+
 ```
 harness-template/
-├── AGENTS.md               # Agent-facing ground rules (read this first)
-├── HANDOFF.md              # What the last session left the next one (generated, commit it)
-├── Makefile                # status / setup / verify / reproduce / run / audit / drift
+├── AGENTS.md               # Ground rules for working on the package itself
+├── Makefile                # lint / test / verify / reproduce / sync-configs
 ├── pyproject.toml          # Project metadata + tool config
-├── .worktrees/             # One worktree per plan in flight (gitignored)
-├── .harness/               # Harness state that is not project code
-│   ├── configs/agents.yaml #   the Sub-Worker tier (the Planner is you)
-│   ├── configs/project.yaml#   authoritative docs, report format, conventions
-│   ├── planners/           #   registered Planners and what they have learned
-│   └── adoption.json       #   how the harness arrived, if code predated it
-├── agents/                 # Role contracts
-│   ├── planner.md          #   Planner = Main Worker: plans, and implements
-│   └── worker.md           #   Sub-Worker: one module task, in isolation
-├── plans/                  # Plans (Planner output)
-├── tasks/                  # Materialized work orders + lifecycle
+├── configs/demo.yaml       # The package's own end-to-end smoke spec (CI runs it)
+├── scripts/demo_step.py    #   the step that spec runs
 ├── harness/                # The harness itself (stdlib + PyYAML only)
 │   ├── spec.py             #   Spec loading & validation
 │   ├── runner.py           #   Step execution engine
@@ -586,7 +601,7 @@ python -m harness status
 - [docs/verification.md](docs/verification.md) — specs, checks, `reproduce`
 - [docs/reproducibility.md](docs/reproducibility.md) — determinism and provenance
 - [docs/architecture.md](docs/architecture.md) — components and design rules
-- [agents/planner.md](agents/planner.md) · [agents/worker.md](agents/worker.md) — role contracts
+- [agents/planner.md](harness/templates/agents/planner.md) · [agents/worker.md](harness/templates/agents/worker.md) — role contracts
 - [integrations/](integrations/README.md) — optional tool shims (nothing required)
 
 ## CI

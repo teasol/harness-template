@@ -267,7 +267,7 @@ harness setup \
   --worker-platform  <p> --worker-model  <m> --worker-effort  <level>
 ```
 
-Both tiers are configured together, in `configs/agents.yaml`, so the split sits
+Both tiers are configured together, in `.harness/configs/agents.yaml`, so the split sits
 in one file where you can see it. `--planner-session <id>` / `--worker-session
 <id>` attach a tier to a session you already have open instead of starting a
 fresh one.
@@ -280,7 +280,7 @@ whatever a tool happens to default to. A command that references `{model}` or
 `{effort}` without a value configured is refused, so a Worker never silently
 runs at the platform default.
 
-Presets live in `configs/agent-platforms.yaml` as **data** — adding a tool, or
+Presets live in `.harness/configs/agent-platforms.yaml` as **data** — adding a tool, or
 a local model, is an entry there rather than a change to `harness/`. Nothing in
 the harness core names a vendor.
 

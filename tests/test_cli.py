@@ -13,10 +13,16 @@ from pathlib import Path
 
 import pytest
 
+import harness as harness_pkg
 from harness.cli import main
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 DEMO_PLAN = str(FIXTURES_DIR / "demo-pipeline.yaml")
+
+#: The configuration a real project receives — `harness init` copies this
+#: directory into `.harness/configs/`. This repository keeps no copy of its own:
+#: it is the package, not a harness project.
+PACKAGED_CONFIGS = Path(harness_pkg.__file__).resolve().parent / "templates" / "configs"
 
 NONDET_SPEC = """
 name: nondet
@@ -362,14 +368,15 @@ def test_status_command_runs_and_points_somewhere(capsys) -> None:
 
 
 def test_setup_lists_platforms(capsys) -> None:
-    assert main(["setup", "--list"]) == 0
+    presets = str(PACKAGED_CONFIGS / "agent-platforms.yaml")
+    assert main(["setup", "--list", "--platforms", presets]) == 0
     out = capsys.readouterr().out
     assert "claude" in out and "reasoning levels" in out
 
 
 def test_setup_writes_the_worker_tier(tmp_path: Path, capsys) -> None:
     """Only the Sub-Worker is configurable — the Planner is the session you are in."""
-    shutil.copytree("configs", tmp_path / "configs")
+    shutil.copytree(PACKAGED_CONFIGS, tmp_path / "configs")
     code = main(
         [
             "setup",
@@ -397,7 +404,7 @@ def test_setup_writes_the_worker_tier(tmp_path: Path, capsys) -> None:
 
 
 def test_setup_defaults_to_manual(tmp_path: Path, capsys) -> None:
-    shutil.copytree("configs", tmp_path / "configs")
+    shutil.copytree(PACKAGED_CONFIGS, tmp_path / "configs")
     code = main(
         [
             "setup",
@@ -424,7 +431,7 @@ def test_setup_can_attach_a_session(tmp_path: Path, capsys) -> None:
     It used to be demonstrated on the Planner tier, which no longer exists as a
     choice: the Planner is the session you are already talking to.
     """
-    shutil.copytree("configs", tmp_path / "configs")
+    shutil.copytree(PACKAGED_CONFIGS, tmp_path / "configs")
     code = main(
         [
             "setup",
@@ -450,14 +457,14 @@ def test_setup_can_attach_a_session(tmp_path: Path, capsys) -> None:
 
 
 def test_setup_rejects_an_unknown_platform(tmp_path: Path, capsys) -> None:
-    shutil.copytree("configs", tmp_path / "configs")
+    shutil.copytree(PACKAGED_CONFIGS, tmp_path / "configs")
     code = main(["setup", "--root", str(tmp_path), "--worker-platform", "nope"])
     assert code == 2
     assert "unknown platform" in capsys.readouterr().err
 
 
 def test_setup_rejects_an_unknown_reasoning_level(tmp_path: Path, capsys) -> None:
-    shutil.copytree("configs", tmp_path / "configs")
+    shutil.copytree(PACKAGED_CONFIGS, tmp_path / "configs")
     code = main(
         [
             "setup",
