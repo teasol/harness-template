@@ -38,8 +38,17 @@ sync-configs: ## Refresh the shipped agents.yaml header from setup.HEADER
 
 # `clean` first, always: setuptools reuses a stale build/lib without saying so,
 # and a wheel built over one ships files that were deleted releases ago.
+#
+# The name check is not paranoia. An old pip cannot read this project's
+# `[tool.setuptools] packages` + `package-dir`, does not say so, and writes an
+# `UNKNOWN-0.0.0` wheel with nothing in it but metadata — a release that looks
+# like it built.
 build: clean ## Build the wheel, then list exactly what it would ship
 	$(PYTHON) -m pip wheel . --no-deps -w dist -q
+	@test -z "$$(ls dist | grep -i UNKNOWN)" || { \
+		echo "build fell back: $$(ls dist). $(PYTHON) cannot read this pyproject —"; \
+		echo "use a python with pip>=23, e.g. make build PYTHON=/path/to/python"; \
+		exit 1; }
 	@$(PYTHON) -c "import glob,zipfile;print(chr(10).join(sorted(zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist())))"
 
 clean: ## Remove generated artifacts
