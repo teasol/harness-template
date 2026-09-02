@@ -32,25 +32,25 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from harness import adoption as adoption_mod
 from harness import invocation
-from harness import plan as plan_mod
-from harness import planners as planners_mod
 from harness import project as project_mod
-from harness.checks import CheckError, lookup_metric
+from harness.handoff import adoption as adoption_mod
+from harness.handoff import planners as planners_mod
+from harness.orchestrate import plan as plan_mod
+from harness.orchestrate.plan import Plan, PlanError, load_plan
+from harness.orchestrate.task import load_board, verify_task
 from harness.paths import (
     get_agents_config_path,
     get_configs_dir,
     get_plans_dir,
     get_tasks_dir,
 )
-from harness.plan import Plan, PlanError, load_plan
-from harness.report import write_reports
-from harness.reproduce import ReproduceError, reproduce
-from harness.reproducibility import collect_provenance
-from harness.runner import Runner
-from harness.spec import SpecError, load_spec
-from harness.task import load_board, verify_task
+from harness.verify.checks import CheckError, lookup_metric
+from harness.verify.report import write_reports
+from harness.verify.reproduce import ReproduceError, reproduce
+from harness.verify.reproducibility import collect_provenance
+from harness.verify.runner import Runner
+from harness.verify.spec import SpecError, load_spec
 
 #: Where worktrees live. A plan is identified by *having* a worktree here, not
 #: by a name prefix — its git branch is called whatever you called the plan.
@@ -1332,7 +1332,7 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
         # "model not recorded" — and everything that Planner has already
         # learned here. Registering afterwards works, but by then the first
         # briefing has already been written without any of it.
-        from harness import planners as planners_mod
+        from harness.handoff import planners as planners_mod
 
         known = [p.name for p in planners_mod.list_planners(root)]
         if known:
@@ -1370,7 +1370,7 @@ def project_status(root: str | Path = ".", cwd: str | Path | None = None) -> Pro
 
 def _agent_tier(root: Path, section: str = "worker") -> dict[str, Any]:
     """How one tier is configured to run, for display and for the report."""
-    from harness.worker import WorkerError, load_agent_config
+    from harness.orchestrate.worker import WorkerError, load_agent_config
 
     try:
         config = load_agent_config(section, root=root)
@@ -1387,7 +1387,7 @@ def _agent_tier(root: Path, section: str = "worker") -> dict[str, Any]:
 
 def _worker_adapter(root: Path) -> str:
     """Which Worker adapter is configured — 'manual' means no Workers are spawned."""
-    from harness.worker import WorkerError, load_worker_config
+    from harness.orchestrate.worker import WorkerError, load_worker_config
 
     try:
         return load_worker_config(root=root).adapter

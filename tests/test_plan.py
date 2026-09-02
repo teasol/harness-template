@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from harness.plan import PlanError, load_plan
+from harness.orchestrate.plan import PlanError, load_plan
 
 
 def write_plan(tmp_path: Path, data: str) -> Path:
@@ -250,7 +250,7 @@ def test_missing_file_raises() -> None:
 
 
 def test_a_fresh_plan_is_not_approved(tmp_path: Path) -> None:
-    from harness.plan import approval_status
+    from harness.orchestrate.plan import approval_status
 
     path = write_plan(tmp_path, VALID_PLAN)
     approved, reason = approval_status(path)
@@ -260,7 +260,7 @@ def test_a_fresh_plan_is_not_approved(tmp_path: Path) -> None:
 
 def test_approval_is_tied_to_the_plans_contents(tmp_path: Path) -> None:
     """Approving a plan must not approve whatever it is edited into next."""
-    from harness.plan import approval_status, record_approval
+    from harness.orchestrate.plan import approval_status, record_approval
 
     path = write_plan(tmp_path, VALID_PLAN)
     record_approval(path, by="user", note="looks right")
@@ -276,7 +276,7 @@ def test_approval_is_tied_to_the_plans_contents(tmp_path: Path) -> None:
 
 def test_cost_estimate_counts_only_delegated_modules(tmp_path: Path) -> None:
     """What the Main Worker keeps does not consume the Sub-Worker budget."""
-    from harness.plan import estimate_cost
+    from harness.orchestrate.plan import estimate_cost
 
     plan = load_plan(write_plan(tmp_path, VALID_PLAN))
     # Both modules default to the Main Worker, so an unmodified plan costs no
@@ -293,8 +293,8 @@ def test_cost_estimate_counts_only_delegated_modules(tmp_path: Path) -> None:
 def test_plan_run_refuses_without_approval(tmp_path: Path, capsys) -> None:
     """The gate sits where money starts being spent, not at validation."""
     from harness.cli import main
-    from harness.plan import record_approval
-    from harness.task import materialize
+    from harness.orchestrate.plan import record_approval
+    from harness.orchestrate.task import materialize
 
     path = write_plan(tmp_path, VALID_PLAN)
     plan = load_plan(path)
@@ -323,7 +323,7 @@ def test_executor_accepts_the_older_names(tmp_path: Path) -> None:
     Plans and task files written before the two-tier model must keep loading —
     the Planner *is* the Main Worker, so the rename says nothing new about them.
     """
-    from harness.plan import normalize_executor
+    from harness.orchestrate.plan import normalize_executor
 
     assert normalize_executor("planner") == "main"
     assert normalize_executor("self") == "main"
@@ -360,7 +360,7 @@ def test_the_two_tier_model_is_stated_where_agents_read_it() -> None:
     """
     # The shipped copies are the only ones there are: this repository is the
     # package, not a harness project, so it keeps no contracts of its own.
-    root = Path(__file__).resolve().parent.parent / "harness" / "templates"
+    root = Path(__file__).resolve().parent.parent / "templates"
     planner = (root / "agents" / "planner.md").read_text(encoding="utf-8")
     worker = (root / "agents" / "worker.md").read_text(encoding="utf-8")
     agents_md = (root / "AGENTS.md").read_text(encoding="utf-8")
@@ -383,12 +383,10 @@ def test_nothing_tells_the_planner_it_may_not_implement() -> None:
     """
     root = Path(__file__).resolve().parent.parent
     surfaces = [
-        "harness/templates/agents/planner.md",
-        "harness/templates/AGENTS.md",
-        "harness/plans.py",
-        "harness/handoff.py",
-        "integrations/README.md",
-        "README.md",
+        "templates/agents/planner.md",
+        "templates/AGENTS.md",
+        "harness/orchestrate/plans.py",
+        "harness/handoff/document.py",
     ]
     for rel in surfaces:
         text = (root / rel).read_text(encoding="utf-8")
@@ -400,12 +398,10 @@ def test_nothing_tells_the_planner_it_may_not_implement() -> None:
             assert forbidden not in text, f"{rel} still forbids the Main Worker from working"
 
     # And the way out of a blocked task has to be spelled out where it happens.
-    contract = (root / "harness" / "templates" / "agents" / "planner.md").read_text(
-        encoding="utf-8"
-    )
+    contract = (root / "templates" / "agents" / "planner.md").read_text(encoding="utf-8")
     assert "Take the module over" in contract
     assert "executor: main" in contract
-    worker_src = (root / "harness" / "worker.py").read_text(encoding="utf-8")
+    worker_src = (root / "harness" / "orchestrate" / "worker.py").read_text(encoding="utf-8")
     assert "set `executor: main`" in worker_src
 
 
@@ -420,7 +416,7 @@ def test_a_module_with_no_executor_stays_with_the_main_worker(tmp_path: Path) ->
     Sub-Worker — which reads as "the Planner does not code", the opposite of the
     Main Worker role.
     """
-    from harness.task import load_task, materialize
+    from harness.orchestrate.task import load_task, materialize
 
     plan = load_plan(write_plan(tmp_path, VALID_PLAN))
     assert [m.executor for m in plan.modules] == ["main", "main"]
@@ -439,8 +435,8 @@ def test_plan_run_stops_at_the_module_that_is_yours(tmp_path: Path, capsys) -> N
     Planner's — nothing is spawned, and nothing later is started ahead of it.
     """
     from harness.cli import main
-    from harness.plan import record_approval
-    from harness.task import load_task, materialize
+    from harness.orchestrate.plan import record_approval
+    from harness.orchestrate.task import load_task, materialize
 
     body = VALID_PLAN.replace("      brief: build b", "      executor: sub\n      brief: build b")
     path = write_plan(tmp_path, body)

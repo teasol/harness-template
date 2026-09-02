@@ -170,8 +170,8 @@ def next_steps(root: str | Path = ".") -> list[str]:
     the Planner; :data:`THEN_TALK` says what happens next.
     """
     from harness import invocation
-    from harness import planners as planners_mod
     from harness import project as project_mod
+    from harness.handoff import planners as planners_mod
 
     pairs: list[tuple[str, str]] = []
     if not planners_mod.list_planners(root):

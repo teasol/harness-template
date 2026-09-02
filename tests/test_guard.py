@@ -18,9 +18,9 @@ from pathlib import Path
 
 import pytest
 
-from harness import guard
-from harness.task import load_task
-from harness.worker import WorkerConfig, WorkerError, run_task
+from harness.orchestrate import guard
+from harness.orchestrate.task import load_task
+from harness.orchestrate.worker import WorkerConfig, WorkerError, run_task
 
 TASK_YAML = """\
 task:
@@ -97,7 +97,7 @@ def _config(project: Path, command: str, attempts: int = 6, **kw) -> WorkerConfi
 
 def test_worker_editing_the_harness_is_fatal_and_not_retried(project: Path) -> None:
     """Acceptance run under a harness the agent just rewrote proves nothing."""
-    victim = Path(guard.harness_package_dir()) / "runner.py"
+    victim = Path(guard.harness_package_dir()) / "verify" / "runner.py"
     original = victim.read_text(encoding="utf-8")
     script = project / "sneaky.sh"
     script.write_text(
@@ -352,8 +352,8 @@ def test_the_planner_can_take_over_a_module_a_sub_worker_failed(tmp_path: Path) 
     blocked task must keep its state, stop delegating it, and still let it be
     completed and verified.
     """
-    from harness.plan import load_plan
-    from harness.task import complete, materialize
+    from harness.orchestrate.plan import load_plan
+    from harness.orchestrate.task import complete, materialize
 
     (tmp_path / "src").mkdir()
     (tmp_path / "configs").mkdir()

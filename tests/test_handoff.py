@@ -22,10 +22,10 @@ from pathlib import Path
 
 import pytest
 
-from harness import handoff as handoff_mod
 from harness import init as init_mod
-from harness import planners as planners_mod
-from harness import plans as plans_mod
+from harness.handoff import document as handoff_mod
+from harness.handoff import planners as planners_mod
+from harness.orchestrate import plans as plans_mod
 
 GIT = shutil.which("git")
 needs_git = pytest.mark.skipif(GIT is None, reason="git required")

@@ -38,38 +38,24 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from harness import adoption as adoption_mod
-from harness import handoff as handoff_mod
-from harness import heartbeat, invocation
-from harness import plan as plan_mod
-from harness import planners as planners_mod
-from harness import plans as plans_mod
+from harness import invocation
 from harness import project as project_mod
-from harness import task as task_mod
-from harness.paths import (
-    get_configs_dir,
-    get_plans_dir,
-    get_tasks_dir,
-)
-from harness.plan import PlanError, load_plan
-from harness.plans import WorkPlanError
-from harness.report import write_reports
-from harness.reproduce import (
-    ReproduceError,
-    reproduce,
-    write_reproduce_report,
-)
-from harness.reproducibility import file_sha256
-from harness.runner import Runner
-from harness.setup import (
+from harness.handoff import adoption as adoption_mod
+from harness.handoff import document as handoff_mod
+from harness.handoff import planners as planners_mod
+from harness.orchestrate import plan as plan_mod
+from harness.orchestrate import plans as plans_mod
+from harness.orchestrate import task as task_mod
+from harness.orchestrate.plan import PlanError, load_plan
+from harness.orchestrate.plans import WorkPlanError
+from harness.orchestrate.setup import (
     SetupError,
     build_config,
     load_platforms,
     write_agent_config,
 )
-from harness.spec import SpecError, load_spec
-from harness.task import TaskError
-from harness.worker import (
+from harness.orchestrate.task import TaskError
+from harness.orchestrate.worker import (
     WorkerError,
     load_agent_config,
     load_worker_config,
@@ -77,6 +63,21 @@ from harness.worker import (
     run_task,
     write_worker_report,
 )
+from harness.paths import (
+    get_configs_dir,
+    get_plans_dir,
+    get_tasks_dir,
+)
+from harness.verify import heartbeat
+from harness.verify.report import write_reports
+from harness.verify.reproduce import (
+    ReproduceError,
+    reproduce,
+    write_reproduce_report,
+)
+from harness.verify.reproducibility import file_sha256
+from harness.verify.runner import Runner
+from harness.verify.spec import SpecError, load_spec
 
 
 def _resolve_tasks_dir(tasks_dir: str, root: str | Path = ".") -> str:
@@ -1290,7 +1291,7 @@ def cmd_project_show(args: argparse.Namespace) -> int:
 
 def _planner_tier_is_manual(root: str) -> bool:
     """True when nobody spawns the Planner — a person opens that session."""
-    from harness.worker import WorkerError
+    from harness.orchestrate.worker import WorkerError
 
     try:
         return load_agent_config("planner", root=root).adapter == "manual"
@@ -1304,7 +1305,7 @@ def _configured_planner_tier(root: str) -> tuple[str, str]:
     A manual tier has neither: that session is opened by a person, so there is
     nothing configured to inherit.
     """
-    from harness.worker import WorkerError
+    from harness.orchestrate.worker import WorkerError
 
     try:
         config = load_agent_config("planner", root=root)
@@ -1700,7 +1701,7 @@ def _choose_tier(
 
 def _run_agent_check(root: str) -> int:
     """Probe every configured tier and report whether it can actually be driven."""
-    from harness.setup import check_tier
+    from harness.orchestrate.setup import check_tier
 
     print("Checking configured agents (one cheap prompt each)...\n")
     failed = False

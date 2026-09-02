@@ -16,10 +16,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from harness.report import write_reports
-from harness.reproducibility import collect_provenance, file_sha256
-from harness.runner import Runner
-from harness.spec import Spec
+from harness.verify.report import write_reports
+from harness.verify.reproducibility import collect_provenance, file_sha256
+from harness.verify.runner import Runner
+from harness.verify.spec import Spec
 
 #: Files the harness itself writes; never determinism-stable, never compared.
 BOOKKEEPING = frozenset({"report.json", "report.md", "reproduce.json"})

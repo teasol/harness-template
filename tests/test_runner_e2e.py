@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from harness.report import write_reports
-from harness.runner import Runner
-from harness.spec import load_spec
+from harness.verify.report import write_reports
+from harness.verify.runner import Runner
+from harness.verify.spec import load_spec
 
 
 def test_demo_spec_end_to_end(tmp_path: Path) -> None:
     """Run the shipped demo spec against the real repo root."""
-    spec = load_spec("configs/demo.yaml")
+    spec = load_spec("tests/fixtures/configs/demo.yaml")
     runner = Runner(root=".", results_dir=tmp_path / "results")
     result = runner.run(spec)
 
@@ -62,7 +62,7 @@ steps:
 
 def test_determinism_two_runs_same_hash(tmp_path: Path) -> None:
     """Two runs of the demo step must produce identical output hashes."""
-    spec = load_spec("configs/demo.yaml")
+    spec = load_spec("tests/fixtures/configs/demo.yaml")
     hashes = []
     for i in range(2):
         runner = Runner(root=".", results_dir=tmp_path / f"results-{i}")
@@ -118,7 +118,7 @@ steps:
 
 def test_report_records_provenance(tmp_path: Path) -> None:
     """A report must answer 'what produced this?' — commit, interpreter, seed."""
-    spec = load_spec("configs/demo.yaml")
+    spec = load_spec("tests/fixtures/configs/demo.yaml")
     runner = Runner(root=".", results_dir=tmp_path / "results")
     result = runner.run(spec)
 

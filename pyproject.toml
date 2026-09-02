@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "research-harness"
 version = "0.7.0"
 description = "Agent-first orchestration harness for reproducible research and automated verification"
-readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
@@ -22,13 +21,23 @@ dev = [
 [project.scripts]
 harness = "harness.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["harness*"]
-exclude = ["tests*", "scripts*", "configs*", "plans*", "tasks*"]
+# Listed rather than discovered, because one of them is not where its name says.
+# `templates/` holds the files `harness init` copies into a project: not code, so
+# not in the code's directory. A wheel can only carry data belonging to some
+# package, so it installs as `harness_templates` beside `harness` — mapped here,
+# and resolved at runtime by `harness.paths.template_root()`.
+[tool.setuptools]
+packages = [
+    "harness",
+    "harness.verify",
+    "harness.orchestrate",
+    "harness.handoff",
+    "harness_templates",
+]
+package-dir = { harness_templates = "templates" }
 
 [tool.setuptools.package-data]
-harness = ["templates/**/*", "templates/**/.*", "templates/*"]
+harness_templates = ["gitignore", "*.md", "agents/*.md", "configs/*.yaml", "scripts/*.py"]
 
 
 [tool.ruff]

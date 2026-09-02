@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from harness import adoption
+from harness.handoff import adoption
 
 
 @pytest.fixture()
@@ -131,8 +131,8 @@ def test_init_on_an_empty_project_keeps_the_greenfield_path(tmp_path: Path, caps
 
 def test_next_steps_drop_what_is_already_done(existing_project: Path) -> None:
     """The list is a state read, not a fixed script."""
-    from harness import planners as planners_mod
     from harness import project as project_mod
+    from harness.handoff import planners as planners_mod
 
     (existing_project / ".harness" / "configs").mkdir(parents=True, exist_ok=True)
     steps = adoption.next_steps(existing_project)

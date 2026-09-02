@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from harness import planners as planners_mod
-from harness.planners import PlannerError
+from harness.handoff import planners as planners_mod
+from harness.handoff.planners import PlannerError
 
 
 @pytest.fixture()
@@ -247,7 +247,7 @@ def test_create_inherits_the_configured_planner_model(repo: Path, capsys) -> Non
     """Nobody should retype what `harness setup` already recorded."""
     from harness.cli import main
     from harness.init import init_project
-    from harness.setup import build_config, load_platforms, write_agent_config
+    from harness.orchestrate.setup import build_config, load_platforms, write_agent_config
 
     init_project(repo, name="p")
     platforms = load_platforms(root=repo)
@@ -313,7 +313,7 @@ def test_no_paste_block_when_the_planner_is_spawned(repo: Path, capsys) -> None:
     """A configured tier is briefed by the harness; a paste block would be noise."""
     from harness.cli import main
     from harness.init import init_project
-    from harness.setup import build_config, load_platforms, write_agent_config
+    from harness.orchestrate.setup import build_config, load_platforms, write_agent_config
 
     init_project(repo, name="p")
     platforms = load_platforms(root=repo)

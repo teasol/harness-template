@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from harness import task as task_mod
-from harness.plan import load_plan
-from harness.task import TaskError
+from harness.orchestrate import task as task_mod
+from harness.orchestrate.plan import load_plan
+from harness.orchestrate.task import TaskError
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 

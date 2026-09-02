@@ -25,8 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from harness import invocation
-from harness import planners as planners_mod
-from harness import plans as plans_mod
+from harness.handoff import planners as planners_mod
+from harness.orchestrate import plans as plans_mod
 
 FILENAME = "HANDOFF.md"
 

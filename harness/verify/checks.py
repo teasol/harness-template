@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from harness.reproducibility import file_sha256
+from harness.verify.reproducibility import file_sha256
 
 
 class CheckError(Exception):

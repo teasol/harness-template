@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from harness.spec import SpecError, load_spec
+from harness.verify.spec import SpecError, load_spec
 
 
 def write_spec(tmp_path: Path, data: dict) -> Path:

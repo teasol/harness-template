@@ -18,10 +18,10 @@ from typing import Any
 
 import yaml
 
-from harness.plan import Contract, Module, Plan, normalize_executor
-from harness.report import write_reports
-from harness.runner import CheckResult, Runner, RunResult, StepResult
-from harness.spec import Spec, Step
+from harness.orchestrate.plan import Contract, Module, Plan, normalize_executor
+from harness.verify.report import write_reports
+from harness.verify.runner import CheckResult, Runner, RunResult, StepResult
+from harness.verify.spec import Spec, Step
 
 TASK_STATUSES = ("todo", "in_progress", "done", "blocked")
 

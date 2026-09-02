@@ -13,16 +13,18 @@ from pathlib import Path
 
 import pytest
 
-import harness as harness_pkg
 from harness.cli import main
+from harness.paths import template_root
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 DEMO_PLAN = str(FIXTURES_DIR / "demo-pipeline.yaml")
+#: This package's own end-to-end spec — a fixture, not a project's config.
+DEMO_SPEC = str(FIXTURES_DIR / "configs" / "demo.yaml")
 
 #: The configuration a real project receives — `harness init` copies this
 #: directory into `.harness/configs/`. This repository keeps no copy of its own:
 #: it is the package, not a harness project.
-PACKAGED_CONFIGS = Path(harness_pkg.__file__).resolve().parent / "templates" / "configs"
+PACKAGED_CONFIGS = template_root() / "configs"
 
 NONDET_SPEC = """
 name: nondet
@@ -52,7 +54,7 @@ def results(tmp_path: Path) -> str:
 
 
 def test_verify_success_returns_zero(results: str, capsys) -> None:
-    assert main(["verify", "--spec", "configs/demo.yaml", "--results-dir", results]) == 0
+    assert main(["verify", "--spec", DEMO_SPEC, "--results-dir", results]) == 0
     assert "PASSED" in capsys.readouterr().out
 
 
@@ -84,7 +86,7 @@ def test_hash_missing_file_returns_two(tmp_path: Path) -> None:
 
 
 def test_reproduce_deterministic_spec_returns_zero(results: str, capsys) -> None:
-    assert main(["reproduce", "--spec", "configs/demo.yaml", "--results-dir", results]) == 0
+    assert main(["reproduce", "--spec", DEMO_SPEC, "--results-dir", results]) == 0
     out = capsys.readouterr().out
     assert "REPRODUCIBLE" in out and "output.json" in out
     payload = json.loads((Path(results) / "reproduce.json").read_text(encoding="utf-8"))
@@ -109,7 +111,17 @@ def test_reproduce_rejects_specs_with_no_artifacts(tmp_path: Path, results: str,
 
 def test_reproduce_requires_at_least_two_runs(results: str) -> None:
     assert (
-        main(["reproduce", "--spec", "configs/demo.yaml", "--times", "1", "--results-dir", results])
+        main(
+            [
+                "reproduce",
+                "--spec",
+                DEMO_SPEC,
+                "--times",
+                "1",
+                "--results-dir",
+                results,
+            ]
+        )
         == 2
     )
 
@@ -300,6 +312,8 @@ def test_plan_check_passes_on_a_plan(tmp_path: Path, capsys) -> None:
     plans.mkdir()
     tasks = tmp_path / "tasks"
     shutil.copy(DEMO_PLAN, plans / "demo-pipeline.yaml")
+    (plans.parent / "configs").mkdir(exist_ok=True)
+    shutil.copy(FIXTURES_DIR / "configs" / "demo.yaml", plans.parent / "configs" / "demo.yaml")
     main(["plan", "materialize", str(plans / "demo-pipeline.yaml"), "--tasks-dir", str(tasks)])
     capsys.readouterr()
     assert main(["plan", "check", "--plans-dir", str(plans), "--tasks-dir", str(tasks)]) == 0
@@ -319,6 +333,8 @@ def test_plan_check_reports_drift(tmp_path: Path, capsys) -> None:
     plans.mkdir()
     tasks = tmp_path / "tasks"
     shutil.copy(DEMO_PLAN, plans / "demo-pipeline.yaml")
+    (plans.parent / "configs").mkdir(exist_ok=True)
+    shutil.copy(FIXTURES_DIR / "configs" / "demo.yaml", plans.parent / "configs" / "demo.yaml")
     main(["plan", "materialize", str(plans / "demo-pipeline.yaml"), "--tasks-dir", str(tasks)])
     capsys.readouterr()
     assert main(["plan", "check", "--plans-dir", str(plans), "--tasks-dir", str(tasks)]) == 0
@@ -396,7 +412,7 @@ def test_setup_writes_the_worker_tier(tmp_path: Path, capsys) -> None:
     # The Planner is never spawned, so it is pinned to manual and asks nothing.
     assert "planner  manual" in out
 
-    from harness.worker import load_agent_config
+    from harness.orchestrate.worker import load_agent_config
 
     planner = load_agent_config("planner", root=tmp_path)
     assert planner.adapter == "manual" and not planner.model
@@ -419,7 +435,7 @@ def test_setup_defaults_to_manual(tmp_path: Path, capsys) -> None:
     assert "planner  manual" in out
     assert "worker   manual" in out
 
-    from harness.worker import load_agent_config
+    from harness.orchestrate.worker import load_agent_config
 
     assert load_agent_config("planner", root=tmp_path).adapter == "manual"
     assert load_agent_config("worker", root=tmp_path).adapter == "manual"
@@ -450,7 +466,7 @@ def test_setup_can_attach_a_session(tmp_path: Path, capsys) -> None:
     assert code == 0
     assert "attached to session sess-42" in capsys.readouterr().out
 
-    from harness.worker import load_agent_config
+    from harness.orchestrate.worker import load_agent_config
 
     worker = load_agent_config("worker", root=tmp_path)
     assert worker.session == "sess-42" and "{session}" in worker.command
@@ -501,7 +517,7 @@ def test_the_old_branch_grammar_is_gone(capsys) -> None:
 def handed_over(tmp_path: Path) -> Path:
     """An initialized project with a Planner, ready to be left and picked up."""
     from harness import init as init_mod
-    from harness import planners as planners_mod
+    from harness.handoff import planners as planners_mod
 
     root = tmp_path / "proj"
     root.mkdir()

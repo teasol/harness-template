@@ -2,7 +2,7 @@
 """Refresh the shipped agent configuration from its source in the code.
 
 The header of `agents.yaml` is written by `harness setup` from
-``harness.setup.HEADER``, so the checked-in file under `harness/templates/` is
+``harness.setup.HEADER``, so the checked-in file under `templates/` is
 that constant's output and nothing else. Editing the file by hand puts it out of
 step with what `setup` would write into a real project; this puts it back.
 
@@ -21,9 +21,9 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from harness.setup import HEADER  # noqa: E402 - after sys.path, by design
+from harness.orchestrate.setup import HEADER  # noqa: E402 - after sys.path, by design
 
-PACKAGED = REPO / "harness" / "templates" / "configs" / "agents.yaml"
+PACKAGED = REPO / "templates" / "configs" / "agents.yaml"
 
 
 def refresh_header(path: Path) -> bool:

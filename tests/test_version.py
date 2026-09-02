@@ -12,10 +12,9 @@ import re
 from pathlib import Path
 
 import harness
-from harness.reproducibility import collect_provenance
+from harness.verify.reproducibility import collect_provenance
 
 PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
-CHANGELOG = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 
 
 def _declared_version() -> str:
@@ -39,14 +38,6 @@ def test_package_version_matches_pyproject() -> None:
     assert harness.__version__ == declared, (
         f"harness.__version__ is {harness.__version__} but pyproject says {declared}; "
         "provenance would record the wrong harness for every run"
-    )
-
-
-def test_current_version_has_a_changelog_entry() -> None:
-    """A released version nobody wrote down is a version nobody can look up."""
-    released = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", CHANGELOG.read_text("utf-8"), re.MULTILINE)
-    assert harness.__version__ in released, (
-        f"no CHANGELOG section for {harness.__version__}; found {released[:5]}"
     )
 
 

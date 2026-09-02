@@ -18,13 +18,13 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Verification spec
-        run: python -m harness verify --spec configs/demo.yaml --results-dir results/verify
+        run: python -m harness verify --spec tests/fixtures/configs/demo.yaml --results-dir results/verify
 
       # Runs the spec twice and diffs a manifest of every artifact it wrote.
       # Fails on any divergence, and refuses to "pass" a spec that produces
       # nothing to compare.
       - name: Determinism gate
-        run: python -m harness reproduce --spec configs/demo.yaml --times 2
+        run: python -m harness reproduce --spec tests/fixtures/configs/demo.yaml --times 2
 
       # Names no plan, so it keeps gating a project whose plans have changed.
       - name: Plan validity + task/plan drift

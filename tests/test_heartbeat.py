@@ -18,10 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from harness import heartbeat
-from harness.runner import Runner
-from harness.spec import load_spec
-from harness.worker import WorkerConfig, run_task
+from harness.orchestrate.worker import WorkerConfig, run_task
+from harness.verify import heartbeat
+from harness.verify.runner import Runner
+from harness.verify.spec import load_spec
 
 TASK_YAML = """\
 task:

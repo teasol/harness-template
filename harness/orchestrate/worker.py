@@ -40,11 +40,13 @@ from typing import Any
 
 import yaml
 
-from harness import guard, heartbeat, invocation
+from harness import invocation
+from harness.orchestrate import guard
+from harness.orchestrate.task import Task, _now, block, load_task, save_task, verify_task
 from harness.paths import get_agents_config_path
-from harness.report import write_reports
-from harness.runner import RunResult
-from harness.task import Task, _now, block, load_task, save_task, verify_task
+from harness.verify import heartbeat
+from harness.verify.report import write_reports
+from harness.verify.runner import RunResult
 
 DEFAULT_ATTEMPTS = 6
 DEFAULT_TIMEOUT = 1800

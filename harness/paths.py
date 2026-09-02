@@ -102,3 +102,26 @@ def get_agents_dir(root: str | Path = ".") -> Path:
     if (r / ".harness").is_dir():
         return harness_agents
     return root_agents
+
+
+def template_root() -> Path:
+    """Where the files `harness init` copies out actually live.
+
+    They are not part of the code, so they do not sit in the code's directory:
+    in this repository they are the top-level `templates/`. Installed, they
+    arrive as the `harness_templates` distribution package beside `harness`,
+    because a wheel can only carry data that belongs to some package — a bare
+    top-level directory is not shipped at all. Both layouts are probed here so
+    that nothing else has to know which one it is looking at.
+    """
+    here = Path(__file__).resolve().parent
+    for candidate in (
+        here.parent / "templates",  # this checkout
+        here.parent / "harness_templates",  # installed beside the package
+        here / "templates",  # the pre-0.8 layout, inside the package
+    ):
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError(
+        f"harness templates not found: looked for templates/ and harness_templates/ next to {here}"
+    )

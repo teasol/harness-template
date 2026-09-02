@@ -6,7 +6,7 @@ import dataclasses
 import json
 from pathlib import Path
 
-from harness.runner import RunResult
+from harness.verify.runner import RunResult
 
 
 def write_reports(result: RunResult) -> tuple[Path, Path]:

@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from harness import worker as worker_mod
-from harness.task import load_task
-from harness.worker import WorkerConfig, WorkerError, load_worker_config, run_task
+from harness.orchestrate import worker as worker_mod
+from harness.orchestrate.task import load_task
+from harness.orchestrate.worker import WorkerConfig, WorkerError, load_worker_config, run_task
 
 TASK_YAML = """\
 task:
@@ -302,7 +302,7 @@ def test_worker_record_is_reconciled_when_a_human_finishes_the_task(project: Pat
     worker.json said 'failed', the board said 'done', and nothing said which to
     believe — an audit trail that contradicts itself is worth less than none.
     """
-    from harness.worker import reconcile_worker_record, write_worker_report
+    from harness.orchestrate.worker import reconcile_worker_record, write_worker_report
 
     outcome = run_task(
         project / "tasks", "widget", _config(project, "true", attempts=1), root=project
@@ -326,6 +326,6 @@ def test_worker_record_is_reconciled_when_a_human_finishes_the_task(project: Pat
 
 
 def test_reconciling_without_a_record_is_harmless(tmp_path: Path) -> None:
-    from harness.worker import reconcile_worker_record
+    from harness.orchestrate.worker import reconcile_worker_record
 
     assert reconcile_worker_record("nope", "done", results_dir="results", root=tmp_path) is None

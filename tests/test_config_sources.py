@@ -1,6 +1,6 @@
 """Tests that keep the shipped configuration and its documentation honest.
 
-The configuration a project receives lives in one place, `harness/templates/`,
+The configuration a project receives lives in one place, `templates/`,
 and is copied out by `harness init`. It did not use to: a second copy sat at
 this repository's root, because the repository was treated as a harness project
 too, and for three releases the root copy was maintained while the copy users
@@ -22,11 +22,11 @@ from pathlib import Path
 
 import pytest
 
-from harness import setup as setup_mod
-from harness.worker import AgentConfig, render_command
+from harness.orchestrate import setup as setup_mod
+from harness.orchestrate.worker import AgentConfig, render_command
 
 REPO = Path(__file__).resolve().parent.parent
-PACKAGED_CONFIGS = REPO / "harness" / "templates" / "configs"
+PACKAGED_CONFIGS = REPO / "templates" / "configs"
 
 SYNC = "make sync-configs"
 
@@ -39,7 +39,7 @@ def test_the_repository_keeps_no_second_copy_of_the_configuration() -> None:
     """
     for stray in ("configs/agents.yaml", "configs/agent-platforms.yaml"):
         assert not (REPO / stray).exists(), (
-            f"{stray} is back. The shipped copy under harness/templates/configs/ is "
+            f"{stray} is back. The shipped copy under templates/configs/ is "
             "the only one; a second copy is what drifted for three releases."
         )
 
@@ -48,7 +48,7 @@ def test_the_shipped_agents_yaml_carries_the_current_header() -> None:
     """`setup.HEADER` is the source; the checked-in file is only its output."""
     text = (PACKAGED_CONFIGS / "agents.yaml").read_text(encoding="utf-8")
     assert text.startswith(setup_mod.HEADER), (
-        "harness/templates/configs/agents.yaml has a stale header. It is written "
+        "templates/configs/agents.yaml has a stale header. It is written "
         f"by `harness setup`, so regenerate it rather than editing it: {SYNC}"
     )
 

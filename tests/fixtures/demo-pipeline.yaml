@@ -29,7 +29,7 @@ plan:
       title: Generate the demo dataset
       depends_on: []
       deliverables:
-        - scripts/demo_step.py
+        - tests/fixtures/demo-pipeline-spec.yaml
       contract:
         inputs:
           - name: seed
@@ -57,7 +57,7 @@ plan:
       title: Compute summary statistics
       depends_on: [data-gen]
       deliverables:
-        - configs/demo.yaml
+        - tests/fixtures/configs/demo.yaml
       contract:
         inputs:
           - name: dataset

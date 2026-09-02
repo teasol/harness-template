@@ -11,10 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from harness import checks as checks_mod
-from harness import heartbeat
-from harness.reproducibility import collect_provenance, math_env, seed_env
-from harness.spec import Spec, Step
+from harness.verify import checks as checks_mod
+from harness.verify import heartbeat
+from harness.verify.reproducibility import collect_provenance, math_env, seed_env
+from harness.verify.spec import Spec, Step
 
 _RUN_ENV_KEYS = (
     "HARNESS_RESULTS_DIR",

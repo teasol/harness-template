@@ -21,11 +21,11 @@ from typing import Any
 
 import yaml
 
+from harness.orchestrate.worker import DEFAULT_ATTEMPTS, AgentConfig
 from harness.paths import (
     get_agents_config_path,
     get_platforms_config_path,
 )
-from harness.worker import DEFAULT_ATTEMPTS, AgentConfig
 
 DEFAULT_PLATFORMS_PATH = "configs/agent-platforms.yaml"
 DEFAULT_AGENTS_PATH = "configs/agents.yaml"
@@ -273,7 +273,12 @@ def check_tier(section: str = "worker", root: str | Path = ".", timeout: int = P
     the task at all. One probe at setup time replaces that entire class of
     debugging.
     """
-    from harness.worker import AgentConfig, WorkerError, load_agent_config, render_command
+    from harness.orchestrate.worker import (
+        AgentConfig,
+        WorkerError,
+        load_agent_config,
+        render_command,
+    )
 
     root = Path(root).resolve()
     try:

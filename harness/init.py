@@ -16,9 +16,8 @@ from harness import invocation
 from harness.paths import (
     get_agents_config_path,
     get_harness_dir,
+    template_root,
 )
-
-TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates"
 
 
 class InitError(Exception):
@@ -70,8 +69,10 @@ def init_project(
     target = Path(target_dir).resolve()
     target.mkdir(parents=True, exist_ok=True)
 
-    if not TEMPLATE_ROOT.is_dir():
-        raise InitError(f"Harness template directory not found at: {TEMPLATE_ROOT}")
+    try:
+        templates = template_root()
+    except FileNotFoundError as exc:
+        raise InitError(str(exc)) from exc
 
     # Re-running init must be safe. A project initialized by an older version is
     # missing whatever shipped since, and the only way to get it used to be
@@ -114,7 +115,7 @@ def init_project(
     ]
 
     for src_rel, dst_path in files_to_copy:
-        src_path = TEMPLATE_ROOT / src_rel
+        src_path = templates / src_rel
         if not src_path.is_file():
             continue
         if dst_path.exists() and not force:
@@ -134,7 +135,7 @@ def init_project(
         created_files.append(dst_path)
 
     # Handle .gitignore
-    gitignore_src = TEMPLATE_ROOT / "gitignore"
+    gitignore_src = templates / "gitignore"
     gitignore_dst = target / ".gitignore"
     if gitignore_src.is_file():
         entries_to_add = gitignore_src.read_text(encoding="utf-8")

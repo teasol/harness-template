@@ -12,11 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from harness import plan as plan_mod
-from harness import plans as plans_mod
-from harness import task as task_mod
-from harness.plan import PlanError, load_plan
-from harness.plans import WorkPlanError
+from harness import init as init_mod
+from harness.orchestrate import plan as plan_mod
+from harness.orchestrate import plans as plans_mod
+from harness.orchestrate import task as task_mod
+from harness.orchestrate.plan import PlanError, load_plan
+from harness.orchestrate.plans import WorkPlanError
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 DEMO_PLAN = FIXTURES_DIR / "demo-pipeline.yaml"
@@ -28,6 +29,17 @@ needs_git = pytest.mark.skipif(GIT is None, reason="git required")
 
 def _run(cwd: Path, *args: str) -> None:
     subprocess.run(args, cwd=str(cwd), check=True, capture_output=True, text=True)
+
+
+def _adopt_spec(wt: Path) -> None:
+    """Put the plan's integration spec where the plan says it is.
+
+    `plan.integration.spec` is required and must exist — a plan without a
+    reachable one is invalid since 0.7.0 — and a worktree is a fresh checkout,
+    so nothing is there until it is copied in.
+    """
+    (wt / "configs").mkdir(exist_ok=True)
+    shutil.copy(DEMO_SPEC, wt / "configs" / "demo.yaml")
 
 
 @pytest.fixture()
@@ -120,7 +132,11 @@ def test_plan_report_accepts_metric_path_syntax(tmp_path: Path) -> None:
 def test_modules_may_not_share_a_deliverable(tmp_path: Path) -> None:
     """Two Workers owning one file is a planning error, caught before any work starts."""
     base = DEMO_PLAN.read_text(encoding="utf-8")
-    base = base.replace("        - configs/demo.yaml", "        - scripts/demo_step.py", 1)
+    base = base.replace(
+        "        - tests/fixtures/configs/demo.yaml",
+        "        - tests/fixtures/demo-pipeline-spec.yaml",
+        1,
+    )
     path = tmp_path / "plan.yaml"
     path.write_text(base, encoding="utf-8")
     with pytest.raises(PlanError, match="owned by exactly one module"):
@@ -240,6 +256,7 @@ def test_report_flags_an_unfinished_plan(clone: Path) -> None:
     work = plans_mod.start("wip", root=clone)
     wt = work.path
     shutil.copy(DEMO_PLAN, wt / "plans/wip.yaml")
+    _adopt_spec(wt)
     text = (wt / "plans/wip.yaml").read_text(encoding="utf-8")
     text = text.replace("name: demo-pipeline", "name: wip", 1)
     (wt / "plans/wip.yaml").write_text(text, encoding="utf-8")
@@ -273,6 +290,7 @@ def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
     wt = work.path
     # A plan with two modules, neither materialized...
     shutil.copy(DEMO_PLAN, wt / "plans/scoped.yaml")
+    _adopt_spec(wt)
     text = (wt / "plans/scoped.yaml").read_text(encoding="utf-8")
     text = text.replace("name: demo-pipeline", "name: scoped", 1)
     text = text.replace("id: data-gen", "id: alpha", 1).replace("id: stats", "id: beta", 1)
@@ -300,6 +318,7 @@ def test_not_ready_always_states_a_reason(clone: Path) -> None:
     work = plans_mod.start("unexplained", root=clone)
     wt = work.path
     shutil.copy(DEMO_PLAN, wt / "plans/unexplained.yaml")
+    _adopt_spec(wt)
     text = (wt / "plans/unexplained.yaml").read_text(encoding="utf-8")
     (wt / "plans/unexplained.yaml").write_text(
         text.replace("name: demo-pipeline", "name: unexplained", 1), encoding="utf-8"
@@ -344,7 +363,9 @@ def test_status_walks_the_whole_flow(clone: Path) -> None:
     """One assertion per stage a newcomer can be standing in."""
     import yaml
 
-    # Instantiated, nothing started yet.
+    # Instantiated, nothing started yet. A clone of this repository is not a
+    # harness project on its own: `init` is what makes one.
+    init_mod.init_project(clone)
     (clone / "pyproject.toml").write_text('name = "myproj"\n', encoding="utf-8")
     status = plans_mod.project_status(clone, cwd=clone)
     assert status.instantiated and not status.plans
@@ -422,6 +443,9 @@ def test_status_reports_the_worker_adapter(clone: Path) -> None:
     plans_mod.start("w", root=clone)
     assert plans_mod.project_status(clone, cwd=clone).worker_adapter == "manual"
 
+    # The repository no longer carries a configs/ of its own, so a clone of it
+    # has none either: an agent configuration has to be created, not overwritten.
+    (clone / "configs").mkdir(exist_ok=True)
     (clone / "configs" / "agents.yaml").write_text(
         "planner:\n  adapter: cli\n  command: 'true'\nworker:\n  adapter: cli\n  command: 'true'\n",
         encoding="utf-8",
@@ -539,8 +563,8 @@ plan:
 """,
         encoding="utf-8",
     )
-    from harness.plan import load_plan as _load_plan
-    from harness.task import complete, materialize
+    from harness.orchestrate.plan import load_plan as _load_plan
+    from harness.orchestrate.task import complete, materialize
 
     materialize(_load_plan(work.plan_path), work_root / "tasks")
     complete(work_root / "tasks", "widget", worker="w", root=work_root)

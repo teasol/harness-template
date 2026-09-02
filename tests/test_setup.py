@@ -12,22 +12,25 @@ from pathlib import Path
 import pytest
 import yaml
 
-from harness import setup as setup_mod
-from harness.setup import (
+from harness.orchestrate.setup import (
     SetupError,
     build_config,
     config_to_dict,
     load_platforms,
     write_agent_config,
 )
-from harness.worker import AgentConfig, WorkerError, load_agent_config, load_worker_config
+from harness.orchestrate.worker import (
+    AgentConfig,
+    WorkerError,
+    load_agent_config,
+    load_worker_config,
+)
+from harness.paths import template_root
 
 #: The presets that ship inside the package. This repository is not a harness
 #: project — it does not use the harness on itself — so there is no root copy to
 #: read, and reading the shipped file is what a real project reads anyway.
-PACKAGED_PRESETS = (
-    Path(setup_mod.__file__).resolve().parent / "templates" / "configs" / "agent-platforms.yaml"
-)
+PACKAGED_PRESETS = template_root() / "configs" / "agent-platforms.yaml"
 
 
 def _shipped_presets():

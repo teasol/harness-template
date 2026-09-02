@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from harness.checks import CheckError, run_check
-from harness.reproducibility import file_sha256
+from harness.verify.checks import CheckError, run_check
+from harness.verify.reproducibility import file_sha256
 
 
 def test_file_exists(check_root: Path) -> None:

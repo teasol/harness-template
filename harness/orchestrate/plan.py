@@ -23,8 +23,8 @@ from typing import Any
 
 import yaml
 
-from harness.checks import CHECK_REGISTRY
-from harness.spec import SpecError, Step
+from harness.verify.checks import CHECK_REGISTRY
+from harness.verify.spec import SpecError, Step
 
 
 class PlanError(ValueError):
