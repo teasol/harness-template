@@ -386,6 +386,7 @@ def test_nothing_tells_the_planner_it_may_not_implement() -> None:
         "templates/agents/planner.md",
         "templates/AGENTS.md",
         "harness/orchestrate/plans.py",
+        "README.md",
         "harness/handoff/document.py",
     ]
     for rel in surfaces:
