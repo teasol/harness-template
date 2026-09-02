@@ -2,7 +2,7 @@
 
 A task file (``tasks/<id>.task.yaml``) is the *only* thing a Worker agent
 needs besides the repository itself: it carries the module brief, the IO
-contract, constraints, deliverables, and machine-checkable acceptance
+contract, constraints, deliverables, and a checklist of named tests
 criteria. Lifecycle state (``todo → in_progress → done``) lives inside the
 task file so agents can coordinate through git.
 
@@ -19,9 +19,8 @@ from typing import Any
 import yaml
 
 from harness.orchestrate.plan import Contract, Module, Plan, normalize_executor
+from harness.verify.checklist import ChecklistRun, Item, ItemResult, parse_list, run_items
 from harness.verify.report import write_reports
-from harness.verify.runner import CheckResult, Runner, RunResult, StepResult
-from harness.verify.spec import Spec, Step
 
 TASK_STATUSES = ("todo", "in_progress", "done", "blocked")
 
@@ -51,7 +50,7 @@ class Task:
     deliverables: list[str] = dataclasses.field(default_factory=list)
     constraints: list[str] = dataclasses.field(default_factory=list)
     contract: Contract = dataclasses.field(default_factory=Contract)
-    acceptance: list[Step] = dataclasses.field(default_factory=list)
+    checklist: list[Item] = dataclasses.field(default_factory=list)
     #: Defaults to the Main Worker, like the module it came from.
     executor: str = "main"
     status: str = "todo"
@@ -72,19 +71,6 @@ class Task:
 # (De)serialization
 
 
-def _step_to_dict(step: Step) -> dict[str, Any]:
-    data: dict[str, Any] = {"id": step.id, "run": step.run}
-    if step.cwd is not None:
-        data["cwd"] = step.cwd
-    if step.timeout is not None:
-        data["timeout"] = step.timeout
-    if step.env:
-        data["env"] = step.env
-    if step.checks:
-        data["checks"] = [{"type": c.type, **c.params} for c in step.checks]
-    return data
-
-
 def _ports_to_list(ports: list[Any]) -> list[dict[str, str]]:
     return [{"name": p.name, "type": p.type, "description": p.description} for p in ports]
 
@@ -103,7 +89,7 @@ def task_to_dict(task: Task) -> dict[str, Any]:
             },
             "deliverables": list(task.deliverables),
             "constraints": list(task.constraints),
-            "acceptance": {"steps": [_step_to_dict(s) for s in task.acceptance]},
+            "checklist": [item.to_dict() for item in task.checklist],
             "executor": task.executor,
             "status": task.status,
             "worker": task.worker,
@@ -124,7 +110,7 @@ def _task_from_dict(data: dict[str, Any], path: Path | None = None) -> Task:
         raise TaskError(
             f"task '{task_id}': invalid status '{status}'. valid: {list(TASK_STATUSES)}"
         )
-    acceptance = [Step.from_dict(s) for s in entry.get("acceptance", {}).get("steps", [])]
+    checklist = parse_list(entry.get("checklist"), module=str(entry.get("id", "")))
     return Task(
         id=task_id,
         plan=str(entry.get("plan", "")),
@@ -134,7 +120,7 @@ def _task_from_dict(data: dict[str, Any], path: Path | None = None) -> Task:
         deliverables=[str(d) for d in entry.get("deliverables", [])],
         constraints=[str(c) for c in entry.get("constraints", [])],
         contract=Contract.from_dict(entry.get("contract")),
-        acceptance=acceptance,
+        checklist=checklist,
         executor=normalize_executor(str(entry.get("executor", "main"))) or "main",
         status=status,
         worker=entry.get("worker"),
@@ -201,7 +187,7 @@ def task_from_module(plan: Plan, module: Module) -> Task:
         deliverables=list(module.deliverables),
         constraints=list(module.constraints),
         contract=module.contract,
-        acceptance=list(module.acceptance),
+        checklist=list(module.checklist),
         executor=module.executor,
     )
 
@@ -211,7 +197,7 @@ def materialize(plan: Plan, tasks_dir: str | Path, force: bool = False) -> list[
 
     Existing task files are left untouched unless ``force`` is set. With
     ``force``, the module's *specification* (title, brief, contract,
-    deliverables, constraints, acceptance, deps) is refreshed from the plan
+    deliverables, constraints, checklist, deps) is refreshed from the plan
     while the *lifecycle* (``status``, ``worker``, ``log``) is preserved — a
     re-materialization must never erase the board or the audit trail. The
     refresh itself is appended to the log.
@@ -243,7 +229,7 @@ SPEC_FIELDS = (
     "contract",
     "deliverables",
     "constraints",
-    "acceptance",
+    "checklist",
 )
 
 
@@ -314,28 +300,30 @@ def block(tasks_dir: str | Path, task_id: str, reason: str) -> Task:
     return task
 
 
-def _deliverables_step(task: Task, root: Path) -> StepResult:
-    """Synthesize a step asserting every declared deliverable exists.
+def _deliverables_result(task: Task, root: Path) -> ItemResult:
+    """The one assertion the harness still makes itself: the files are there.
 
-    Deliverables are part of the contract, so they are verified by the
-    harness rather than trusted — a task whose acceptance passes but whose
-    declared files are missing has not delivered.
+    Deliverables are part of the contract, not a test of behaviour, which is why
+    they survived the removal of the built-in check types: a task whose whole
+    checklist passes but whose declared files are missing has not delivered, and
+    no project-specific test would necessarily notice.
     """
-    results = []
-    for rel in task.deliverables:
-        path = Path(rel)
-        resolved = path if path.is_absolute() else (root / path)
-        if resolved.exists():
-            results.append(CheckResult("deliverable", True, f"deliverable present: {rel}"))
-        else:
-            results.append(CheckResult("deliverable", False, f"deliverable missing: {rel}"))
-    return StepResult(
-        step_id="deliverables",
-        command="(harness: declared deliverables exist)",
-        exit_code=0,
+    missing = [
+        rel
+        for rel in task.deliverables
+        if not (Path(rel) if Path(rel).is_absolute() else root / rel).exists()
+    ]
+    return ItemResult(
+        module=task.id,
+        name="deliverables",
+        command=(
+            f"(harness: declared deliverables missing: {', '.join(missing)})"
+            if missing
+            else "(harness: declared deliverables exist)"
+        ),
+        exit_code=1 if missing else 0,
         duration_s=0.0,
         log_path="",
-        checks=results,
     )
 
 
@@ -343,21 +331,20 @@ def verify_task(
     task: Task,
     root: str | Path = ".",
     results_dir: str | Path = "results",
-) -> RunResult:
-    """Run the task's acceptance steps, then assert its deliverables exist."""
-    spec = Spec(
-        name=f"task-{task.id}",
-        description=f"Acceptance for task '{task.id}' (plan: {task.plan})",
-        steps=list(task.acceptance),
+    progress=None,
+) -> ChecklistRun:
+    """Run this task's checklist, then assert its declared deliverables exist."""
+    run = run_items(
+        list(task.checklist),
+        root=root,
+        results_dir=results_dir,
+        scope=task.id,
+        progress=progress,
     )
-    runner = Runner(root=root, results_dir=results_dir)
-    result = runner.run(spec)
     if task.deliverables:
-        step = _deliverables_step(task, runner.root)
-        result.steps.append(step)
-        result.success = result.success and step.success
-    write_reports(result)
-    return result
+        run.results.append(_deliverables_result(task, Path(root).resolve()))
+    write_reports(run)
+    return run
 
 
 def complete(
@@ -366,16 +353,16 @@ def complete(
     worker: str | None = None,
     root: str | Path = ".",
     results_dir: str | Path = "results",
-) -> tuple[Task, RunResult]:
-    """Verify acceptance + deliverables, then mark the task done."""
+) -> tuple[Task, ChecklistRun]:
+    """Run the checklist and the deliverables gate, then mark the task done."""
     task = load_task(tasks_dir, task_id)
     result = verify_task(task, root=root, results_dir=results_dir)
-    if not result.success:
+    if not result.passed:
         return task, result
     task.status = "done"
     if worker:
         task.worker = worker
-    task.log.append(f"{_now()} acceptance passed ({len(result.steps)} step(s)) — done")
+    task.log.append(f"{_now()} checklist passed ({len(result.results)} item(s)) — done")
     save_task(task)
     return task, result
 

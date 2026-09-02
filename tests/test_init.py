@@ -19,7 +19,7 @@ def test_init_fresh_directory(tmp_path: Path) -> None:
     assert (project_dir / ".harness" / "agents" / "worker.md").is_file()
     assert (project_dir / ".harness" / "configs" / "agents.yaml").is_file()
     assert (project_dir / ".harness" / "configs" / "agent-platforms.yaml").is_file()
-    assert (project_dir / ".harness" / "configs" / "demo.yaml").is_file()
+    assert (project_dir / ".harness" / "configs" / "agents.yaml").is_file()
     assert (project_dir / ".gitignore").is_file()
 
     gitignore_text = (project_dir / ".gitignore").read_text(encoding="utf-8")
@@ -132,33 +132,39 @@ def test_find_project_root(tmp_path: Path) -> None:
 
 
 def test_the_quickstart_actually_runs_on_a_fresh_project(tmp_path: Path) -> None:
-    """`harness init` then `harness verify --spec configs/demo.yaml`, verbatim.
+    """`harness init` then `harness status`, and the demo command actually works.
 
-    Two things had quietly broken this, and both are exactly what a first
-    impression is made of: `init` writes specs under `.harness/` so they cannot
-    collide with a project's own `configs/`, but `--spec configs/demo.yaml` did
-    not look there; and the demo spec was shipped without the script it runs.
+    The quickstart is what a first impression is made of: `init` must scaffold a
+    project whose next command runs, and the demo command a project's first
+    checklist item would borrow must succeed out of the box.
     """
+    import subprocess
+
     from harness.cli import main
 
     assert main(["init", str(tmp_path), "--no-setup"]) == 0
-    # The script the demo spec runs must actually be installed.
+    # The script a first checklist item runs must actually be installed.
     assert (tmp_path / ".harness" / "scripts" / "demo_step.py").is_file()
 
     cwd = os.getcwd()
     try:
         os.chdir(tmp_path)
-        assert main(["verify", "--spec", "configs/demo.yaml"]) == 0
+        # `harness status` is the documented entry point; it must run here.
+        assert main(["status"]) == 0
+        # And the demo command itself works, exactly as a checklist item runs it.
+        proc = subprocess.run(
+            [
+                "python3",
+                str(tmp_path / ".harness" / "scripts" / "demo_step.py"),
+                "--out",
+                str(tmp_path / "results" / "output.json"),
+                "--seed",
+                "42",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
     finally:
         os.chdir(cwd)
-
-
-def test_spec_path_falls_back_to_the_harness_dir(tmp_path: Path) -> None:
-    from harness.cli import _resolve_spec_path
-
-    (tmp_path / ".harness" / "configs").mkdir(parents=True)
-    (tmp_path / ".harness" / "configs" / "x.yaml").write_text("name: x\n", encoding="utf-8")
-    resolved = _resolve_spec_path("configs/x.yaml", tmp_path)
-    assert resolved.endswith(".harness/configs/x.yaml")
-    # An explicit path that exists is never rewritten.
-    assert _resolve_spec_path("configs/missing.yaml", tmp_path) == "configs/missing.yaml"

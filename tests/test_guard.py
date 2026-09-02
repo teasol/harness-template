@@ -36,13 +36,9 @@ task:
   deliverables:
   - src/widget.py
   constraints: []
-  acceptance:
-    steps:
-    - id: check
-      run: test -f src/widget.py
-      checks:
-      - type: file_exists
-        path: src/widget.py
+  checklist:
+  - name: check
+    run: test -f src/widget.py
   executor: sub
   status: todo
   worker: null
@@ -60,13 +56,13 @@ def project(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def content_project(tmp_path: Path) -> Path:
-    """A task whose acceptance needs file *content*, not merely existence."""
+    """A task whose checklist needs file *content*, not merely existence."""
     (tmp_path / "tasks").mkdir()
     (tmp_path / "src").mkdir()
     (tmp_path / "tasks" / "widget.task.yaml").write_text(
         TASK_YAML.replace(
-            "    - id: check\n      run: test -f src/widget.py",
-            "    - id: check\n      run: grep -q done src/widget.py",
+            "  - name: check\n    run: test -f src/widget.py",
+            "  - name: check\n    run: grep -q done src/widget.py",
         ),
         encoding="utf-8",
     )
@@ -97,7 +93,7 @@ def _config(project: Path, command: str, attempts: int = 6, **kw) -> WorkerConfi
 
 def test_worker_editing_the_harness_is_fatal_and_not_retried(project: Path) -> None:
     """Acceptance run under a harness the agent just rewrote proves nothing."""
-    victim = Path(guard.harness_package_dir()) / "verify" / "runner.py"
+    victim = Path(guard.harness_package_dir()) / "verify" / "checklist.py"
     original = victim.read_text(encoding="utf-8")
     script = project / "sneaky.sh"
     script.write_text(
@@ -122,9 +118,9 @@ def test_worker_editing_the_harness_is_fatal_and_not_retried(project: Path) -> N
 
     assert outcome.status == "error"
     assert outcome.guard_violations
-    assert "runner.py" in " ".join(outcome.guard_violations)
+    assert "checklist.py" in " ".join(outcome.guard_violations)
     # Fatal means fatal: one attempt, no retries, even though the agent had
-    # also produced a deliverable that would have passed acceptance.
+    # also produced a deliverable that would have passed the checklist.
     assert len(outcome.attempts) == 1
     assert load_task(project / "tasks", "widget").status == "blocked"
 
@@ -366,17 +362,19 @@ plan:
   name: t
   goal: prove the take-over path works
   integration: {{spec: configs/t.yaml}}
+  checklist:
+    - name: assembled
+      run: "true"
+
   modules:
     - id: hard
       title: hard one
       executor: {executor}
       deliverables: [src/hard.py]
       brief: make src/hard.py
-      acceptance:
-        steps:
-          - id: check
-            run: test -f src/hard.py
-            checks: [{{type: file_exists, path: src/hard.py}}]
+      checklist:
+        - name: check
+          run: test -f src/hard.py
 """
     plan_path.write_text(body.format(executor="sub"), encoding="utf-8")
     materialize(load_plan(plan_path), tmp_path / "tasks")
@@ -408,4 +406,4 @@ plan:
     # The Planner does the work, and a blocked task can still be completed.
     (tmp_path / "src" / "hard.py").write_text("x = 1\n", encoding="utf-8")
     task, result = complete(tmp_path / "tasks", "hard", worker="planner", root=tmp_path)
-    assert result.success and task.status == "done"
+    assert result.passed and task.status == "done"

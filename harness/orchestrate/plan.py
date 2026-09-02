@@ -1,8 +1,9 @@
 """Orchestration plans — the Planner agent's output.
 
 A plan decomposes a goal into modules with explicit contracts (typed
-inputs/outputs), dependencies forming a DAG, a worker brief per module, and
-machine-checkable acceptance criteria. Plans are materialized into
+inputs/outputs), dependencies forming a DAG, a worker brief per module, and a
+**checklist** of named tests per module — the project's own commands, which the
+harness runs and judges by exit code. Plans are materialized into
 self-contained task files (see :mod:`harness.task`) that Worker agents
 execute one at a time, each in isolation.
 
@@ -23,8 +24,7 @@ from typing import Any
 
 import yaml
 
-from harness.verify.checks import CHECK_REGISTRY
-from harness.verify.spec import SpecError, Step
+from harness.verify.checklist import ChecklistError, Item, parse_list
 
 
 class PlanError(ValueError):
@@ -69,7 +69,7 @@ class Port:
 
 @dataclasses.dataclass
 class Contract:
-    """The input/output contract of a module, enforced by its acceptance."""
+    """The input/output contract of a module. Declared here, tested by its checklist."""
 
     inputs: list[Port] = dataclasses.field(default_factory=list)
     outputs: list[Port] = dataclasses.field(default_factory=list)
@@ -184,17 +184,23 @@ class Module:
     deliverables: list[str] = dataclasses.field(default_factory=list)
     constraints: list[str] = dataclasses.field(default_factory=list)
     contract: Contract = dataclasses.field(default_factory=Contract)
-    acceptance: list[Step] = dataclasses.field(default_factory=list)
+    #: The named tests that decide this module, each naming a command the
+    #: project already has. The harness runs them and reads the exit code;
+    #: what the test asserts is the project's business, not the harness's.
+    checklist: list[Item] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
 class Plan:
-    """A full orchestration plan: goal, module DAG, and integration spec."""
+    """A full orchestration plan: goal, module DAG, and the checklist for each."""
 
     name: str
     goal: str
     description: str = ""
-    integration: str | None = None
+    #: The plan-level checklist: what proves the assembled whole, as opposed to
+    #: any one module. Required, for the same reason it was required when it was
+    #: an integration spec — modules that each pass alone can still not add up.
+    checklist: list[Item] = dataclasses.field(default_factory=list)
     report: Report = dataclasses.field(default_factory=Report)
     modules: list[Module] = dataclasses.field(default_factory=list)
     source: Path | None = None
@@ -236,16 +242,12 @@ def _load_yaml(path: str | Path, error: type[ValueError]) -> dict[str, Any]:
     return raw
 
 
-def _validate_steps(module_id: str, steps: list[Step]) -> None:
-    if not steps:
-        raise PlanError(f"module '{module_id}': acceptance must define at least one step")
-    for step in steps:
-        for check in step.checks:
-            if check.type not in CHECK_REGISTRY:
-                raise PlanError(
-                    f"module '{module_id}' step '{step.id}': unknown check type "
-                    f"'{check.type}'. available: {sorted(CHECK_REGISTRY)}"
-                )
+def _validate_checklist(module_id: str, items: list[Item]) -> None:
+    if not items:
+        raise PlanError(
+            f"module '{module_id}': checklist must declare at least one item. A module "
+            "nothing tests is a module nobody can call done"
+        )
 
 
 #: Marker written into scaffolded plans by ``harness plan new``. A scaffold
@@ -261,7 +263,7 @@ def load_plan(path: str | Path) -> Plan:
         raise PlanError(
             f"{path} is still the scaffold, not a plan: it contains "
             f"'{SCAFFOLD_MARKER}'. Replace every TODO — the goal, the report "
-            "metrics, and each module's brief, deliverables, and acceptance — "
+            "metrics, and each module's brief, deliverables, and checklist — "
             "then validate again."
         )
     raw = _load_yaml(path, PlanError)
@@ -276,11 +278,14 @@ def load_plan(path: str | Path) -> Plan:
     if not isinstance(goal, str) or not goal.strip():
         raise PlanError("'plan.goal' must be a non-empty string")
 
-    integration = (data.get("integration") or {}).get("spec")
-    if not isinstance(integration, str) or not integration:
+    try:
+        checklist = parse_list(data.get("checklist"))
+    except ChecklistError as exc:
+        raise PlanError(f"plan checklist: {exc}") from exc
+    if not checklist:
         raise PlanError(
-            "'plan.integration.spec' is required: a plan is not a plan until it "
-            "declares the spec that verifies the assembled whole"
+            "'plan.checklist' is required: a plan is not a plan until it declares "
+            "what proves the assembled whole, not just the parts"
         )
 
     modules_data = data.get("modules", [])
@@ -290,7 +295,7 @@ def load_plan(path: str | Path) -> Plan:
     modules: list[Module] = []
     for entry in modules_data:
         module = _module_from_dict(entry)
-        _validate_steps(module.id, module.acceptance)
+        _validate_checklist(module.id, module.checklist)
         modules.append(module)
 
     _validate_dag(modules)
@@ -298,23 +303,11 @@ def load_plan(path: str | Path) -> Plan:
 
     report = Report.from_dict(data.get("report"))
 
-    source_dir = Path(path).resolve().parent
-    integration_path = Path(integration)
-    candidates = [
-        integration_path,
-        source_dir / integration_path,
-        source_dir.parent / integration_path,
-        source_dir.parent / ".harness" / integration_path,
-        source_dir.parent / ".harness" / "configs" / integration_path.name,
-    ]
-    if not any(c.is_file() for c in candidates):
-        raise PlanError(f"integration spec not found: {integration}")
-
     return Plan(
         name=name,
         goal=goal,
         description=str(data.get("description", "")),
-        integration=integration,
+        checklist=checklist,
         report=report,
         modules=modules,
         source=Path(path),
@@ -335,13 +328,10 @@ def _module_from_dict(entry: Any) -> Module:
     if not isinstance(depends_on, list):
         raise PlanError(f"module '{module_id}': 'depends_on' must be a list")
 
-    acceptance_data = entry.get("acceptance", {})
-    if not isinstance(acceptance_data, dict) or "steps" not in acceptance_data:
-        raise PlanError(f"module '{module_id}': 'acceptance' must be a mapping with a 'steps' list")
     try:
-        acceptance = [Step.from_dict(s) for s in acceptance_data["steps"]]
-    except SpecError as exc:
-        raise PlanError(f"module '{module_id}': invalid acceptance: {exc}") from exc
+        checklist = parse_list(entry.get("checklist"), module=module_id)
+    except ChecklistError as exc:
+        raise PlanError(f"module '{module_id}': {exc}") from exc
 
     executor = normalize_executor(str(entry.get("executor", "main")))
     if executor is None:
@@ -359,7 +349,7 @@ def _module_from_dict(entry: Any) -> Module:
         deliverables=[str(d) for d in entry.get("deliverables", [])],
         constraints=[str(c) for c in entry.get("constraints", [])],
         contract=Contract.from_dict(entry.get("contract")),
-        acceptance=acceptance,
+        checklist=checklist,
     )
 
 

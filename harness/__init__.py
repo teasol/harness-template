@@ -1,14 +1,13 @@
-"""Agent-first harness for reproducible research and automated verification."""
+"""Agent-first harness for research code: checklists, two tiers, and a handoff."""
 
-from harness.verify.spec import Check, Spec, SpecError, Step, load_spec
+from harness.verify.checklist import ChecklistError, ChecklistRun, Item, ItemResult
 
 __version__ = "0.8.0"
 
 __all__ = [
-    "Check",
-    "Spec",
-    "SpecError",
-    "Step",
-    "load_spec",
+    "ChecklistError",
+    "ChecklistRun",
+    "Item",
+    "ItemResult",
     "__version__",
 ]

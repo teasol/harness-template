@@ -5,7 +5,7 @@ being precise about which:
 
 | | | |
 |---|---|---|
-| **1** | **Mechanical verification** | Runs a spec, asserts things about the files it produced, and proves the whole thing repeats. Judges pass/fail on evidence, never on opinion. |
+| **1** | **Mechanical verification** | Runs the project's own tests as a named checklist, gates every module's "done" on them, and records what produced each run. Judges pass/fail on evidence, never on opinion. |
 | **2** | **Two-tier orchestration** | A Planner that is also the Main Worker decomposes the work into modules with contracts, builds them, and hands the routine bulk to Sub-Workers one at a time. |
 | **3** | **Handoff** | One document, always current, that a session which was not here reads instead of being told — so the work resumes on another day, another machine, another tool. |
 
@@ -26,62 +26,58 @@ starting the plan.
 ## 1. Mechanical verification
 
 This is the layer everything else rests on, so it is deliberately small and
-hard to talk round. It verifies **four** things, all of which reduce to files on
-disk and exit codes.
+hard to talk round. It verifies **three** things, all of which reduce to exit
+codes and files on disk.
 
 ### What it actually checks
 
-**A command ran and exited zero.** A spec is an ordered list of steps; each step
-is one shell command followed by zero or more checks, with an optional
-`timeout` so that hung and failed are different outcomes. Every step is handed a
-fixed environment — `HARNESS_RESULTS_DIR` (this run's artifact directory),
-`HARNESS_RUN_ID`, `HARNESS_PYTHON` (the interpreter to use),
-`HARNESS_SEED`, `HARNESS_DIR` — so a step never hardcodes a path and sees the
-same contract wherever it runs.
+**A named test ran and exited zero.** The harness ships no assertions of its
+own. It manages a **checklist**: each item is addressed as `<module>:<name>`
+(`loader:parses-v2`) and names a command the project already has — pytest, a
+shell script, a CLI of its own — and the verdict is that command's **exit
+code**, which is the one thing that means the same in every project. An item
+has an optional `timeout` so that hung and failed are different outcomes, and
+every command is handed a fixed environment — `HARNESS_RESULTS_DIR` (this
+run's artifact directory), `HARNESS_RUN_ID`, `HARNESS_PYTHON` (the interpreter
+to use), `HARNESS_SEED`, `HARNESS_DIR` — so an item never hardcodes a path and
+sees the same contract wherever it runs.
 
-**The assertions about the files it produced hold.** There are exactly four
-check types:
+Writing the test is the project's job, because only the project knows what
+would count as working. "Does the code work" is not the same question twice —
+a log parser and a training loop need different tests, and the four built-in
+check types and spec language this layer once shipped fit neither. Knowing
+which tests exist, which module each belongs to, and which of them pass right
+now is this layer's.
 
-| type | what it asserts |
-|---|---|
-| `file_exists` | a file is at that path |
-| `file_hash` | that file's sha256 equals the value you named |
-| `json_metric` | a dotted path in a JSON document (`train.loss`) reads as a number, within `min` / `max` / `equals` |
-| `text_contains` | the file contains every substring you listed |
+**Every declared deliverable exists.** This is a separate gate from the
+checklist. A task lists the files it must produce under `deliverables:`, and
+the harness synthesizes an item asserting each one — so a task **fails even
+when every checklist item passed** if a declared file is missing. "The tests
+passed but nothing was written" cannot be reported as done. The corollary
+matters: an incomplete `deliverables` list is an unenforced contract.
 
-Four is the design, not a backlog. A spec is **data, not logic**: adding a check
-means registering a Python function, never putting a condition in YAML.
-
-`json_metric` is strict on purpose. It refuses a boolean, because `equals: 1` and
-`equals: true` would otherwise mean the same thing — and a pass/fail flag that
-compares equal to a measurement is a bug waiting for a bad day. It refuses
-strings too, and tells you to use `text_contains`.
-
-**Every declared deliverable exists.** This is a separate gate from the checks.
-A task lists the files it must produce under `deliverables:`, and the harness
-synthesizes a step asserting each one — so a task **fails even when every check
-passed** if a declared file is missing. "The tests passed but nothing was
-written" cannot be reported as done. The corollary matters: an incomplete
-`deliverables` list is an unenforced contract.
-
-**It repeats.** `harness reproduce` runs the whole spec twice and diffs a
-manifest of every artifact's hash. Any divergence fails. It also **refuses to
-pass a spec that produced nothing comparable** — a gate over zero files would
-pass unconditionally.
+**What produced a run is recorded.** Commit, branch, interpreter, platform,
+harness version — a report is unreadable without it, so the harness collects
+it around every run. What counts as *reproducible* is not recorded, because
+that differs by project: a project that needs a determinism gate writes it as
+a checklist item of its own, rather than carrying one built for no project in
+particular.
 
 ```bash
-harness verify --spec configs/<name>.yaml     # run it, judge it
-harness reproduce --spec configs/<name>.yaml  # run it twice, diff every artifact
-harness hash <file>                           # the sha256, for file_hash checks
+harness check --plan <name>              # every item in the plan
+harness check <module> --plan <name>     # one module's items
+harness check <module>:<item> --plan <name>
+harness checklist --plan <name>          # print every item and its command
 ```
 
 ### Two levels
 
-- **Per module** — a task's `acceptance`: did this one module meet its contract?
+- **Per module** — a task's `checklist`: did this one module meet its contract?
   `harness task verify --id <id>`
-- **The whole** — the plan's `integration.spec`: does the assembled thing work?
-  Required since 0.7.0; a plan without one fails `plan validate` rather than
-  surviving to a report that could never approve it.
+- **The whole** — the plan's own `checklist`: does the assembled thing work?
+  Required; a plan without one fails `plan validate` rather than surviving to a
+  report that could never approve it. Modules that each pass alone can still
+  not add up.
 
 `harness task verify --all --status done` re-verifies everything that *claims*
 to be done. CI runs exactly that, so a task that passed once and broke later is
@@ -93,7 +89,7 @@ A verdict only means something if the thing issuing it was not tampered with.
 
 **The harness hashes itself around every Worker invocation.** If the package
 changed during an attempt, the task fails outright. This was not hypothetical: a
-Worker once patched `runner.py` mid-attempt, and **acceptance under a rewritten
+Worker once patched the harness mid-attempt, and **acceptance under a rewritten
 harness proves nothing**. Under the default `guard: strict` a task also fails if
 the Worker modified a tracked file it never declared as a deliverable.
 
@@ -161,7 +157,7 @@ modules:
 ```
 
 `executor` defaults to `main`, so nothing is delegated behind the Planner's
-back. Either way the module keeps its contract and its acceptance: what changes
+back. Either way the module keeps its contract and its checklist: what changes
 is who writes the code, never whether it is verified.
 
 `plan run` is the Main Worker's loop. It walks the plan in dependency order,
@@ -238,9 +234,8 @@ harness create -n <name>        # register a Planner — the one thing you run
 harness setup [--check]         # choose the Sub-Worker platform / model / effort
 harness progress --watch        # what is running right now (second terminal)
 
-harness verify --spec <spec>    # run a spec and judge it
-harness reproduce --spec <spec> # run it twice, diff every artifact
-harness hash <file>             # sha256
+harness check <module>[:<item>]  # run checklist items and judge them
+harness checklist --plan <name>  # print every item and the command behind it
 
 harness plan new|validate|approve|materialize|run|status|check|drop|resume
 harness plans                   # every plan in flight
@@ -272,8 +267,8 @@ collide with what is already there:
     ├── agents/planner.md   #   Planner = Main Worker: plans, and builds
     ├── agents/worker.md    #   Sub-Worker: one module task, in isolation
     ├── configs/agents.yaml #   which agent runs which tier
-    ├── configs/demo.yaml   #   smoke spec, so "prove it works here" works
     ├── plans/ tasks/       #   plans and materialized work orders
+    ├── scripts/demo_step.py#   example command for a first checklist item
     ├── planners/           #   registered Planners and what they have learned
     └── adoption.json       #   how the harness arrived, if code predated it
 ```
@@ -294,12 +289,11 @@ harness/
 ├── invocation.py    how the harness was invoked, so printed commands paste
 ├── project.py       the project manifest both the engine and the Planner read
 ├── init.py          scaffolding
-├── verify/          spec · checks · runner · report · reproduce ·
-│                    reproducibility · heartbeat   — role 1
+├── verify/          checklist · provenance · report · heartbeat   — role 1
 ├── orchestrate/     plan · task · plans · worker · guard · setup   — role 2
 └── handoff/         document · planners · adoption   — role 3
 templates/           the files `harness init` copies into a project
-tests/               294 tests, no network, no API key, no model calls
+tests/               258 tests, no network, no API key, no model calls
 ```
 
 `verify/` knows nothing about Planners, plans or tasks: remove the layers above
@@ -309,7 +303,7 @@ whether the result is acceptable is `verify/`'s answer, never its own.
 ```bash
 make test      # pytest
 make lint      # ruff check + format check
-make verify    # the package's own end-to-end spec
+make check     # the demo plan's checklist, end to end
 make build     # wheel, and a listing of exactly what it ships
 ```
 

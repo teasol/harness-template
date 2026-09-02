@@ -4,8 +4,8 @@ Usage::
 
     python -m harness status                          # where am I, what next
     python -m harness setup [--platform P --model M --effort E]  # choose the Worker tier
-    python -m harness verify --spec configs/demo.yaml [--results-dir DIR]
-    python -m harness reproduce --spec configs/demo.yaml [--times 2]
+    python -m harness check [<module>[:<name>]]        # run checklist items
+    python -m harness checklist                        # what the checklist holds
     python -m harness hash <file> [<file> ...]
 
     # Two-tier orchestration (Planner → tasks → Workers)
@@ -25,7 +25,7 @@ Usage::
     python -m harness create -n <planner> [--model M]  # a Planner, once per project
     python -m harness plan new <name> --planner <planner>
     python -m harness plans
-    python -m harness report <name> [--no-run] [--determinism] [--save]
+    python -m harness report <name> [--no-run] [--save]
     python -m harness drop <name> [--force]
     python -m harness planner brief <name>            # current state, re-run anytime
 
@@ -64,20 +64,12 @@ from harness.orchestrate.worker import (
     write_worker_report,
 )
 from harness.paths import (
-    get_configs_dir,
     get_plans_dir,
     get_tasks_dir,
 )
 from harness.verify import heartbeat
+from harness.verify.checklist import parse_ref, run_items
 from harness.verify.report import write_reports
-from harness.verify.reproduce import (
-    ReproduceError,
-    reproduce,
-    write_reproduce_report,
-)
-from harness.verify.reproducibility import file_sha256
-from harness.verify.runner import Runner
-from harness.verify.spec import SpecError, load_spec
 
 
 def _resolve_tasks_dir(tasks_dir: str, root: str | Path = ".") -> str:
@@ -92,87 +84,77 @@ def _resolve_plans_dir(plans_dir: str, root: str | Path = ".") -> str:
     return plans_dir
 
 
-def _resolve_spec_path(spec: str, root: str | Path = ".") -> str:
-    """Let `configs/x.yaml` find `.harness/configs/x.yaml`.
-
-    `init` writes specs under `.harness/` so they cannot collide with a
-    project's own `configs/`, but the README, the Makefile and every habit say
-    `configs/demo.yaml`. Tasks and plans already resolve both ways; specs did
-    not, so the first command in the quickstart failed on a fresh project.
-    """
-    candidate = Path(spec)
-    if candidate.is_absolute() or candidate.exists():
-        return spec
-    parts = candidate.parts
-    if len(parts) >= 2 and parts[0] == "configs":
-        fallback = get_configs_dir(root).joinpath(*parts[1:])
-        if fallback.is_file():
-            return str(fallback)
-    return spec
-
-
-def cmd_verify(args: argparse.Namespace) -> int:
+def cmd_check(args: argparse.Namespace) -> int:
+    """Run checklist items — a whole plan's, one module's, or a single item."""
     try:
-        spec = load_spec(_resolve_spec_path(args.spec, args.root))
-    except SpecError as exc:
+        plan = load_plan(plans_mod.resolve_plan_path(args.plan, args.root))
+    except PlanError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    runner = Runner(root=args.root, results_dir=args.results_dir)
-    result = runner.run(spec)
-    json_path, md_path = write_reports(result)
+    module, name = parse_ref(args.item) if args.item else ("", "")
+    items = _select_items(plan, module, name)
+    if not items:
+        known = ["(plan)"] + [m.id for m in plan.modules]
+        print(
+            f"error: no checklist item matches '{args.item}'. scopes here: {known}",
+            file=sys.stderr,
+        )
+        return 2
 
-    status = "PASSED" if result.success else "FAILED"
-    print(f"[{spec.name}] {status} ({len(result.steps)} step(s))")
-    for step in result.steps:
-        mark = "ok" if step.success else "FAIL"
-        exit_col = "timeout" if step.exit_code is None else step.exit_code
-        print(f"  {mark:>4}  {step.step_id}  (exit={exit_col}, {step.duration_s:.2f}s)")
-        for check in step.checks:
-            if not check.passed:
-                print(f"         check failed [{check.check_type}]: {check.detail}")
+    scope = args.item or plan.name
+    run = run_items(
+        items,
+        root=args.root,
+        results_dir=args.results_dir,
+        scope=scope.replace(":", "-"),
+        progress=print,
+    )
+    json_path, md_path = write_reports(run)
+    passing = sum(1 for r in run.results if r.passed)
+    print(f"\n{passing}/{len(run.results)} item(s) passing")
     print(f"  report: {md_path}")
     print(f"  json:   {json_path}")
-    return 0 if result.success else 1
+    return 0 if run.passed else 1
 
 
-def cmd_reproduce(args: argparse.Namespace) -> int:
-    try:
-        spec = load_spec(_resolve_spec_path(args.spec, args.root))
-    except SpecError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-
-    try:
-        result = reproduce(spec, times=args.times, root=args.root, results_dir=args.results_dir)
-    except ReproduceError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-
-    report = write_reproduce_report(result, args.results_dir)
-    if result.reproducible:
-        print(
-            f"[{spec.name}] REPRODUCIBLE — {result.times} runs, "
-            f"{len(result.manifest)} artifact(s) identical"
-        )
-        for rel, digest in result.manifest.items():
-            print(f"    ok  {rel}  {digest[:16]}…")
+def _select_items(plan, module: str, name: str):
+    """Items for a `module`, a `module:name`, or everything when neither is given."""
+    if not module:
+        return list(plan.checklist) + [i for m in plan.modules for i in m.checklist]
+    if module in ("plan", plan.name):
+        pool = list(plan.checklist)
     else:
-        print(f"[{spec.name}] NOT REPRODUCIBLE — {result.times} runs", file=sys.stderr)
-        for line in result.differences:
-            print(f"  DIFF  {line}", file=sys.stderr)
-    print(f"  report: {report}")
-    return 0 if result.reproducible else 1
+        pool = [i for m in plan.modules if m.id == module for i in m.checklist]
+    return [i for i in pool if i.name == name] if name else pool
 
 
-def cmd_hash(args: argparse.Namespace) -> int:
-    for path in args.paths:
-        try:
-            digest = file_sha256(path)
-        except OSError as exc:
-            print(f"error: cannot read {path}: {exc}", file=sys.stderr)
-            return 2
-        print(f"{digest}  {path}")
+def cmd_checklist(args: argparse.Namespace) -> int:
+    """Print the checklist: every item, what runs it, and where it belongs."""
+    try:
+        plan = load_plan(plans_mod.resolve_plan_path(args.plan, args.root))
+    except PlanError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    board = {t.id: t for t in task_mod.load_board(_resolve_tasks_dir(args.tasks_dir, args.root))}
+    rows: list[tuple[str, str, str]] = []
+    for item in plan.checklist:
+        rows.append((f"(plan):{item.name}", "—", item.run))
+    for module in plan.modules:
+        task = board.get(module.id)
+        status = task.status if task else "unmaterialized"
+        for item in module.checklist:
+            rows.append((item.ref, status, item.run))
+
+    if not rows:
+        print("(no checklist items)")
+        return 0
+    width = max(len(ref) for ref, _, _ in rows)
+    print(f"  {'ITEM':<{width}}  {'MODULE':<16}  COMMAND")
+    for ref, status, run in rows:
+        print(f"  {ref:<{width}}  {status:<16}  {run}")
+    print(f"\n{len(rows)} item(s). Run them with `{invocation.cmd('check')}`.")
     return 0
 
 
@@ -180,14 +162,10 @@ def cmd_hash(args: argparse.Namespace) -> int:
 # Orchestration: plans (Planner side)
 
 
-def _print_step_failures(result) -> None:
-    for step in result.steps:
-        if step.success:
-            continue
-        print(f"  FAIL {step.step_id} (exit={step.exit_code})")
-        for check in step.checks:
-            if not check.passed:
-                print(f"         check failed [{check.check_type}]: {check.detail}")
+def _print_run_failures(run) -> None:
+    for result in run.failures:
+        print(f"  FAIL {result.ref} ({result.detail})")
+        print(f"       command: {result.command}")
 
 
 def cmd_plan_validate(args: argparse.Namespace) -> int:
@@ -197,10 +175,10 @@ def cmd_plan_validate(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     order = " → ".join(plan.topological_order())
-    integration = plan.integration
+    items = len(plan.checklist) + sum(len(m.checklist) for m in plan.modules)
     print(f"[{plan.name}] valid — {len(plan.modules)} module(s)")
-    print(f"  order:      {order}")
-    print(f"  integration: {integration}")
+    print(f"  order:     {order}")
+    print(f"  checklist: {items} item(s) ({len(plan.checklist)} at plan level)")
     return 0
 
 
@@ -283,8 +261,7 @@ def cmd_plan_status(args: argparse.Namespace) -> int:
     total = len(module_ids)
     print()
     print(f"Progress: {done}/{total} done")
-    if plan.integration:
-        print(f"Integration spec: {plan.integration}")
+    print(f"Plan checklist: {len(plan.checklist)} item(s)")
 
     orphans = sorted(set(board) - set(module_ids))
     if orphans:
@@ -389,11 +366,11 @@ def cmd_task_verify(args: argparse.Namespace) -> int:
     failed = 0
     for task in tasks:
         result = task_mod.verify_task(task, root=args.root, results_dir=args.results_dir)
-        status = "PASSED" if result.success else "FAILED"
-        print(f"[{result.spec_name}] {status} ({len(result.steps)} step(s))")
-        _print_step_failures(result)
+        status = "PASSED" if result.passed else "FAILED"
+        print(f"[{result.scope}] {status} ({len(result.results)} item(s))")
+        _print_run_failures(result)
         print(f"  report: {Path(result.run_dir) / 'report.md'}")
-        if not result.success:
+        if not result.passed:
             failed += 1
     if len(tasks) > 1:
         print(f"{len(tasks) - failed}/{len(tasks)} task(s) passed")
@@ -413,9 +390,9 @@ def cmd_task_done(args: argparse.Namespace) -> int:
     except TaskError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    if not result.success:
-        print(f"task '{args.id}' acceptance FAILED — status not changed", file=sys.stderr)
-        _print_step_failures(result)
+    if not result.passed:
+        print(f"task '{args.id}' checklist FAILED — status not changed", file=sys.stderr)
+        _print_run_failures(result)
         return 1
     # A task finished by hand after a Worker gave up would otherwise leave
     # worker.json permanently claiming 'failed' for a task the board calls
@@ -459,26 +436,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     init_cmd.set_defaults(func=cmd_init)
 
-    verify = sub.add_parser("verify", help="Run a verification spec")
-    verify.add_argument("--spec", required=True, help="Path to the spec YAML file")
-    verify.add_argument(
-        "--root", default=".", help="Root directory for relative paths (default: cwd)"
+    check_cmd = sub.add_parser(
+        "check", help="Run checklist items: a plan's, a module's, or one item"
     )
-    verify.add_argument("--results-dir", default="results", help="Base directory for run outputs")
-    verify.set_defaults(func=cmd_verify)
-
-    rerun = sub.add_parser("reproduce", help="Run a spec repeatedly and compare artifact hashes")
-    rerun.add_argument("--spec", required=True, help="Path to the spec YAML file")
-    rerun.add_argument("--times", type=int, default=2, help="How many runs to compare (>= 2)")
-    rerun.add_argument("--root", default=".", help="Root directory for relative paths")
-    rerun.add_argument(
-        "--results-dir", default="results/reproduce", help="Base directory for run outputs"
+    check_cmd.add_argument(
+        "item",
+        nargs="?",
+        default=None,
+        metavar="<module>[:<name>]",
+        help="What to run. Omit for every item in the plan; 'plan' for the plan-level ones",
     )
-    rerun.set_defaults(func=cmd_reproduce)
+    check_cmd.add_argument("--plan", default="plan", help="Plan name, or a path to its YAML")
+    check_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    check_cmd.add_argument(
+        "--results-dir", default="results", help="Base directory for run outputs"
+    )
+    check_cmd.set_defaults(func=cmd_check)
 
-    hash_cmd = sub.add_parser("hash", help="Print the sha256 of file(s)")
-    hash_cmd.add_argument("paths", nargs="+", help="File path(s)")
-    hash_cmd.set_defaults(func=cmd_hash)
+    checklist_cmd = sub.add_parser(
+        "checklist", help="Print every checklist item and the command behind it"
+    )
+    checklist_cmd.add_argument("--plan", default="plan", help="Plan name, or a path to its YAML")
+    checklist_cmd.add_argument("--tasks-dir", default="tasks")
+    checklist_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
+    checklist_cmd.set_defaults(func=cmd_checklist)
 
     plan_cmd = sub.add_parser(
         "plan", help="Plans: one piece of work, from starting it to reporting on it"
@@ -594,8 +575,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("show", "Print a task file", cmd_task_show),
         ("claim", "Claim a task (todo/blocked → in_progress)", cmd_task_claim),
         ("block", "Mark a task blocked with a reason", cmd_task_block),
-        ("verify", "Run a task's acceptance steps", cmd_task_verify),
-        ("done", "Verify acceptance and mark done", cmd_task_done),
+        ("verify", "Run a task's checklist", cmd_task_verify),
+        ("done", "Run the checklist and mark done", cmd_task_done),
         ("run", "Invoke a Worker on a task, verify, and retry", cmd_task_run),
     ]:
         parser_i = task_sub.add_parser(name, help=help_text)
@@ -642,9 +623,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     report_cmd = sub.add_parser("report", help="Build the decision aid for one plan")
     report_cmd.add_argument("name", help="Plan name")
-    report_cmd.add_argument("--no-run", action="store_true", help="Do not run the integration spec")
     report_cmd.add_argument(
-        "--determinism", action="store_true", help="Also run the determinism gate"
+        "--no-run", action="store_true", help="Do not re-run the plan checklist"
     )
     report_cmd.add_argument("--save", action="store_true", help="Also write the report into it")
     report_cmd.add_argument("--root", default=".", help="Repo root (default: cwd)")
@@ -905,8 +885,7 @@ def cmd_plan_report(args: argparse.Namespace) -> int:
         report = plans_mod.build_report(
             args.name,
             root=args.root,
-            run_integration=not args.no_run,
-            check_determinism=args.determinism,
+            run_checklist=not args.no_run,
         )
         work = plans_mod.find_plan(args.name, args.root)
     except WorkPlanError as exc:
@@ -916,10 +895,9 @@ def cmd_plan_report(args: argparse.Namespace) -> int:
     written = plans_mod.write_plan_report(report, work.path, save=args.save)
     verdict = "READY TO MERGE" if report.merge_ready else "NOT READY"
     print(f"[{report.name}] {verdict}")
-    print(f"  integration: {report.integration}")
-    print(f"  tasks:       {report.tasks_done}/{report.tasks_total} done")
-    print(f"  determinism: {report.determinism}")
-    print(f"  commit:      {report.commit or 'unknown'}{' (dirty)' if report.dirty else ''}")
+    print(f"  checklist: {report.checklist}")
+    print(f"  modules:   {report.tasks_done}/{report.tasks_total} done")
+    print(f"  commit:    {report.commit or 'unknown'}{' (dirty)' if report.dirty else ''}")
     for value in report.metrics:
         print(f"  {value.name}: {value.error or value.value}")
     for caveat in report.caveats:
@@ -1159,7 +1137,7 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
         )
         for step in invocation.steps(
             [
-                (f"task show --id {yours}", "its brief, contract and acceptance"),
+                (f"task show --id {yours}", "its brief, contract and checklist"),
                 (f"task verify --id {yours}", "when you think it is done"),
                 (f"task done --id {yours} --by planner", ""),
                 (f"plan run {plan.name}", "continues from here"),
@@ -1178,7 +1156,7 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
             if task.executor == "main":
                 why = "yours to run (`executor: main`)"
             elif task.status == "blocked":
-                why = "blocked — read its log, then fix the brief or the acceptance"
+                why = "blocked — read its log, then fix the brief or the checklist"
             elif task.status == "in_progress":
                 why = f"claimed by {task.worker or 'someone'} — `task done` or re-claim it"
             else:
@@ -1910,16 +1888,13 @@ def cmd_init(args: argparse.Namespace) -> int:
         for index, step in enumerate(adoption_mod.next_steps(target_dir), 1):
             print(f"  {index}. {step}")
         print(f"\n  {adoption_mod.THEN_TALK}")
-        print(
-            "\n  (smoke-test the harness itself any time: "
-            + invocation.cmd("verify --spec configs/demo.yaml")
-            + ")"
-        )
+        demo_cmd = invocation.cmd(".harness/scripts/demo_step.py")
+        print(f"\n  (an example command for a checklist item: {demo_cmd})")
         return 0
 
     print(
         f"  This repository already has {adoption.source_files} source file(s), and none of\n"
-        "  them is covered by a contract, an acceptance check, or a plan yet.\n"
+        "  them is covered by a contract, a checklist item, or a plan yet.\n"
         "  Register the Planner you will talk to, and let it plan how to change that:\n"
     )
     for index, step in enumerate(adoption_mod.next_steps(target_dir), 1):

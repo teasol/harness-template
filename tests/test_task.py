@@ -26,7 +26,7 @@ def test_materialize_creates_task_files(demo_plan, tmp_path: Path) -> None:
     assert task.depends_on == ["data-gen"]
     assert task.status == "todo"
     assert "stats" in task.brief
-    assert len(task.acceptance) == 2  # prepare-input + run-stats
+    assert [item.name for item in task.checklist] == ["writes-the-stats"]
 
 
 def test_materialize_skips_existing(demo_plan, tmp_path: Path) -> None:
@@ -72,17 +72,19 @@ def test_claim_rejects_unready_dependencies(demo_plan, tmp_path: Path) -> None:
 
 
 def test_verify_task_fails_on_missing_deliverable(demo_plan, tmp_path: Path) -> None:
-    """Passing acceptance is not enough: declared deliverables must exist."""
+    """Passing the checklist is not enough: declared deliverables must exist."""
     tasks_dir = tmp_path / "tasks"
     task_mod.materialize(demo_plan, tasks_dir)
     task = task_mod.load_task(tasks_dir, "data-gen")
-    task.deliverables = ["scripts/demo_step.py", "scripts/ghost.py"]
+    task.deliverables = ["tests/fixtures/demo-pipeline-spec.yaml", "scripts/ghost.py"]
 
     result = task_mod.verify_task(task, root=".", results_dir=tmp_path / "results")
 
-    assert not result.success
-    details = [c.detail for s in result.steps for c in s.checks if not c.passed]
-    assert any("ghost.py" in d for d in details)
+    assert not result.passed
+    # The gate names the file that is missing, not just a bare failure.
+    gate = next(r for r in result.results if r.name == "deliverables")
+    assert not gate.passed
+    assert "ghost.py" in gate.command
 
 
 def test_claim_lifecycle(tmp_path: Path, demo_plan) -> None:
@@ -109,12 +111,12 @@ def test_block_and_reclaim(tmp_path: Path, demo_plan) -> None:
 
 
 def test_demo_task_verify_e2e(tmp_path: Path, demo_plan) -> None:
-    """The task's acceptance passes end-to-end against the fixture."""
+    """The task's checklist passes end-to-end against the fixture."""
     tasks_dir = tmp_path / "tasks"
     task_mod.materialize(demo_plan, tasks_dir)
     task = task_mod.load_task(tasks_dir, "data-gen")
     result = task_mod.verify_task(task, root=".", results_dir=tmp_path / "results")
-    assert result.success, [c.detail for s in result.steps for c in s.checks]
+    assert result.passed, [r.detail for r in result.results]
 
 
 def test_complete_marks_done(tmp_path: Path, demo_plan) -> None:
@@ -124,7 +126,7 @@ def test_complete_marks_done(tmp_path: Path, demo_plan) -> None:
     task, result = task_mod.complete(
         tasks_dir, "data-gen", worker="agent-1", results_dir=tmp_path / "results"
     )
-    assert result.success
+    assert result.passed
     assert task.status == "done"
     assert task.log[-1].endswith("done")
     # Done tasks cannot be claimed again.

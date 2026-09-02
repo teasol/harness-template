@@ -1,13 +1,8 @@
 PYTHON ?= python3
 RESULTS_DIR ?= results
 
-# This package's own end-to-end spec. It is a test fixture, not a project's
-# configuration: this repository does not run the harness on itself, so the
-# targets that operate on a plan or a task board do not belong here.
-SPEC ?= tests/fixtures/configs/demo.yaml
-
 .DEFAULT_GOAL := help
-.PHONY: help install lint format test verify reproduce sync-configs build clean
+.PHONY: help install lint format test check sync-configs build clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -26,12 +21,9 @@ format: ## Auto-format code with ruff
 test: ## Run the pytest suite
 	$(PYTHON) -m pytest
 
-verify: ## Run the verification engine end to end on this package's own spec
-	$(PYTHON) -m harness verify --spec $(SPEC) --results-dir $(RESULTS_DIR)
-
-reproduce: ## Run that spec twice and compare artifact hashes (determinism gate)
-	$(PYTHON) -m harness reproduce --spec $(SPEC) --times 2 \
-		--results-dir $(RESULTS_DIR)/reproduce
+check: ## Run the demo plan's checklist end to end
+	$(PYTHON) -m harness check --plan tests/fixtures/demo-pipeline.yaml \
+		--results-dir $(RESULTS_DIR)/check
 
 sync-configs: ## Refresh the shipped agents.yaml header from setup.HEADER
 	$(PYTHON) scripts/sync_configs.py

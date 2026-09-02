@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import textwrap
 import threading
 import time
 from pathlib import Path
@@ -19,9 +18,7 @@ from pathlib import Path
 import pytest
 
 from harness.orchestrate.worker import WorkerConfig, run_task
-from harness.verify import heartbeat
-from harness.verify.runner import Runner
-from harness.verify.spec import load_spec
+from harness.verify import checklist, heartbeat
 
 TASK_YAML = """\
 task:
@@ -37,13 +34,9 @@ task:
   deliverables:
   - src/widget.py
   constraints: []
-  acceptance:
-    steps:
-    - id: check
-      run: test -f src/widget.py
-      checks:
-      - type: file_exists
-        path: src/widget.py
+  checklist:
+  - name: check
+    run: test -f src/widget.py
   executor: sub
   status: todo
   worker: null
@@ -169,36 +162,23 @@ def _watch_for(results: Path, label: str, timeout: float = 8.0) -> list[heartbea
 # published from the real code paths
 
 
-def test_a_running_step_is_visible_from_outside(tmp_path: Path) -> None:
+def test_a_running_item_is_visible_from_outside(tmp_path: Path) -> None:
     """The case that motivated this: work in flight, output buffered, silence."""
-    spec_path = tmp_path / "slow.yaml"
-    spec_path.write_text(
-        textwrap.dedent(
-            """
-            name: slow
-            steps:
-              - id: quick
-                run: "true"
-                checks: []
-              - id: slow-one
-                run: "sleep 1.5"
-                checks: []
-            """
-        ),
-        encoding="utf-8",
-    )
+    items = [
+        checklist.Item(name="quick", run="true", module="slow"),
+        checklist.Item(name="slow-one", run="sleep 1.5", module="slow"),
+    ]
     results = tmp_path / "results"
-    seen, watcher = _watch_for(results, "slow-one")
-    result = Runner(root=tmp_path, results_dir=results).run(load_spec(spec_path))
+    seen, watcher = _watch_for(results, "slow:slow-one")
+    run = checklist.run_items(items, root=tmp_path, results_dir=results, scope="slow")
     watcher.join()
 
-    assert result.success
-    assert seen, "a step running for 1.5s must be observable while it runs"
+    assert run.passed
+    assert seen, "an item running for 1.5s must be observable while it runs"
     beat = seen[0]
-    assert beat.activity == "step"
-    assert beat.label == "slow-one"
-    assert beat.position == "2/2", "the position within the spec must be reported"
-    assert beat.detail["spec"] == "slow"
+    assert beat.activity == "check"
+    assert beat.label == "slow:slow-one"
+    assert beat.position == "2/2", "the position within the checklist must be reported"
     # And it is gone once the run finishes.
     assert heartbeat.read(results) is None
 
@@ -238,7 +218,7 @@ def test_a_running_worker_attempt_is_visible_from_outside(tmp_path: Path) -> Non
 
     # The blocked terminal is told too, at the start rather than at the end.
     assert any("attempt 1/2 started" in line for line in lines)
-    assert any("acceptance passed" in line for line in lines)
+    assert any("checklist passed" in line for line in lines)
 
 
 def test_progress_command_reports_nothing_running(tmp_path: Path, capsys) -> None:

@@ -7,7 +7,6 @@ exit codes, not its Python API. Exit codes are therefore asserted explicitly —
 
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 
@@ -18,30 +17,42 @@ from harness.paths import template_root
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 DEMO_PLAN = str(FIXTURES_DIR / "demo-pipeline.yaml")
-#: This package's own end-to-end spec — a fixture, not a project's config.
-DEMO_SPEC = str(FIXTURES_DIR / "configs" / "demo.yaml")
+
+#: A plan whose checklist item fails — the command is the verdict, and `false`
+#: never exits zero.
+FAILING_PLAN = """
+plan:
+  name: failing-plan
+  goal: A plan whose one item always fails.
+  checklist:
+    - name: boom
+      run: "false"
+  modules:
+    - id: only
+      title: The one module
+      depends_on: []
+      brief: |
+        Its item fails on purpose.
+      checklist:
+        - name: boom
+          run: "false"
+"""
+
+#: A plan whose plan-level checklist names something that does not exist.
+UNKNOWN_ITEM = """
+plan:
+  name: no-such-item
+  goal: A plan used to probe addressability.
+  checklist:
+    - name: real-one
+      run: "true"
+  modules: []
+"""
 
 #: The configuration a real project receives — `harness init` copies this
 #: directory into `.harness/configs/`. This repository keeps no copy of its own:
 #: it is the package, not a harness project.
 PACKAGED_CONFIGS = template_root() / "configs"
-
-NONDET_SPEC = """
-name: nondet
-steps:
-  - id: roll
-    run: >-
-      $HARNESS_PYTHON -c "import random, json, os;
-      open(os.environ['HARNESS_RESULTS_DIR'] + '/roll.json', 'w').write(
-      json.dumps({'v': random.SystemRandom().random()}))"
-"""
-
-FAILING_SPEC = """
-name: failing
-steps:
-  - id: boom
-    run: "false"
-"""
 
 
 @pytest.fixture()
@@ -50,89 +61,60 @@ def results(tmp_path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# verify / hash
+# check / checklist
 
 
-def test_verify_success_returns_zero(results: str, capsys) -> None:
-    assert main(["verify", "--spec", DEMO_SPEC, "--results-dir", results]) == 0
-    assert "PASSED" in capsys.readouterr().out
-
-
-def test_verify_failure_returns_one(tmp_path: Path, results: str) -> None:
-    spec = tmp_path / "failing.yaml"
-    spec.write_text(FAILING_SPEC, encoding="utf-8")
-    assert main(["verify", "--spec", str(spec), "--results-dir", results]) == 1
-
-
-def test_verify_missing_spec_returns_two(results: str, capsys) -> None:
-    assert main(["verify", "--spec", "configs/nope.yaml", "--results-dir", results]) == 2
-    assert "not found" in capsys.readouterr().err
-
-
-def test_hash_prints_digest(tmp_path: Path, capsys) -> None:
-    target = tmp_path / "a.txt"
-    target.write_text("hello\n", encoding="utf-8")
-    assert main(["hash", str(target)]) == 0
-    digest = capsys.readouterr().out.split()[0]
-    assert len(digest) == 64
-
-
-def test_hash_missing_file_returns_two(tmp_path: Path) -> None:
-    assert main(["hash", str(tmp_path / "ghost.txt")]) == 2
-
-
-# ---------------------------------------------------------------------------
-# reproduce (the determinism gate)
-
-
-def test_reproduce_deterministic_spec_returns_zero(results: str, capsys) -> None:
-    assert main(["reproduce", "--spec", DEMO_SPEC, "--results-dir", results]) == 0
+def test_check_runs_every_item_and_returns_zero(results: str, capsys) -> None:
+    """The demo plan has three items: one plan-level, one per module."""
+    assert main(["check", "--plan", DEMO_PLAN, "--results-dir", results]) == 0
     out = capsys.readouterr().out
-    assert "REPRODUCIBLE" in out and "output.json" in out
-    payload = json.loads((Path(results) / "reproduce.json").read_text(encoding="utf-8"))
-    assert payload["reproducible"] is True
-    assert payload["times"] == 2
+    assert "3/3 item(s) passing" in out
+    assert "report:" in out
 
 
-def test_reproduce_detects_nondeterminism(tmp_path: Path, results: str, capsys) -> None:
-    spec = tmp_path / "nondet.yaml"
-    spec.write_text(NONDET_SPEC, encoding="utf-8")
-    assert main(["reproduce", "--spec", str(spec), "--results-dir", results]) == 1
-    assert "NOT REPRODUCIBLE" in capsys.readouterr().err
+def test_check_failure_returns_one(tmp_path: Path, results: str, capsys) -> None:
+    plan = tmp_path / "failing-plan.yaml"
+    plan.write_text(FAILING_PLAN, encoding="utf-8")
+    assert main(["check", "--plan", str(plan), "--results-dir", results]) == 1
+    assert "0/2 item(s) passing" in capsys.readouterr().out
 
 
-def test_reproduce_rejects_specs_with_no_artifacts(tmp_path: Path, results: str, capsys) -> None:
-    """A gate comparing zero files would pass unconditionally — refuse it."""
-    spec = tmp_path / "empty.yaml"
-    spec.write_text("name: empty\nsteps:\n  - id: noop\n    run: 'true'\n", encoding="utf-8")
-    assert main(["reproduce", "--spec", str(spec), "--results-dir", results]) == 2
-    assert "no comparable artifacts" in capsys.readouterr().err
+def test_check_missing_plan_returns_two(results: str, capsys) -> None:
+    assert main(["check", "--plan", "plans/nope.yaml", "--results-dir", results]) == 2
+    assert "error:" in capsys.readouterr().err
 
 
-def test_reproduce_requires_at_least_two_runs(results: str) -> None:
+def test_check_one_module_and_one_item(results: str, capsys) -> None:
+    """A bare module means every item in it; `module:name` narrows to one."""
+    assert main(["check", "data-gen", "--plan", DEMO_PLAN, "--results-dir", results]) == 0
+    assert "1/1 item(s) passing" in capsys.readouterr().out
     assert (
         main(
             [
-                "reproduce",
-                "--spec",
-                DEMO_SPEC,
-                "--times",
-                "1",
+                "check",
+                "data-gen:writes-the-dataset",
+                "--plan",
+                DEMO_PLAN,
                 "--results-dir",
                 results,
             ]
         )
-        == 2
+        == 0
     )
 
 
-def test_reproduce_reports_failing_spec_as_usage_error(
-    tmp_path: Path, results: str, capsys
-) -> None:
-    spec = tmp_path / "failing.yaml"
-    spec.write_text(FAILING_SPEC, encoding="utf-8")
-    assert main(["reproduce", "--spec", str(spec), "--results-dir", results]) == 2
-    assert "failed" in capsys.readouterr().err
+def test_check_unknown_item_is_a_usage_error(results: str, capsys) -> None:
+    bad = ["check", "data-gen:no-such-test", "--plan", DEMO_PLAN, "--results-dir", results]
+    assert main(bad) == 2
+    assert "no checklist item matches" in capsys.readouterr().err
+
+
+def test_checklist_lists_items_with_their_commands(capsys) -> None:
+    assert main(["checklist", "--plan", DEMO_PLAN]) == 0
+    out = capsys.readouterr().out
+    assert "data-gen:writes-the-dataset" in out
+    assert "(plan):assembled-flow" in out
+    assert "demo_step.py" in out
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +274,9 @@ def test_task_done_fails_on_missing_deliverable(tasks_dir: str, results: str, ca
         ["task", "done", "--id", "data-gen", "--tasks-dir", tasks_dir, "--results-dir", results]
     )
     assert code == 1
-    assert "deliverable missing" in capsys.readouterr().out
+    # The failure names the file that is missing, and does not advance the board.
+    out = capsys.readouterr().out
+    assert "deliverables missing" in out and "ghost.py" in out
     # Status must not advance on a failed acceptance.
     assert yaml.safe_load(path.read_text(encoding="utf-8"))["task"]["status"] == "todo"
 

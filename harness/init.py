@@ -107,10 +107,9 @@ def init_project(
         ("agents/worker.md", harness_dir / "agents" / "worker.md"),
         ("configs/agent-platforms.yaml", harness_dir / "configs" / "agent-platforms.yaml"),
         ("configs/agents.yaml", harness_dir / "configs" / "agents.yaml"),
-        ("configs/demo.yaml", harness_dir / "configs" / "demo.yaml"),
-        # The demo spec runs this. Shipping the spec without it made the first
-        # command in the quickstart — "prove it works here" — fail on every
-        # fresh project, which is the worst possible first impression.
+        # The demo spec runs this. Shipping the script without a runnable thing
+        # would be pointless, so it stays: a project's first checklist item can
+        # borrow it as a smoke test.
         ("scripts/demo_step.py", harness_dir / "scripts" / "demo_step.py"),
     ]
 

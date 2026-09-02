@@ -1,4 +1,9 @@
 # Example orchestration plan fixture for unit tests.
+#
+# Every command here writes a real file and exits 0, because the tests assert on
+# the verdict the harness reaches — not on anything the commands mean. What a
+# checklist item asserts is the project's business; that an item's exit code
+# decides it is the harness's, and that is what this fixture exercises.
 plan:
   name: demo-pipeline
   goal: >
@@ -21,8 +26,10 @@ plan:
     artifacts:
       - stats.json
 
-  integration:
-    spec: configs/demo.yaml
+  checklist:
+    - name: assembled-flow
+      run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/stats.json" --seed 42
+      timeout: 120
 
   modules:
     - id: data-gen
@@ -44,14 +51,10 @@ plan:
       constraints:
         - stdlib only
         - deterministic for a given seed
-      acceptance:
-        steps:
-          - id: run-data-gen
-            run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/demo_data.json" --seed 42
-            timeout: 120
-            checks:
-              - type: file_exists
-                path: ${HARNESS_RESULTS_DIR}/demo_data.json
+      checklist:
+        - name: writes-the-dataset
+          run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/demo_data.json" --seed 42
+          timeout: 120
 
     - id: stats
       title: Compute summary statistics
@@ -71,18 +74,7 @@ plan:
         Implement `stats` module.
       constraints:
         - stdlib only
-      acceptance:
-        steps:
-          - id: prepare-input
-            run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/demo_data.json" --seed 42
-            timeout: 120
-          - id: run-stats
-            run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/stats.json" --seed 42
-            timeout: 120
-            checks:
-              - type: file_exists
-                path: ${HARNESS_RESULTS_DIR}/stats.json
-              - type: json_metric
-                path: ${HARNESS_RESULTS_DIR}/stats.json
-                metric: seed
-                equals: 42
+      checklist:
+        - name: writes-the-stats
+          run: ${HARNESS_PYTHON} scripts/demo_step.py --out "${HARNESS_RESULTS_DIR}/stats.json" --seed 42
+          timeout: 120

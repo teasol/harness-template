@@ -1,7 +1,8 @@
-"""Deterministic demo step used by ``configs/demo.yaml``.
+"""Deterministic example command for a project's first checklist item.
 
-Produces a small JSON artifact from a seeded RNG so that output hashes are
-stable across runs — which is exactly what the CI determinism gate compares.
+Produces a small JSON artifact from a seeded RNG so that runs are stable —
+a checklist item's verdict is its exit code, and this one always exits zero
+when it can write its output.
 """
 
 from __future__ import annotations

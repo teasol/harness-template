@@ -45,12 +45,9 @@ from harness.paths import (
     get_plans_dir,
     get_tasks_dir,
 )
-from harness.verify.checks import CheckError, lookup_metric
-from harness.verify.report import write_reports
-from harness.verify.reproduce import ReproduceError, reproduce
-from harness.verify.reproducibility import collect_provenance
-from harness.verify.runner import Runner
-from harness.verify.spec import SpecError, load_spec
+from harness.verify.checklist import run_items
+from harness.verify.provenance import collect_provenance
+from harness.verify.report import MetricError, lookup_metric, write_reports
 
 #: Where worktrees live. A plan is identified by *having* a worktree here, not
 #: by a name prefix — its git branch is called whatever you called the plan.
@@ -100,18 +97,17 @@ class PlanReport:
     merge_ready: bool
     commit: str | None = None
     dirty: bool | None = None
-    integration: str = "not run"
-    #: Whether the integration evidence — fresh or reused — actually passed.
+    checklist: str = "not run"
+    #: Whether the plan-level evidence — fresh or reused — actually passed.
     #: Kept separate from the human string above so merge-readiness never
     #: depends on matching prose.
-    integration_ok: bool = False
+    checklist_ok: bool = False
     #: True when the evidence is a reused run from a different commit, so it
     #: passed for code that is not the code being reported on.
-    integration_stale: bool = False
+    checklist_stale: bool = False
     tasks_total: int = 0
     tasks_done: int = 0
     task_results: list[dict[str, Any]] = dataclasses.field(default_factory=list)
-    determinism: str = "not run"
     metrics: list[MetricValue] = dataclasses.field(default_factory=list)
     artifacts: list[str] = dataclasses.field(default_factory=list)
     caveats: list[str] = dataclasses.field(default_factory=list)
@@ -339,8 +335,17 @@ plan:
         metric: TODO.dotted.key
     artifacts: []
 
-  integration:
-    spec: configs/{name}.yaml
+  # The plan-level checklist: what proves the ASSEMBLED whole, once every
+  # module is done. Modules that each pass alone can still not add up.
+  #
+  # An item is a name and a command. The harness runs the command and reads its
+  # exit code — zero passes, anything else fails. What the command asserts is
+  # yours to decide, because only this project knows what "working" means here:
+  # pytest, a shell script, your own CLI, a diff against a fixture.
+  checklist:
+    - name: TODO-end-to-end
+      run: ${{HARNESS_PYTHON}} -c "print('TODO: run the assembled pipeline')"
+      timeout: 300
 
   # You build these, in order. `executor` defaults to `main` — the Main Worker,
   # which is you — so a module says nothing unless you decide to delegate it.
@@ -360,11 +365,13 @@ plan:
         handed to someone who reads nothing but this task file and the
         repository — which is exactly what happens if you set `executor: sub`.
       constraints: []
-      acceptance:
-        steps:
-          - id: TODO-check
-            run: ${{HARNESS_PYTHON}} -c "print('TODO')"
-            checks: []
+      # At least one item, or the module cannot be called done. Write the tests
+      # that would actually catch this module being wrong — including the ones
+      # nobody writes by default: that a value in the config reaches the code
+      # that uses it, and that changing it changes the result.
+      checklist:
+        - name: TODO-test
+          run: ${{HARNESS_PYTHON}} -m pytest tests/test_TODO.py -q
 """
 
 
@@ -432,20 +439,15 @@ def start(
         name=name, git_branch=git_branch, path=path, head=_git(path, "rev-parse", "HEAD")
     )
     _inherit_agent_configs(root, path)
-    if scaffold:
-        if not created.plan_path.exists():
-            created.plan_path.parent.mkdir(parents=True, exist_ok=True)
-            created.plan_path.write_text(
-                PLAN_TEMPLATE.format(name=name, prefix=invocation.command_prefix()),
-                encoding="utf-8",
-            )
-        # Scaffold the integration spec the plan points at, so the Planner's
-        # first validation error is about the TODOs it must fill in, not about
-        # a file the scaffold neglected to create.
-        spec_path = get_configs_dir(path) / f"{name}.yaml"
-        if not spec_path.exists():
-            spec_path.parent.mkdir(parents=True, exist_ok=True)
-            spec_path.write_text(INTEGRATION_TEMPLATE.format(name=name), encoding="utf-8")
+    if scaffold and not created.plan_path.exists():
+        # No separate spec file to scaffold any more: the plan-level checklist
+        # lives in the plan, so the Planner's first validation error is about
+        # the TODOs it must fill in rather than a file the scaffold forgot.
+        created.plan_path.parent.mkdir(parents=True, exist_ok=True)
+        created.plan_path.write_text(
+            PLAN_TEMPLATE.format(name=name, prefix=invocation.command_prefix()),
+            encoding="utf-8",
+        )
     return created
 
 
@@ -481,7 +483,7 @@ def _extract_metrics(plan: Plan, run_dir: Path | None) -> list[MetricValue]:
     for ref in plan.report.metrics:
         value = MetricValue(name=ref.name, source=ref.source, metric=ref.metric)
         if run_dir is None:
-            value.error = "no integration run to read from"
+            value.error = "no checklist run to read from"
             values.append(value)
             continue
         relative = ref.source.replace("${HARNESS_RESULTS_DIR}", str(run_dir))
@@ -495,7 +497,7 @@ def _extract_metrics(plan: Plan, run_dir: Path | None) -> list[MetricValue]:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 value.value = lookup_metric(data, ref.metric)
-            except (json.JSONDecodeError, CheckError) as exc:
+            except (json.JSONDecodeError, MetricError) as exc:
                 value.error = str(exc)
         values.append(value)
     return values
@@ -504,14 +506,13 @@ def _extract_metrics(plan: Plan, run_dir: Path | None) -> list[MetricValue]:
 def build_report(
     name: str,
     root: str | Path = ".",
-    run_integration: bool = True,
-    check_determinism: bool = False,
+    run_checklist: bool = True,
 ) -> PlanReport:
     """Assemble the user's decision aid for one plan.
 
-    The spine — integration result, task acceptance, determinism, the commit
-    to merge — is measured here, not narrated by an agent. The requested
-    metrics are extracted from the artifacts the run produced.
+    The spine — the plan-level checklist, every module's checklist, the commit
+    to merge — is measured here, not narrated by an agent. The requested metrics
+    are extracted from the artifacts the run produced.
     """
     work = find_plan(name, root)
     plan = _resolve_plan(work)
@@ -523,7 +524,7 @@ def build_report(
         goal=plan.goal.strip(),
         merge_ready=False,
         artifacts=list(plan.report.artifacts),
-        provenance=collect_provenance(plan_root, seed=None),
+        provenance=collect_provenance(plan_root),
     )
     report.commit = report.provenance.get("git_commit")
     report.dirty = report.provenance.get("git_dirty")
@@ -551,15 +552,15 @@ def build_report(
                 {
                     "id": module_id,
                     "status": "unmaterialized",
-                    "acceptance": "not run",
+                    "checklist": "not run",
                     "worker": None,
                 }
             )
             continue
-        entry = {"id": task.id, "status": task.status, "acceptance": "not run"}
+        entry = {"id": task.id, "status": task.status, "checklist": "not run"}
         if task.is_done:
             result = verify_task(task, root=plan_root, results_dir=plan_root / "results")
-            entry["acceptance"] = "passed" if result.success else "FAILED"
+            entry["checklist"] = "passed" if result.passed else "FAILED"
         entry["worker"] = task.worker
         report.task_results.append(entry)
 
@@ -569,82 +570,61 @@ def build_report(
         report.caveats.append(
             f"{report.tasks_total - report.tasks_done} of {report.tasks_total} module(s) not done"
         )
-    failed = [e["id"] for e in report.task_results if e["acceptance"] == "FAILED"]
+    failed = [e["id"] for e in report.task_results if e["checklist"] == "FAILED"]
     if failed:
-        report.caveats.append(f"task acceptance now failing: {failed}")
+        report.caveats.append(f"module checklist now failing: {failed}")
     orphans = sorted(set(board) - set(module_ids))
     if orphans:
         report.caveats.append(
             f"task file(s) not part of this plan, ignored for this report: {orphans}"
         )
 
-    # --- integration: does the assembled whole work? ---
+    # --- the plan-level checklist: does the assembled whole work? ---
     run_dir: Path | None = None
-    if plan.integration is None:
-        # Defensive: load_plan requires an integration spec, so this branch is
-        # unreachable through normal paths — but never let a missing spec
-        # produce a contradictory report; fail loudly instead.
-        raise PlanError("plan has no integration spec — every plan must declare one")
-    if run_integration:
-        spec_path = _integration_path(plan_root, plan.integration)
-        try:
-            spec = load_spec(spec_path)
-        except SpecError as exc:
-            report.integration = f"spec error: {exc}"
-        else:
-            runner = Runner(root=plan_root, results_dir=plan_root / "results")
-            result = runner.run(spec)
-            write_reports(result)
-            run_dir = Path(result.run_dir)
-            report.run_dir = result.run_dir
-            report.integration = "PASSED" if result.success else "FAILED"
-            report.integration_ok = result.success
+    if run_checklist:
+        result = run_items(
+            list(plan.checklist),
+            root=plan_root,
+            results_dir=plan_root / "results",
+            scope=plan.name,
+        )
+        write_reports(result)
+        run_dir = Path(result.run_dir)
+        report.run_dir = result.run_dir
+        report.checklist = "PASSED" if result.passed else "FAILED"
+        report.checklist_ok = result.passed
+        if result.failures:
+            report.caveats.extend(
+                f"plan checklist item '{f.ref}' failed ({f.detail})" for f in result.failures
+            )
     else:
         # --no-run used to throw away a run that had just passed, so every
-        # metric came back "no integration run to read from" and producing a
-        # report meant paying for the whole integration again — hours of GPU in
-        # the case that motivated this. Attach the last one instead, and say
-        # exactly which run it is so nobody mistakes it for a fresh result.
-        previous = _last_run(plan_root, plan.integration)
+        # metric came back "no run to read from" and producing a report meant
+        # paying for the whole thing again — hours of GPU in the case that
+        # motivated this. Attach the last one instead, and say exactly which
+        # run it is so nobody mistakes it for a fresh result.
+        previous = _last_run(plan_root, plan.name)
         if previous is None:
-            report.integration = "skipped (--no-run), and no previous run to attach"
+            report.checklist = "skipped (--no-run), and no previous run to attach"
             report.caveats.append(
-                "integration spec was not run, and no earlier run was found to read from"
+                "the plan checklist was not run, and no earlier run was found to read from"
             )
         else:
             run_dir = previous.path
             report.run_dir = str(previous.path)
             verdict = "PASSED" if previous.success else "FAILED"
-            report.integration = f"reused {verdict} run from {previous.finished_at}"
-            report.integration_ok = previous.success
+            report.checklist = f"reused {verdict} run from {previous.finished_at}"
+            report.checklist_ok = previous.success
             report.caveats.append(
-                f"integration was not re-run: these numbers come from {previous.path.name}, "
+                f"the checklist was not re-run: these numbers come from {previous.path.name}, "
                 f"which {verdict.lower()} at {previous.finished_at}"
             )
             if previous.commit and report.commit and previous.commit != report.commit:
-                report.integration_stale = True
+                report.checklist_stale = True
                 report.caveats.append(
                     f"the reused run was made at commit {previous.commit[:12]}, not the "
                     f"current {report.commit[:12]} — it does not describe this code"
                 )
-
-    # --- determinism (opt-in: a full re-run can be expensive) ---
-    if check_determinism:
-        try:
-            outcome = reproduce(
-                load_spec(_integration_path(plan_root, plan.integration)),
-                times=2,
-                root=plan_root,
-                results_dir=plan_root / "results" / "reproduce",
-            )
-            report.determinism = "REPRODUCIBLE" if outcome.reproducible else "NOT REPRODUCIBLE"
-            if not outcome.reproducible:
-                report.caveats.extend(f"nondeterministic: {d}" for d in outcome.differences)
-        except (ReproduceError, SpecError) as exc:
-            report.determinism = f"could not check: {exc}"
-            report.caveats.append(f"determinism unverified: {exc}")
-    else:
-        report.caveats.append("determinism not checked (pass --determinism to run the gate)")
 
     report.metrics = _extract_metrics(plan, run_dir)
     for value in report.metrics:
@@ -686,21 +666,19 @@ def build_report(
     # Every blocker becomes a stated reason: a verdict the user cannot
     # explain is not a decision aid.
     blockers: list[str] = []
-    if not report.integration_ok:
-        blockers.append(f"integration did not pass ({report.integration})")
-    elif report.integration_stale:
+    if not report.checklist_ok:
+        blockers.append(f"the plan checklist did not pass ({report.checklist})")
+    elif report.checklist_stale:
         # It passed — for other code. That is not evidence about this commit.
-        blockers.append("the reused integration run was made at a different commit")
+        blockers.append("the reused checklist run was made at a different commit")
     if report.tasks_total == 0:
         blockers.append("the plan declares no modules")
     if report.tasks_done != report.tasks_total:
         blockers.append(f"{report.tasks_done}/{report.tasks_total} module(s) done")
     if failed:
-        blockers.append(f"acceptance failing: {failed}")
+        blockers.append(f"module checklist failing: {failed}")
     if report.dirty:
         blockers.append("uncommitted changes in the worktree")
-    if report.determinism == "NOT REPRODUCIBLE":
-        blockers.append("the plan is not reproducible")
 
     report.merge_ready = not blockers
     report.blockers = blockers
@@ -709,7 +687,7 @@ def build_report(
 
 @dataclasses.dataclass
 class PreviousRun:
-    """A finished integration run that a report can attach to instead of re-running."""
+    """A finished checklist run that a report can attach to instead of re-running."""
 
     path: Path
     success: bool
@@ -717,23 +695,17 @@ class PreviousRun:
     commit: str | None
 
 
-def _last_run(plan_root: Path, integration: str | None) -> PreviousRun | None:
-    """The most recent completed run of this plan's integration spec.
+def _last_run(plan_root: Path, scope: str) -> PreviousRun | None:
+    """The most recent completed run of this plan's own checklist.
 
-    Matched on the spec's name, so an unrelated spec's run in the same results
-    directory is never mistaken for this plan's evidence.
+    Matched on the scope the run was recorded under, so a module's checklist run
+    in the same results directory is never mistaken for the plan's evidence.
     """
-    if integration is None:
-        return None
-    try:
-        spec_name = load_spec(_integration_path(plan_root, integration)).name
-    except (SpecError, WorkPlanError, OSError):
-        return None
-    runs_dir = plan_root / "results" / "runs"
+    runs_dir = plan_root / "results" / "checks"
     if not runs_dir.is_dir():
         return None
     candidates = sorted(
-        (d for d in runs_dir.glob(f"{spec_name}-*") if (d / "report.json").is_file()),
+        (d for d in runs_dir.glob(f"{scope}-*") if (d / "report.json").is_file()),
         key=lambda d: d.name,
         reverse=True,
     )
@@ -744,16 +716,11 @@ def _last_run(plan_root: Path, integration: str | None) -> PreviousRun | None:
             continue
         return PreviousRun(
             path=directory,
-            success=bool(data.get("success")),
+            success=bool(data.get("passed")),
             finished_at=str(data.get("finished_at", "unknown")),
             commit=(data.get("provenance") or {}).get("git_commit"),
         )
     return None
-
-
-def _integration_path(plan_root: Path, integration: str) -> Path:
-    candidate = Path(integration)
-    return candidate if candidate.is_absolute() else plan_root / candidate
 
 
 # ---------------------------------------------------------------------------
@@ -779,9 +746,8 @@ def report_markdown(report: PlanReport) -> str:
         "",
         f"- Git branch: `{report.git_branch}`",
         f"- Merge commit: `{commit}`",
-        f"- Integration: {report.integration}",
-        f"- Tasks: {report.tasks_done}/{report.tasks_total} done",
-        f"- Determinism: {report.determinism}",
+        f"- Plan checklist: {report.checklist}",
+        f"- Modules: {report.tasks_done}/{report.tasks_total} done",
         "",
     ]
     if report.blockers:
@@ -791,12 +757,12 @@ def report_markdown(report: PlanReport) -> str:
         lines += [
             "## Modules",
             "",
-            "| Task | Status | Acceptance | Worker |",
+            "| Module | Status | Checklist | Worker |",
             "| --- | --- | --- | --- |",
         ]
         for entry in report.task_results:
             lines.append(
-                f"| `{entry['id']}` | {entry['status']} | {entry['acceptance']} "
+                f"| `{entry['id']}` | {entry['status']} | {entry['checklist']} "
                 f"| {entry.get('worker') or '-'} |"
             )
         lines.append("")
@@ -980,7 +946,7 @@ def planner_brief(name: str, root: str | Path = ".") -> str:
             board = {t.id: t for t in load_board(plan_root / "tasks")}
             lines += [
                 f"Goal: {plan.goal.strip()}",
-                f"Integration spec: {plan.integration or '(none declared)'}",
+                f"Plan checklist: {len(plan.checklist)} item(s)",
                 "",
                 "| Module | Status | Worker | Depends on |",
                 "| --- | --- | --- | --- |",
@@ -1132,21 +1098,6 @@ def planner_of(work: WorkPlan) -> dict[str, Any] | None:
         return None
 
 
-INTEGRATION_TEMPLATE = """\
-# Integration spec for plan '{name}' — verifies the ASSEMBLED whole once
-# every module is done. TODO(Planner): replace the placeholder step.
-name: {name}
-description: Integration check for {name}
-seed: 42
-
-steps:
-  - id: TODO-integration
-    run: ${{HARNESS_PYTHON}} -c "print('TODO: run the assembled pipeline')"
-    timeout: 60
-    checks: []
-"""
-
-
 # ---------------------------------------------------------------------------
 # Orientation: where am I, and what do I do next?
 
@@ -1256,7 +1207,7 @@ def plan_state(item: WorkPlan) -> PlanState:
     return state(
         "ready to report",
         "every module is done",
-        f"report {name} --determinism --save",
+        f"report {name} --save",
     )
 
 

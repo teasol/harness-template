@@ -5,29 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
 
 from harness.orchestrate.plan import PlanError, load_plan
 
 
 def write_plan(tmp_path: Path, data: str) -> Path:
-    """Write a plan fixture, plus the integration spec every plan must declare.
-
-    ``plan.integration.spec`` is required, so each fixture gets a trivial
-    companion spec at ``configs/p.yaml``, and the key is added when the fixture
-    did not write one. Tests about integration itself pass their own value.
-    """
+    """Write a plan fixture as-is; tests about validation pass their own text."""
     path = tmp_path / "plan.yaml"
     path.write_text(data, encoding="utf-8")
-    spec_dir = tmp_path / "configs"
-    spec_dir.mkdir(exist_ok=True)
-    (spec_dir / "p.yaml").write_text(
-        "name: p\nsteps:\n  - id: ok\n    run: 'true'\n", encoding="utf-8"
-    )
-    raw = yaml.safe_load(data)
-    if "integration" not in (raw or {}).get("plan", {}):
-        raw["plan"]["integration"] = {"spec": "configs/p.yaml"}
-        path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return path
 
 
@@ -35,23 +20,21 @@ VALID_PLAN = """
 plan:
   name: p
   goal: do something
+  checklist:
+    - name: everything-holds
+      run: "true"
   modules:
     - id: a
       brief: build a
-      acceptance:
-        steps:
-          - id: run-a
-            run: "true"
-            checks:
-              - type: file_exists
-                path: out.txt
+      checklist:
+        - name: run-a
+          run: "true"
     - id: b
       brief: build b
       depends_on: [a]
-      acceptance:
-        steps:
-          - id: run-b
-            run: "true"
+      checklist:
+        - name: run-b
+          run: "true"
 """
 
 
@@ -77,19 +60,20 @@ def test_cycle_detected(tmp_path: Path) -> None:
 plan:
   name: p
   goal: g
+  checklist: [{name: s, run: "true"}]
   modules:
     - id: a
       brief: b
       depends_on: [c]
-      acceptance: {steps: [{id: s, run: "true"}]}
+      checklist: [{name: s, run: "true"}]
     - id: b
       brief: b
       depends_on: [a]
-      acceptance: {steps: [{id: s, run: "true"}]}
+      checklist: [{name: s, run: "true"}]
     - id: c
       brief: b
       depends_on: [b]
-      acceptance: {steps: [{id: s, run: "true"}]}
+      checklist: [{name: s, run: "true"}]
 """,
     )
     with pytest.raises(PlanError, match="cycle"):
@@ -103,11 +87,12 @@ def test_unknown_dependency(tmp_path: Path) -> None:
 plan:
   name: p
   goal: g
+  checklist: [{name: s, run: "true"}]
   modules:
     - id: a
       brief: b
       depends_on: [ghost]
-      acceptance: {steps: [{id: s, run: "true"}]}
+      checklist: [{name: s, run: "true"}]
 """,
     )
     with pytest.raises(PlanError, match="unknown module"):
@@ -121,13 +106,14 @@ def test_duplicate_module_ids(tmp_path: Path) -> None:
 plan:
   name: p
   goal: g
+  checklist: [{name: s, run: "true"}]
   modules:
     - id: a
       brief: b
-      acceptance: {steps: [{id: s, run: "true"}]}
+      checklist: [{name: s, run: "true"}]
     - id: a
       brief: b
-      acceptance: {steps: [{id: s, run: "true"}]}
+      checklist: [{name: s, run: "true"}]
 """,
     )
     with pytest.raises(PlanError, match="duplicate"):
@@ -141,16 +127,36 @@ def test_missing_brief_rejected(tmp_path: Path) -> None:
 plan:
   name: p
   goal: g
+  checklist: [{name: s, run: "true"}]
   modules:
     - id: a
-      acceptance: {steps: [{id: s, run: "true"}]}
+      checklist: [{name: s, run: "true"}]
 """,
     )
     with pytest.raises(PlanError, match="brief"):
         load_plan(path)
 
 
-def test_missing_acceptance_rejected(tmp_path: Path) -> None:
+def test_missing_checklist_rejected(tmp_path: Path) -> None:
+    """A module nothing tests is a module nobody can call done."""
+    path = write_plan(
+        tmp_path,
+        """
+plan:
+  name: p
+  goal: g
+  checklist: [{name: s, run: "true"}]
+  modules:
+    - id: a
+      brief: b
+""",
+    )
+    with pytest.raises(PlanError, match="checklist"):
+        load_plan(path)
+
+
+def test_plan_level_checklist_required(tmp_path: Path) -> None:
+    """A plan must declare what proves the assembled whole, not just the parts."""
     path = write_plan(
         tmp_path,
         """
@@ -160,34 +166,38 @@ plan:
   modules:
     - id: a
       brief: b
+      checklist: [{name: s, run: "true"}]
 """,
     )
-    with pytest.raises(PlanError, match="acceptance"):
+    with pytest.raises(PlanError, match="'plan.checklist' is required"):
         load_plan(path)
 
 
-def test_unknown_check_type_rejected(tmp_path: Path) -> None:
+def test_item_names_are_addressable(tmp_path: Path) -> None:
+    """An item name the harness cannot address (`module:name`) is a planning error."""
     path = write_plan(
         tmp_path,
         """
 plan:
   name: p
   goal: g
+  checklist: [{name: s, run: "true"}]
   modules:
     - id: a
       brief: b
-      acceptance:
-        steps:
-          - id: s
-            run: "true"
-            checks: [{type: nope, path: x}]
+      checklist: [{name: Not-Addressable, run: "true"}]
 """,
     )
-    with pytest.raises(PlanError, match="unknown check type"):
+    with pytest.raises(PlanError, match="lowercase letters, digits and hyphens"):
         load_plan(path)
 
 
-def test_integration_spec_must_exist(tmp_path: Path) -> None:
+def test_integration_spec_is_no_longer_part_of_the_language(tmp_path: Path) -> None:
+    """The determinism gate moved to the project; a stale key must not break loading.
+
+    Plans written before the checklist model carried `integration.spec`. The
+    harness no longer owns a spec language, so the key is simply ignored.
+    """
     path = write_plan(
         tmp_path,
         """
@@ -195,33 +205,15 @@ plan:
   name: p
   goal: g
   integration: {spec: configs/missing.yaml}
+  checklist: [{name: s, run: "true"}]
   modules:
     - id: a
       brief: b
-      acceptance: {steps: [{id: s, run: "true"}]}
+      checklist: [{name: s, run: "true"}]
 """,
     )
-    with pytest.raises(PlanError, match="integration spec not found"):
-        load_plan(path)
-
-
-def test_integration_spec_required(tmp_path: Path) -> None:
-    """A plan without an integration spec is not a plan."""
-    path = tmp_path / "plan.yaml"
-    path.write_text(
-        """
-plan:
-  name: p
-  goal: g
-  modules:
-    - id: a
-      brief: b
-      acceptance: {steps: [{id: s, run: "true"}]}
-""",
-        encoding="utf-8",
-    )
-    with pytest.raises(PlanError, match="integration"):
-        load_plan(path)
+    plan = load_plan(path)
+    assert plan.name == "p"
 
 
 def test_goal_required(tmp_path: Path) -> None:
@@ -233,7 +225,7 @@ plan:
   modules:
     - id: a
       brief: b
-      acceptance: {steps: [{id: s, run: "true"}]}
+      checklist: [{name: s, run: "true"}]
 """,
     )
     with pytest.raises(PlanError, match="goal"):

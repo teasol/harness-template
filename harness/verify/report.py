@@ -1,4 +1,4 @@
-"""JSON + Markdown report generation for harness runs."""
+"""JSON + Markdown report for one pass over a checklist."""
 
 from __future__ import annotations
 
@@ -6,34 +6,58 @@ import dataclasses
 import json
 from pathlib import Path
 
-from harness.verify.runner import RunResult
+from harness.verify.checklist import ChecklistRun
 
 
-def write_reports(result: RunResult) -> tuple[Path, Path]:
+class MetricError(ValueError):
+    """Raised when a declared metric cannot be read out of an artifact."""
+
+
+def lookup_metric(data: object, metric: str) -> object:
+    """Resolve a dotted path inside a loaded JSON document.
+
+    A plan's `report:` block declares *where* each number lives rather than
+    what it is, so this is how the harness reads one out. It used to belong to
+    the `json_metric` check type; extracting a value for a report outlived
+    asserting things about it.
+    """
+    node: object = data
+    for part in metric.split("."):
+        if isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            raise MetricError(f"metric path '{metric}' not found in JSON document")
+    return node
+
+
+def write_reports(run: ChecklistRun) -> tuple[Path, Path]:
     """Write ``report.json`` and ``report.md`` into the run directory."""
-    run_dir = Path(result.run_dir)
+    run_dir = Path(run.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
 
     json_path = run_dir / "report.json"
     md_path = run_dir / "report.md"
+    payload = dataclasses.asdict(run)
+    # `passed` is a property, and a reader of the JSON should not have to
+    # recompute the verdict the harness already reached.
+    payload["passed"] = run.passed
+    for entry, result in zip(payload["results"], run.results, strict=True):
+        entry["passed"] = result.passed
 
-    json_path.write_text(
-        json.dumps(dataclasses.asdict(result), indent=2) + "\n",
-        encoding="utf-8",
-    )
-    md_path.write_text(_markdown(result), encoding="utf-8")
+    json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    md_path.write_text(_markdown(run), encoding="utf-8")
     return json_path, md_path
 
 
-def _provenance_lines(result: RunResult) -> list[str]:
-    """Render the 'how do I reproduce this?' block, if provenance was captured."""
-    prov = result.provenance
+def _provenance_lines(run: ChecklistRun) -> list[str]:
+    """The 'how do I redo this?' block, if provenance was captured."""
+    prov = run.provenance
     if not prov:
         return []
     commit = prov.get("git_commit") or "unknown"
     if prov.get("git_dirty"):
-        commit += " (dirty worktree — uncommitted changes)"
-    lines = [
+        commit = f"{commit} (dirty worktree — uncommitted changes)"
+    return [
         "## Provenance",
         "",
         f"- Commit: `{commit}`",
@@ -41,57 +65,48 @@ def _provenance_lines(result: RunResult) -> list[str]:
         f"- Python: {prov.get('python_version') or 'unknown'} (`{prov.get('python_executable')}`)",
         f"- Platform: {prov.get('platform') or 'unknown'}",
         f"- Harness: {prov.get('harness_version') or 'unknown'}",
-        f"- Seed: {prov.get('seed') if prov.get('seed') is not None else '(none declared)'}",
+        "",
     ]
-    # Anything the harness put into the step environment has to be visible: a
-    # number measured under CUBLAS_WORKSPACE_CONFIG is not comparable to one
-    # measured without it, and that must not be a hidden variable.
-    injected = prov.get("injected_env")
-    if isinstance(injected, dict) and injected:
-        rendered = ", ".join(f"`{k}={v}`" for k, v in sorted(injected.items()))
-        lines.append(f"- Injected env: {rendered}")
-    else:
-        lines.append("- Injected env: (none)")
-    if prov.get("deterministic_math"):
-        lines.append(
-            "- **Deterministic math is ON** — results are not directly comparable "
-            "to measurements taken without it."
-        )
-    lines.append("")
-    return lines
 
 
-def _markdown(result: RunResult) -> str:
-    status = "PASSED" if result.success else "FAILED"
+def _markdown(run: ChecklistRun) -> str:
     lines = [
-        f"# Harness report: {result.spec_name}",
+        f"# Checklist: {run.scope or 'plan'}",
         "",
-        f"**Status: {status}**",
+        f"**{'PASSED' if run.passed else 'FAILED'}** — "
+        f"{sum(1 for r in run.results if r.passed)}/{len(run.results)} item(s) passing",
         "",
-        f"- Started: {result.started_at}",
-        f"- Finished: {result.finished_at}",
-        f"- Run dir: `{result.run_dir}`",
+        f"- Started: {run.started_at}",
+        f"- Finished: {run.finished_at}",
+        f"- Run dir: `{run.run_dir}`",
         "",
     ]
-    lines += _provenance_lines(result)
+    lines += _provenance_lines(run)
     lines += [
-        "| Step | Exit | Duration (s) | Checks | Status |",
+        "| Item | Command | Exit | Duration (s) | Status |",
         "| --- | --- | --- | --- | --- |",
     ]
-    for step in result.steps:
-        passed = sum(1 for c in step.checks if c.passed)
-        total = len(step.checks)
-        exit_col = "timeout" if step.exit_code is None else str(step.exit_code)
-        mark = "pass" if step.success else "FAIL"
+    for result in run.results:
+        exit_col = "timeout" if result.timed_out else str(result.exit_code)
         lines.append(
-            f"| `{step.step_id}` | {exit_col} | {step.duration_s:.2f} | {passed}/{total} | {mark} |"
+            f"| `{result.ref}` | `{result.command}` | {exit_col} | "
+            f"{result.duration_s:.2f} | {'pass' if result.passed else 'FAIL'} |"
         )
 
-    failed = [c for s in result.steps for c in s.checks if not c.passed]
-    if failed:
-        lines += ["", "## Failed checks", ""]
-        for check in failed:
-            lines.append(f"- `{check.check_type}`: {check.detail}")
+    if run.failures:
+        lines += ["", "## Failing items", ""]
+        for result in run.failures:
+            lines += [
+                f"- **`{result.ref}`** — {result.detail}",
+                f"  - command: `{result.command}`",
+                f"  - log: `{result.log_path}`",
+            ]
+    if not run.results:
+        lines += [
+            "",
+            "No items ran. An empty checklist establishes nothing, so this is a",
+            "failure rather than a pass.",
+        ]
 
     lines.append("")
     return "\n".join(lines)

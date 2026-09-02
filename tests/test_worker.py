@@ -35,13 +35,9 @@ task:
   - src/widget.py
   constraints:
   - stdlib only
-  acceptance:
-    steps:
-    - id: check
-      run: test -f src/widget.py
-      checks:
-      - type: file_exists
-        path: src/widget.py
+  checklist:
+  - name: check
+    run: test -f src/widget.py
   executor: sub
   status: todo
   worker: null
@@ -166,7 +162,7 @@ def test_failing_worker_is_retried_with_the_real_output(project: Path) -> None:
     assert [a.passed for a in outcome.attempts] == [False, False, True]
     # The last prompt the worker saw was retry feedback, not the original brief.
     prompt = (project / "last-prompt.txt").read_text(encoding="utf-8")
-    assert "did not pass acceptance" in prompt
+    assert "did not pass its checklist" in prompt
     assert "attempt 3 of 6" in prompt
     assert "Fix the code; do not start over" in prompt
     # Every attempt is on the record.
@@ -190,12 +186,12 @@ def test_attempt_cap_blocks_the_task_for_the_planner(project: Path) -> None:
 
 
 def test_deliverables_are_still_enforced(project: Path) -> None:
-    """A worker whose acceptance passes but leaves no deliverable has not delivered."""
+    """A worker whose checklist passes but leaves no deliverable has not delivered."""
     task_file = project / "tasks" / "widget.task.yaml"
     # Acceptance that always passes, but the deliverable is still declared.
     task_file.write_text(
-        TASK_YAML.split("  acceptance:")[0]
-        + "  acceptance:\n    steps:\n    - id: check\n      run: 'true'\n"
+        TASK_YAML.split("  checklist:")[0]
+        + "  checklist:\n  - name: check\n    run: 'true'\n"
         + "  executor: sub\n  status: todo\n  worker: null\n  log: []\n",
         encoding="utf-8",
     )

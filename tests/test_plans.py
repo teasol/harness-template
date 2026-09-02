@@ -21,7 +21,6 @@ from harness.orchestrate.plans import WorkPlanError
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 DEMO_PLAN = FIXTURES_DIR / "demo-pipeline.yaml"
-DEMO_SPEC = FIXTURES_DIR / "demo-pipeline-spec.yaml"
 
 GIT = shutil.which("git")
 needs_git = pytest.mark.skipif(GIT is None, reason="git required")
@@ -29,17 +28,6 @@ needs_git = pytest.mark.skipif(GIT is None, reason="git required")
 
 def _run(cwd: Path, *args: str) -> None:
     subprocess.run(args, cwd=str(cwd), check=True, capture_output=True, text=True)
-
-
-def _adopt_spec(wt: Path) -> None:
-    """Put the plan's integration spec where the plan says it is.
-
-    `plan.integration.spec` is required and must exist — a plan without a
-    reachable one is invalid since 0.7.0 — and a worktree is a fresh checkout,
-    so nothing is there until it is copied in.
-    """
-    (wt / "configs").mkdir(exist_ok=True)
-    shutil.copy(DEMO_SPEC, wt / "configs" / "demo.yaml")
 
 
 @pytest.fixture()
@@ -98,7 +86,7 @@ MINIMAL_PLAN = """
 plan:
   name: minimal
   goal: g
-  integration: {{spec: configs/minimal.yaml}}
+  checklist: [{{name: assembled, run: "true"}}]
   report:
     question: q
     metrics:
@@ -107,10 +95,7 @@ plan:
 {metric_line}  modules:
     - id: m
       brief: b
-      acceptance:
-        steps:
-          - id: s
-            run: "true"
+      checklist: [{{name: s, run: "true"}}]
 """
 
 
@@ -118,10 +103,6 @@ def test_plan_report_accepts_metric_path_syntax(tmp_path: Path) -> None:
     path = tmp_path / "plan.yaml"
     path.write_text(
         MINIMAL_PLAN.format(metric_line="        metric: results.loss\n"), encoding="utf-8"
-    )
-    (tmp_path / "configs").mkdir(exist_ok=True)
-    (tmp_path / "configs" / "minimal.yaml").write_text(
-        "name: minimal\nsteps:\n  - id: ok\n    run: 'true'\n", encoding="utf-8"
     )
     assert load_plan(path).report.metrics[0].metric == "results.loss"
 
@@ -210,12 +191,7 @@ def test_report_on_a_finished_plan(clone: Path) -> None:
     shutil.copy(DEMO_PLAN, wt / "plans/finished.yaml")
     plan_text = (wt / "plans/finished.yaml").read_text(encoding="utf-8")
     plan_text = plan_text.replace("name: demo-pipeline", "name: finished", 1)
-    plan_text = plan_text.replace("spec: configs/demo.yaml", "spec: configs/finished.yaml", 1)
     (wt / "plans/finished.yaml").write_text(plan_text, encoding="utf-8")
-    spec_text = DEMO_SPEC.read_text(encoding="utf-8")
-    (wt / "configs/finished.yaml").write_text(
-        spec_text.replace("name: demo-pipeline", "name: finished", 1), encoding="utf-8"
-    )
 
     # Materialize and complete all tasks for this plan
     import yaml
@@ -230,11 +206,11 @@ def test_report_on_a_finished_plan(clone: Path) -> None:
     _run(wt, "git", "add", "-A")
     _run(wt, "git", "commit", "--quiet", "-m", "plan and tasks for finished")
 
-    report = plans_mod.build_report("finished", root=clone, run_integration=True)
+    report = plans_mod.build_report("finished", root=clone, run_checklist=True)
 
-    assert report.integration == "PASSED"
+    assert report.checklist == "PASSED"
     assert report.tasks_done == report.tasks_total == 2
-    assert all(e["acceptance"] == "passed" for e in report.task_results)
+    assert all(e["checklist"] == "passed" for e in report.task_results)
     assert report.commit and report.dirty is False
     assert report.merge_ready is True
     assert report.goal  # carried through from the plan
@@ -256,14 +232,13 @@ def test_report_flags_an_unfinished_plan(clone: Path) -> None:
     work = plans_mod.start("wip", root=clone)
     wt = work.path
     shutil.copy(DEMO_PLAN, wt / "plans/wip.yaml")
-    _adopt_spec(wt)
     text = (wt / "plans/wip.yaml").read_text(encoding="utf-8")
     text = text.replace("name: demo-pipeline", "name: wip", 1)
     (wt / "plans/wip.yaml").write_text(text, encoding="utf-8")
     for stale in (wt / "tasks").glob("*.task.yaml"):
         stale.unlink()
 
-    report = plans_mod.build_report("wip", root=clone, run_integration=False)
+    report = plans_mod.build_report("wip", root=clone, run_checklist=False)
 
     assert report.merge_ready is False
     assert report.dirty is True
@@ -290,7 +265,6 @@ def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
     wt = work.path
     # A plan with two modules, neither materialized...
     shutil.copy(DEMO_PLAN, wt / "plans/scoped.yaml")
-    _adopt_spec(wt)
     text = (wt / "plans/scoped.yaml").read_text(encoding="utf-8")
     text = text.replace("name: demo-pipeline", "name: scoped", 1)
     text = text.replace("id: data-gen", "id: alpha", 1).replace("id: stats", "id: beta", 1)
@@ -299,11 +273,11 @@ def test_report_ignores_tasks_from_other_plans(clone: Path) -> None:
     # ...while tasks/ holds a task from another plan.
     (wt / "tasks").mkdir(parents=True, exist_ok=True)
     (wt / "tasks" / "foreign.task.yaml").write_text(
-        "task:\n  id: foreign\n  plan: other-plan\n  status: done\n  acceptance:\n    steps: []\n",
+        "task:\n  id: foreign\n  plan: other-plan\n  status: done\n  checklist: []\n",
         encoding="utf-8",
     )
 
-    report = plans_mod.build_report("scoped", root=clone, run_integration=False)
+    report = plans_mod.build_report("scoped", root=clone, run_checklist=False)
 
     assert report.tasks_total == 2
     assert report.tasks_done == 0  # not 2: foreign tasks are not this plan's
@@ -318,13 +292,12 @@ def test_not_ready_always_states_a_reason(clone: Path) -> None:
     work = plans_mod.start("unexplained", root=clone)
     wt = work.path
     shutil.copy(DEMO_PLAN, wt / "plans/unexplained.yaml")
-    _adopt_spec(wt)
     text = (wt / "plans/unexplained.yaml").read_text(encoding="utf-8")
     (wt / "plans/unexplained.yaml").write_text(
         text.replace("name: demo-pipeline", "name: unexplained", 1), encoding="utf-8"
     )
 
-    report = plans_mod.build_report("unexplained", root=clone, run_integration=False)
+    report = plans_mod.build_report("unexplained", root=clone, run_checklist=False)
 
     assert not report.merge_ready
     assert report.blockers, "NOT READY must always come with stated blockers"
@@ -332,10 +305,15 @@ def test_not_ready_always_states_a_reason(clone: Path) -> None:
 
 
 @needs_git
-def test_start_scaffolds_an_integration_spec(clone: Path) -> None:
-    """The scaffold must not point at a file it forgot to create."""
+def test_start_scaffolds_only_the_plan(clone: Path) -> None:
+    """The scaffold is one file: the plan itself carries the plan-level checklist.
+
+    There is no separate spec file to scaffold any more, so there is no file
+    the scaffold could forget to create.
+    """
     work = plans_mod.start("scaffolded", root=clone)
-    assert (work.path / "configs" / "scaffolded.yaml").is_file()
+    assert work.plan_path.is_file()
+    assert not (work.path / "configs" / "scaffolded.yaml").exists()
 
 
 @needs_git
@@ -345,7 +323,7 @@ def test_a_scaffold_is_not_a_plan(clone: Path) -> None:
     with pytest.raises(PlanError, match="still the scaffold"):
         load_plan(work.plan_path)
     with pytest.raises(WorkPlanError, match="still the scaffold"):
-        plans_mod.build_report("stub", root=clone, run_integration=False)
+        plans_mod.build_report("stub", root=clone, run_checklist=False)
 
 
 # ---------------------------------------------------------------------------
@@ -385,9 +363,7 @@ def test_status_walks_the_whole_flow(clone: Path) -> None:
     shutil.copy(DEMO_PLAN, wt / "plans/flow.yaml")
     text = (wt / "plans/flow.yaml").read_text(encoding="utf-8")
     text = text.replace("name: demo-pipeline", "name: flow", 1)
-    text = text.replace("spec: configs/demo.yaml", "spec: configs/flow.yaml", 1)
     (wt / "plans/flow.yaml").write_text(text, encoding="utf-8")
-    shutil.copy(DEMO_SPEC, wt / "configs/flow.yaml")
     for stale in (wt / "tasks").glob("*.task.yaml"):
         stale.unlink()
 
@@ -472,14 +448,11 @@ def test_the_briefing_keeps_one_shape(clone: Path) -> None:
     fresh = plans_mod.planner_brief("shape", root=clone)
 
     created = plans_mod.find_plan("shape", clone)
-    (created.path / "configs" / "shape.yaml").write_text(
-        "name: shape\nsteps:\n  - id: ok\n    run: 'true'\n", encoding="utf-8"
-    )
     created.plan_path.write_text(
         "plan:\n  name: shape\n  goal: make the loader stop guessing\n"
-        "  integration: {spec: configs/shape.yaml}\n"
-        "  modules:\n    - id: m\n      brief: b\n      acceptance:\n"
-        "        steps:\n          - id: s\n            run: 'true'\n            checks: []\n",
+        "  checklist: [{name: assembled, run: 'true'}]\n"
+        "  modules:\n    - id: m\n      brief: b\n"
+        "      checklist: [{name: s, run: 'true'}]\n",
         encoding="utf-8",
     )
     with_goal = plans_mod.planner_brief("shape", root=clone)
@@ -509,31 +482,14 @@ def test_starting_a_plan_registers_its_planner(clone: Path) -> None:
 
 
 def _finished_plan(clone: Path, name: str = "reuse") -> object:
-    """A plan whose single module is done and whose integration passes."""
+    """A plan whose single module is done and whose plan-level checklist passes."""
     work = plans_mod.start(
         name,
         root=clone,
     )
     work_root = work.path
-    (work_root / "configs").mkdir(exist_ok=True)
     (work_root / "src").mkdir(exist_ok=True)
     (work_root / "src" / "widget.py").write_text("x = 1\n", encoding="utf-8")
-    (work_root / "configs" / f"{name}.yaml").write_text(
-        f"""
-name: {name}
-steps:
-  - id: emit
-    run: >-
-      mkdir -p "${{HARNESS_RESULTS_DIR}}" &&
-      echo {{\\"score\\": 0.5}} > "${{HARNESS_RESULTS_DIR}}/metrics.json"
-    checks:
-      - type: json_metric
-        path: ${{HARNESS_RESULTS_DIR}}/metrics.json
-        metric: score
-        min: 0.0
-""",
-        encoding="utf-8",
-    )
     (work_root / "plans").mkdir(exist_ok=True)
     work.plan_path.write_text(
         f"""
@@ -546,20 +502,19 @@ plan:
       - name: score
         source: ${{HARNESS_RESULTS_DIR}}/metrics.json
         metric: score
-  integration:
-    spec: configs/{name}.yaml
+  checklist:
+    - name: writes-metrics
+      run: >-
+        mkdir -p "${{HARNESS_RESULTS_DIR}}" &&
+        echo '{{"score": 0.5}}' > "${{HARNESS_RESULTS_DIR}}/metrics.json"
   modules:
     - id: widget
       title: widget
       deliverables: [src/widget.py]
       brief: make src/widget.py
-      acceptance:
-        steps:
-          - id: check
-            run: test -f src/widget.py
-            checks:
-              - type: file_exists
-                path: src/widget.py
+      checklist:
+        - name: file-exists
+          run: test -f src/widget.py
 """,
         encoding="utf-8",
     )
@@ -572,19 +527,19 @@ plan:
 
 
 @needs_git
-def test_no_run_reuses_the_last_integration_run(clone: Path) -> None:
-    """Producing a report must not mean paying for the whole integration again."""
+def test_no_run_reuses_the_last_checklist_run(clone: Path) -> None:
+    """Producing a report must not mean paying for the whole checklist again."""
     _finished_plan(clone)
 
     fresh = plans_mod.build_report("reuse", root=clone)
-    assert fresh.integration == "PASSED"
-    assert fresh.integration_ok
+    assert fresh.checklist == "PASSED"
+    assert fresh.checklist_ok
     assert [m.value for m in fresh.metrics] == [0.5]
 
-    reused = plans_mod.build_report("reuse", root=clone, run_integration=False)
-    assert reused.integration.startswith("reused PASSED")
-    assert reused.integration_ok
-    # The numbers are really there, not "no integration run to read from".
+    reused = plans_mod.build_report("reuse", root=clone, run_checklist=False)
+    assert reused.checklist.startswith("reused PASSED")
+    assert reused.checklist_ok
+    # The numbers are really there, not "no checklist run to read from".
     assert [m.value for m in reused.metrics] == [0.5]
     assert any("was not re-run" in c for c in reused.caveats)
 
@@ -602,27 +557,18 @@ def test_no_run_with_nothing_to_reuse_says_so(clone: Path) -> None:
 plan:
   name: empty
   goal: nothing has run yet
-  integration:
-    spec: configs/empty.yaml
+  checklist: [{name: assembled, run: "true"}]
   modules:
     - id: m
       title: m
       brief: b
-      acceptance:
-        steps:
-          - id: s
-            run: "true"
-            checks: []
+      checklist: [{name: s, run: "true"}]
 """,
         encoding="utf-8",
     )
-    (work.path / "configs").mkdir(exist_ok=True)
-    (work.path / "configs" / "empty.yaml").write_text(
-        "name: empty\nsteps:\n  - id: s\n    run: 'true'\n    checks: []\n", encoding="utf-8"
-    )
-    report = plans_mod.build_report("empty", root=clone, run_integration=False)
-    assert "no previous run" in report.integration
-    assert not report.integration_ok
+    report = plans_mod.build_report("empty", root=clone, run_checklist=False)
+    assert "no previous run" in report.checklist or "no earlier run" in report.checklist
+    assert not report.checklist_ok
     assert not report.merge_ready
 
 
@@ -630,7 +576,7 @@ plan:
 def test_reused_evidence_from_another_commit_blocks_the_merge(clone: Path) -> None:
     """It passed — for other code. That is not evidence about this commit.
 
-    Silently accepting it would let a report certify a commit the integration
+    Silently accepting it would let a report certify a commit the checklist
     never ran against, which is the exact failure the reuse shortcut invites.
     """
     work = _finished_plan(clone, "stale")
@@ -644,9 +590,9 @@ def test_reused_evidence_from_another_commit_blocks_the_merge(clone: Path) -> No
         ["git", "commit", "-qm", "move on"], cwd=work_root, check=True, capture_output=True
     )
 
-    report = plans_mod.build_report("stale", root=clone, run_integration=False)
-    assert report.integration_ok, "the reused run itself did pass"
-    assert report.integration_stale
+    report = plans_mod.build_report("stale", root=clone, run_checklist=False)
+    assert report.checklist_ok, "the reused run itself did pass"
+    assert report.checklist_stale
     assert not report.merge_ready
     assert any("different commit" in b for b in report.blockers)
     assert any("does not describe this code" in c for c in report.caveats)
@@ -659,12 +605,12 @@ def test_a_plan_approved_by_its_own_planner_is_flagged(clone: Path) -> None:
     plan_mod.record_approval(work.plan_path, by="planner")
     plans_mod.register_planner("selfapproved", "planner", root=clone, model="m", require_model=True)
 
-    report = plans_mod.build_report("selfapproved", root=clone, run_integration=False)
+    report = plans_mod.build_report("selfapproved", root=clone, run_checklist=False)
     assert any("is the Planner itself" in c for c in report.caveats)
 
     # A different approver is not flagged.
     plan_mod.record_approval(work.plan_path, by="user")
-    report = plans_mod.build_report("selfapproved", root=clone, run_integration=False)
+    report = plans_mod.build_report("selfapproved", root=clone, run_checklist=False)
     assert not any("is the Planner itself" in c for c in report.caveats)
 
 

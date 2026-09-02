@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 import harness
-from harness.verify.reproducibility import collect_provenance
+from harness.verify.provenance import collect_provenance
 
 PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 

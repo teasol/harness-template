@@ -89,9 +89,9 @@ The harness names no vendor — the command is configuration.
 Verification commands:
 
 ```bash
-python -m harness verify --spec .harness/configs/<spec>.yaml [--results-dir DIR]
-python -m harness reproduce --spec .harness/configs/<spec>.yaml [--times N]
-python -m harness hash <file>          # sha256 helper
+python -m harness check --plan <name>            # every item in the plan
+python -m harness check <module>[:<item>] --plan <name>
+python -m harness task verify --all --status done
 ```
 
 ## Directory layout

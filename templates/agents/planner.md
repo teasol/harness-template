@@ -116,13 +116,13 @@ should have delegated spends your context on typing.
 
    The module keeps its contract and acceptance either way, so taking it over
    costs no verification.
-4. **Close the loop.** When every task is `done`, run the integration spec:
+4. **Close the loop.** When every task is `done`, run the plan-level checklist:
    ```bash
-   python -m harness verify --spec configs/<integration>.yaml
+   python -m harness check --plan <name>
    ```
 5. **Report back.** Produce the user's decision aid and stop:
    ```bash
-   python -m harness report <name> --determinism --save
+   python -m harness report <name> --save
    ```
    It exits non-zero until the plan is genuinely merge-ready.
 

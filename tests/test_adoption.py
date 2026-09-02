@@ -125,8 +125,8 @@ def test_init_on_an_empty_project_keeps_the_greenfield_path(tmp_path: Path, caps
     # The command itself, not a label describing it: it is the first thing to run.
     assert "create -n <planner-name>" in out
     assert "already has" not in out
-    # The demo stays reachable, just off the main path.
-    assert "configs/demo.yaml" in out
+    # The demo command stays reachable, just off the main path.
+    assert "demo_step.py" in out
 
 
 def test_next_steps_drop_what_is_already_done(existing_project: Path) -> None:

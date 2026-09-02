@@ -45,8 +45,8 @@ from harness.orchestrate import guard
 from harness.orchestrate.task import Task, _now, block, load_task, save_task, verify_task
 from harness.paths import get_agents_config_path
 from harness.verify import heartbeat
+from harness.verify.checklist import ChecklistRun
 from harness.verify.report import write_reports
-from harness.verify.runner import RunResult
 
 DEFAULT_ATTEMPTS = 6
 DEFAULT_TIMEOUT = 1800
@@ -77,20 +77,17 @@ def _as_text(value: object) -> str:
     return str(value)
 
 
-def _failure_summary(result: RunResult, verbose: bool = False) -> str:
-    """Say *why* acceptance failed, not merely that it did.
+def _failure_summary(result: ChecklistRun, verbose: bool = False) -> str:
+    """Say *why* the checklist failed, not merely that it did.
 
-    'acceptance failed' sends the reader hunting through run directories for
+    'the checklist failed' sends the reader hunting through run directories for
     the one line that matters. The cause is usually the tail of the first
-    failing step's log, so put it where the failure is reported.
+    failing item's log, so put it where the failure is reported.
     """
-    for step in result.steps:
-        if step.success:
-            continue
-        failed_checks = [c.detail for c in step.checks if not c.passed]
-        head = f"acceptance failed at step '{step.step_id}' (exit={step.exit_code})"
+    for item in result.failures:
+        head = f"checklist item '{item.ref}' failed ({item.detail})"
         detail = ""
-        log_path = Path(step.log_path) if step.log_path else None
+        log_path = Path(item.log_path) if item.log_path else None
         if log_path and log_path.is_file():
             text = log_path.read_text(encoding="utf-8", errors="replace").strip()
             tail = text[-_FAILURE_TAIL_CHARS:]
@@ -100,10 +97,8 @@ def _failure_summary(result: RunResult, verbose: bool = False) -> str:
                 last = [ln for ln in tail.splitlines() if ln.strip()]
                 if last:
                     detail = f": {last[-1][:200]}"
-        if failed_checks and not detail:
-            detail = f": {failed_checks[0][:200]}"
         return head + detail
-    return "acceptance failed"
+    return "the checklist failed"
 
 
 def _deliverable_hashes(task: Task, root: Path) -> dict[str, str]:
@@ -280,13 +275,14 @@ def build_brief(task: Task, root: str | Path = ".") -> str:
         lines += [f"  - {c}" for c in task.constraints] + [""]
 
     lines += [
-        "## Definition of done",
+        "## Definition of done — this module's checklist",
         "These commands are run for you after you finish. They decide the outcome;",
         "your own opinion of the work does not.",
         "",
     ]
-    for step in task.acceptance:
-        lines.append(f"  $ {step.run}")
+    for item in task.checklist:
+        lines.append(f"  {item.name}")
+        lines.append(f"    $ {item.run}")
     lines += [
         "",
         "You may run them yourself while working: " + invocation.cmd(f"task verify --id {task.id}"),
@@ -295,31 +291,26 @@ def build_brief(task: Task, root: str | Path = ".") -> str:
     return "\n".join(lines)
 
 
-def retry_brief(task: Task, result: RunResult, attempt: int, attempts: int) -> str:
+def retry_brief(task: Task, result: ChecklistRun, attempt: int, attempts: int) -> str:
     """Hand the worker the real failure output and ask for a fix."""
-    failures = [
-        f"  [{check.check_type}] {check.detail}"
-        for step in result.steps
-        for check in step.checks
-        if not check.passed
-    ]
+    failures = [f"  {item.ref}: {item.detail} — `{item.command}`" for item in result.failures]
     logs = []
-    for step in result.steps:
-        if step.success or not step.log_path:
+    for item in result.failures:
+        if not item.log_path:
             continue
-        log_file = Path(step.log_path)
+        log_file = Path(item.log_path)
         if log_file.is_file():
             logs.append(f"--- {log_file.name} ---\n{log_file.read_text(encoding='utf-8')[-4000:]}")
     return "\n".join(
         [
-            f"Your previous attempt at task '{task.id}' did not pass acceptance.",
+            f"Your previous attempt at task '{task.id}' did not pass its checklist.",
             f"This is attempt {attempt} of {attempts}. Fix the code; do not start over.",
             "",
-            "## Failing checks",
-            *(failures or ["  (the step itself failed before any check ran)"]),
+            "## Failing items",
+            *(failures or ["  (nothing ran — the checklist is empty)"]),
             "",
             "## Output",
-            *(logs or ["  (no step log captured)"]),
+            *(logs or ["  (no item log captured)"]),
             "",
             "Change the implementation so these pass. Stay within your deliverables.",
         ]
@@ -587,14 +578,14 @@ def run_task(
 
         result = verify_task(task, root=root, results_dir=results_dir)
         write_reports(result)
-        attempt.passed = result.success
+        attempt.passed = result.passed
         if not attempt.detail:
-            attempt.detail = "acceptance passed" if result.success else _failure_summary(result)
+            attempt.detail = "checklist passed" if result.passed else _failure_summary(result)
 
         # Judge progress before logging, so the audit trail records not just
         # that the attempt failed but whether it moved anything.
         deliverables_after = _deliverable_hashes(task, root)
-        if result.success:
+        if result.passed:
             consecutive_noop = 0
         elif deliverables_before == deliverables_after:
             consecutive_noop += 1
@@ -610,7 +601,7 @@ def run_task(
                 f"({heartbeat.human_duration(attempt.duration_s)}): {attempt.detail}"
             )
 
-        if result.success:
+        if result.passed:
             task.status = "done"
             task.worker = label
             task.log.append(f"{_now()} acceptance passed on attempt {number} — done")

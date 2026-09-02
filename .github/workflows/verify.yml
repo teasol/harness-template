@@ -4,7 +4,7 @@ on:
   pull_request:
   workflow_dispatch:
   schedule:
-    - cron: "0 3 * * 1" # weekly determinism canary
+    - cron: "0 3 * * 1" # weekly canary
 
 jobs:
   verify:
@@ -17,23 +17,17 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
 
-      - name: Verification spec
-        run: python -m harness verify --spec tests/fixtures/configs/demo.yaml --results-dir results/verify
-
-      # Runs the spec twice and diffs a manifest of every artifact it wrote.
-      # Fails on any divergence, and refuses to "pass" a spec that produces
-      # nothing to compare.
-      - name: Determinism gate
-        run: python -m harness reproduce --spec tests/fixtures/configs/demo.yaml --times 2
+      - name: Demo plan checklist
+        run: python -m harness check --plan tests/fixtures/demo-pipeline.yaml --results-dir results/check
 
       # Names no plan, so it keeps gating a project whose plans have changed.
       - name: Plan validity + task/plan drift
         run: python -m harness plan check
 
-      # Every task claiming 'done' must still pass its acceptance and produce
+      # Every task claiming 'done' must still pass its checklist and produce
       # its declared deliverables. Iterates the board, so new tasks are gated
       # automatically without editing this workflow.
-      - name: Completed tasks still pass acceptance
+      - name: Completed tasks still pass their checklist
         run: python -m harness task verify --all --status done --results-dir results/tasks
 
       # Two steps stood here: the demo-pipeline integration spec and a smoke
@@ -77,6 +71,5 @@ jobs:
           path: |
             results/**/report.json
             results/**/report.md
-            results/**/reproduce.json
           if-no-files-found: ignore
           retention-days: 14
